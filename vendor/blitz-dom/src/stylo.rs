@@ -607,7 +607,9 @@ impl<'a> TElement for BlitzNode<'a> {
         // and need a reference to the Slab to convert it back into an Element
         //
         // Luckily it is only needed for shadow dom.
-        todo!();
+        // PATCH: never panic in the style system (shadow DOM is emulated without Stylo's
+        // shadow roots, so this is unreachable in practice).
+        None
     }
 
     fn traversal_children(&self) -> style::dom::LayoutIterator<Self::TraversalChildrenIterator> {
@@ -1201,7 +1203,7 @@ impl<'a> TElement for BlitzNode<'a> {
     where
         F: FnMut(&AtomIdent),
     {
-        todo!()
+        // PATCH: no custom states (`:state()`) yet. Reached by `:has()` invalidation.
     }
 
     fn has_selector_flags(&self, flags: ElementSelectorFlags) -> bool {
