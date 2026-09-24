@@ -39,6 +39,13 @@ debug = 0
 strip = true
 panic = "unwind"
 
+# Release build with symbols for profilers (`perf`, `samply`):
+# cargo build --profile profiling -p browser-core -p browser-launcher
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "line-tables-only"
+
 # Engine fixes maintained in-tree (see vendor/README.md).
 [patch.crates-io]
 blitz-dom = { path = "vendor/blitz-dom" }

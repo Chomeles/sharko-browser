@@ -6,6 +6,7 @@
 //! cargo xtask package --target <triple>          dist/browser-<ver>-<platform>.zip
 //! cargo xtask manifest --base-url <url> <zip>... dist/manifest.json (sha256 + sizes)
 //! cargo xtask sign <file>                        <file>.sig (key: $UPDATE_SIGNING_KEY)
+//! cargo xtask icu                                resources/icudtl.dat for development builds
 //! ```
 //!
 //! Update security: every release carries `manifest.json` (versions, download URLs,
@@ -32,7 +33,8 @@ fn main() {
         Some("package") => package(&args[1..]),
         Some("manifest") => manifest(&args[1..]),
         Some("sign") => sign(args.get(1).map(PathBuf::from)),
-        _ => Err("usage: cargo xtask <keygen|notices|package|manifest|sign> ...".into()),
+        Some("icu") => icu(),
+        _ => Err("usage: cargo xtask <keygen|notices|package|manifest|sign|icu> ...".into()),
     };
     if let Err(e) = r {
         eprintln!("xtask: {e}");
@@ -170,6 +172,16 @@ fn crate_dir(name: &str) -> Result<PathBuf> {
         .and_then(|p| p["manifest_path"].as_str())
         .and_then(|m| Path::new(m).parent().map(Path::to_path_buf))
         .ok_or_else(|| format!("crate {name} not in dependency graph"))
+}
+
+/// Development builds load the ICU data (full `Intl`) from the source tree's
+/// `resources/icudtl.dat` (git-ignored); release packages ship their own copy.
+fn icu() -> Result<()> {
+    let src = crate_dir("deno_core_icudata")?.join("src/icudtl.dat");
+    let dst = workspace_root().join("resources/icudtl.dat");
+    std::fs::copy(&src, &dst).map_err(|e| format!("{}: {e}", src.display()))?;
+    println!("{}", dst.display());
+    Ok(())
 }
 
 fn package(args: &[String]) -> Result<()> {

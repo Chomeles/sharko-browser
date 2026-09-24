@@ -38,7 +38,7 @@ pub(crate) fn init_v8() {
                 }
             }
             None => eprintln!(
-                "script: {} not found; Intl will be limited",
+                "script: {} not found (development build: run `cargo xtask icu`); Intl will be limited",
                 common::resources::path("icudtl.dat").display()
             ),
         }
