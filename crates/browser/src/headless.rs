@@ -271,6 +271,11 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
                 t.frames,
                 t.title
             );
+            if let Some((parse, script, style_layout, paint)) = t.metrics {
+                eprintln!(
+                    "[headless] renderer: parse {parse:.1} ms | scripts (sync part) {script:.1} ms | style+layout {style_layout:.1} ms | paint {paint:.1} ms"
+                );
+            }
             let errors = t.console.iter().filter(|(l, _)| l == "error").count();
             if errors > 0 {
                 eprintln!("[headless] {errors} console error(s) (use --console to show)");

@@ -8,9 +8,9 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["svg", "woff", "system-fonts", "floats", "complex-scripts"] }
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["svg", "woff", "system-fonts", "floats", "complex-scripts", "parallel-construct"] }
 blitz-html = { version = "=0.3.0-beta.2" }
-blitz-paint = { version = "=0.3.0-beta.2", default-features = false, features = ["svg"] }
+blitz-paint = { version = "=0.3.0-beta.2", default-features = false, features = ["svg", "scrollbars"] }
 blitz-traits = { version = "=0.3.0-beta.2" }
 anyrender = { version = "0.13", features = ["serde"] }
 anyrender_vello_cpu = { version = "0.17", features = ["multithreading"] }

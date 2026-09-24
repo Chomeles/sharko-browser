@@ -56,6 +56,44 @@ impl Renderer {
 enum PointerTarget {
     Chrome,
     Content,
+    /// Dragging the viewport scrollbar thumb (value = grab offset within the thumb, px).
+    Scrollbar(f64),
+}
+
+/// Geometry of the viewport scrollbar thumb in window pixels.
+struct ScrollbarGeom {
+    thumb: Rect,
+    track_top: f64,
+    track_len: f64,
+    max_scroll: f64,
+    scroll_x: f64,
+}
+
+fn scrollbar_geom(tab: &browser::Tab, width: u32, height: u32, chrome_px: f64, ui_scale: f64) -> Option<ScrollbarGeom> {
+    let frame = tab.frame.as_ref()?;
+    let scale = frame.scale as f64;
+    if scale <= 0.0 {
+        return None;
+    }
+    let view_h_css = frame.height as f64 / scale;
+    let content_h = frame.content_height as f64;
+    if content_h <= view_h_css + 1.0 {
+        return None;
+    }
+    let track_top = chrome_px + 2.0 * ui_scale;
+    let track_len = (height as f64 - chrome_px) - 4.0 * ui_scale;
+    let thumb_len = (track_len * view_h_css / content_h).max(32.0 * ui_scale);
+    let max_scroll = content_h - view_h_css;
+    let pos = (frame.scroll_y as f64 / max_scroll).clamp(0.0, 1.0) * (track_len - thumb_len);
+    let w = 7.0 * ui_scale;
+    let x1 = width as f64 - 3.0 * ui_scale;
+    Some(ScrollbarGeom {
+        thumb: Rect::new(x1 - w, track_top + pos, x1, track_top + pos + thumb_len),
+        track_top,
+        track_len,
+        max_scroll,
+        scroll_x: frame.scroll_x as f64,
+    })
 }
 
 struct App {
@@ -447,6 +485,16 @@ impl App {
                     );
                     scene.pop_layer();
                 }
+                if let Some(g) = scrollbar_geom(tab, width, height, chrome_px, scale) {
+                    let r = g.thumb.width() / 2.0;
+                    scene.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        Color::from_rgba8(0, 0, 0, 90),
+                        None,
+                        &kurbo::RoundedRect::from_rect(g.thumb, r),
+                    );
+                }
                 if tab.loading {
                     // Thin progress bar under the toolbar.
                     let t = tab
@@ -631,6 +679,18 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse = position;
+                if let Some(PointerTarget::Scrollbar(grab)) = self.capture {
+                    let geom = self.active.and_then(|a| self.browser.tab(a)).and_then(|t| {
+                        scrollbar_geom(t, self.size.width, self.size.height, self.chrome_px(), self.scale)
+                    });
+                    if let (Some(g), Some(a)) = (geom, self.active) {
+                        let thumb_len = g.thumb.height();
+                        let pos = (position.y - grab - g.track_top).clamp(0.0, g.track_len - thumb_len);
+                        let y = pos / (g.track_len - thumb_len).max(1.0) * g.max_scroll;
+                        self.browser.send(a, ToRenderer::ScrollTo { x: g.scroll_x, y });
+                    }
+                    return;
+                }
                 match self.pointer_target() {
                     PointerTarget::Chrome => {
                         if let Some(c) = self.chrome.as_mut() {
@@ -653,6 +713,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         self.request_redraw();
                     }
+                    PointerTarget::Scrollbar(_) => {}
                     PointerTarget::Content => {
                         let (x, y) = self.content_point();
                         self.send_content(InputEvent::MouseMove { x, y, buttons: self.buttons, mods: self.mods });
@@ -690,6 +751,40 @@ impl ApplicationHandler<UserEvent> for App {
                     self.run_actions(vec![action], event_loop);
                     return;
                 }
+                // Viewport scrollbar: grab the thumb or jump by a page in the track.
+                if state == ElementState::Pressed && b == 0 && self.capture.is_none() {
+                    let geom = self.active.and_then(|a| self.browser.tab(a)).and_then(|t| {
+                        scrollbar_geom(t, self.size.width, self.size.height, self.chrome_px(), self.scale)
+                    });
+                    if let (Some(g), Some(a)) = (geom, self.active) {
+                        let in_lane = self.mouse.x >= g.thumb.x0 - 6.0 * self.scale
+                            && self.mouse.y >= self.chrome_px();
+                        if in_lane {
+                            if self.mouse.y >= g.thumb.y0 && self.mouse.y <= g.thumb.y1 {
+                                self.capture = Some(PointerTarget::Scrollbar(self.mouse.y - g.thumb.y0));
+                            } else {
+                                // Center the thumb under the pointer.
+                                let thumb_len = g.thumb.height();
+                                let pos = (self.mouse.y - thumb_len / 2.0 - g.track_top)
+                                    .clamp(0.0, g.track_len - thumb_len);
+                                let y = pos / (g.track_len - thumb_len).max(1.0) * g.max_scroll;
+                                self.browser.send(a, ToRenderer::ScrollTo { x: g.scroll_x, y });
+                                self.capture = Some(PointerTarget::Scrollbar(thumb_len / 2.0));
+                            }
+                            self.buttons |= bit;
+                            return;
+                        }
+                    }
+                }
+                if let Some(PointerTarget::Scrollbar(_)) = self.capture {
+                    if state == ElementState::Released {
+                        self.buttons &= !bit;
+                        if self.buttons == 0 {
+                            self.capture = None;
+                        }
+                    }
+                    return;
+                }
                 let target = self.pointer_target();
                 if state == ElementState::Pressed {
                     self.buttons |= bit;
@@ -698,6 +793,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.buttons &= !bit;
                 }
                 match target {
+                    PointerTarget::Scrollbar(_) => {}
                     PointerTarget::Chrome => {
                         let kind = if state == ElementState::Pressed { 1 } else { 2 };
                         let ev = self.chrome_pointer(kind, b);

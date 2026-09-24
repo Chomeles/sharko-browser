@@ -114,6 +114,8 @@ pub struct Tab {
     pub first_frame: Option<Duration>,
     pub frames: u64,
     pub console: Vec<(String, String)>,
+    /// Last `Metrics` report: (parse, initial script, style+layout, paint) in ms.
+    pub metrics: Option<(f64, f64, f64, f64)>,
 }
 
 impl Tab {
@@ -275,6 +277,7 @@ impl Browser {
             first_frame: None,
             frames: 0,
             console: Vec::new(),
+            metrics: None,
         };
         self.tabs.insert(id, tab);
         self.order.push(id);
@@ -583,6 +586,10 @@ impl Browser {
                             tab.console.push((level.clone(), message.clone()));
                         }
                         Some(BrowserEvent::Tab(id, FromRenderer::Console { level, message }))
+                    }
+                    FromRenderer::Metrics { parse_ms, script_ms, style_layout_ms, paint_ms } => {
+                        tab.metrics = Some((parse_ms, script_ms, style_layout_ms, paint_ms));
+                        None
                     }
                     other => Some(BrowserEvent::Tab(id, other)),
                 }

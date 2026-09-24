@@ -45,6 +45,10 @@ pub enum LoopMsg {
 }
 
 const FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
+/// While a page is still loading (after its first paint), style/layout work is batched
+/// into fewer frames: every stylesheet or class change on the root forces a full restyle,
+/// and doing that at 60 Hz during load only delays the load itself.
+const LOADING_FRAME_INTERVAL: Duration = Duration::from_millis(100);
 /// Don't paint an unstyled page while render-blocking stylesheets load (like browsers),
 /// but give up waiting after this long.
 const RENDER_BLOCK_TIMEOUT: Duration = Duration::from_secs(4);
@@ -62,6 +66,10 @@ struct Page {
     last_scroll: (f64, f64),
     resources_were_pending: bool,
     last_title: String,
+    parse_ms: f64,
+    script_ms: f64,
+    metrics_sent: bool,
+    first_frame_costs: Option<(f64, f64)>,
 }
 
 pub struct RendererConfig {
@@ -209,9 +217,16 @@ impl Renderer {
             }
         }
         if self.needs_frame() {
-            min(self.last_frame + FRAME_INTERVAL);
+            min(self.last_frame + self.frame_interval());
         }
         deadline
+    }
+
+    fn frame_interval(&self) -> Duration {
+        match &self.page {
+            Some(p) if !p.load_sent && p.first_frame_costs.is_some() => LOADING_FRAME_INTERVAL,
+            _ => FRAME_INTERVAL,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -280,6 +295,28 @@ impl Renderer {
                 self.shared.redraw.store(true, Ordering::SeqCst);
             }
             ToRenderer::Input(ev) => self.handle_input(ev),
+            ToRenderer::ScrollTo { x, y } => {
+                if let Some(page) = &mut self.page {
+                    let vp = page.doc.viewport().clone();
+                    let css_w = vp.window_size.0 as f64 / vp.scale_f64();
+                    let css_h = vp.window_size.1 as f64 / vp.scale_f64();
+                    let (cw, ch) = document_content_size(&page.doc);
+                    let max_x = (cw as f64 - css_w).max(0.0);
+                    let max_y = (ch as f64 - css_h).max(0.0);
+                    page.doc.set_viewport_scroll(blitz_dom::Point {
+                        x: x.clamp(0.0, max_x),
+                        y: y.clamp(0.0, max_y),
+                    });
+                    let s = page.doc.viewport_scroll();
+                    if (s.x, s.y) != page.last_scroll {
+                        page.last_scroll = (s.x, s.y);
+                        if let Some(rt) = page.rt.as_mut() {
+                            rt.scrolled(&mut page.doc);
+                        }
+                    }
+                    self.shared.redraw.store(true, Ordering::SeqCst);
+                }
+            }
             ToRenderer::Eval { id, source } => {
                 let (ok, value) = match &mut self.page {
                     Some(Page {
@@ -508,6 +545,8 @@ impl Renderer {
             })),
             shell_provider: Some(Arc::new(Shell { shared })),
             font_ctx: self.font_ctx.clone(),
+            // One document per renderer process: use Stylo's parallel (rayon) traversal.
+            style_threading: blitz_dom::StyleThreading::Parallel,
             ..Default::default()
         };
         script::configure_document(&mut config);
@@ -555,6 +594,10 @@ impl Renderer {
             last_scroll: (0.0, 0.0),
             resources_were_pending: true,
             last_title: String::new(),
+            parse_ms,
+            script_ms: 0.0,
+            metrics_sent: false,
+            first_frame_costs: None,
         };
         if self.config.javascript {
             // Scripting is on: <noscript> content must not render.
@@ -586,16 +629,10 @@ impl Renderer {
             rt.document_parsed(&mut page.doc);
             page.rt = Some(rt);
         }
-        let script_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        page.script_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
         self.page = Some(page);
         self.shared.redraw.store(true, Ordering::SeqCst);
-        self.send(FromRenderer::Metrics {
-            parse_ms,
-            script_ms,
-            style_layout_ms: 0.0,
-            paint_ms: 0.0,
-        });
     }
 
     // -----------------------------------------------------------------------
@@ -656,7 +693,7 @@ impl Renderer {
             }
         }
 
-        if self.needs_frame() && now >= self.last_frame + FRAME_INTERVAL {
+        if self.needs_frame() && now >= self.last_frame + self.frame_interval() {
             self.produce_frame();
         }
     }
@@ -687,15 +724,11 @@ impl Renderer {
 
         let vp = self.viewport;
         let scale = page.doc.viewport().scale_f64();
-        let root_size = page
-            .doc
-            .try_root_element()
-            .map(|r| r.final_layout().size)
-            .unwrap_or_default();
+        let (root_w, root_h) = document_content_size(&page.doc);
         let css_w = vp.width as f32 / scale as f32;
         let css_h = vp.height as f32 / scale as f32;
-        let content_width = root_size.width.max(css_w);
-        let content_height = root_size.height.max(css_h);
+        let content_width = root_w.max(css_w);
+        let content_height = root_h.max(css_h);
 
         // Full-page capture: temporarily enlarge the viewport.
         let capture = self.pending_capture.take();
@@ -748,10 +781,34 @@ impl Renderer {
             page.doc.set_viewport_scroll(saved_scroll);
             self.shared.redraw.store(true, Ordering::SeqCst);
         }
-        if page.load_sent {
-            // Report steady-state costs occasionally (cheap).
-            let _ = (style_layout_ms, paint_ms);
+        if page.first_frame_costs.is_none() {
+            page.first_frame_costs = Some((style_layout_ms, paint_ms));
         }
+        if !page.metrics_sent && page.load_sent {
+            page.metrics_sent = true;
+            let (sl, p) = page.first_frame_costs.unwrap_or((style_layout_ms, paint_ms));
+            self.shared.send(FromRenderer::Metrics {
+                parse_ms: page.parse_ms,
+                script_ms: page.script_ms,
+                style_layout_ms: sl,
+                paint_ms: p,
+            });
+        }
+    }
+}
+
+/// Scrollable size of the document in CSS px: the root box or its overflowing content
+/// (pages often set `html, body { height: 100% }` and overflow).
+fn document_content_size(doc: &BaseDocument) -> (f32, f32) {
+    match doc.try_root_element() {
+        Some(root) => {
+            let l = root.final_layout();
+            (
+                l.size.width.max(root.scroll_width()),
+                l.size.height.max(root.scroll_height()),
+            )
+        }
+        None => (0.0, 0.0),
     }
 }
 

@@ -247,6 +247,8 @@ pub enum ToRenderer {
     Reload,
     Resize(ViewportInfo),
     Input(InputEvent),
+    /// Scroll the viewport to an absolute position (CSS px), e.g. scrollbar dragging.
+    ScrollTo { x: f64, y: f64 },
     /// Run JS in the page (headless `--eval`, devtools console). Reply: `EvalResult`.
     Eval { id: u64, source: String },
     /// Reply: `Dom` with the serialized document.
