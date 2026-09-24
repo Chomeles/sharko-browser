@@ -1036,7 +1036,8 @@ fn inline_edge_extents(node: &crate::Node) -> ((f32, f32), (f32, f32)) {
 
 fn push_spacer(builder: &mut TreeBuilder<TextBrush>, flag: u64, node_id: NodeId, width: f32) {
     if width > 0.0 {
-        builder.push_inline_box(InlineBox {
+        // Spacers don't take part in white-space collapsing (vendored parley PATCH).
+        builder.push_collapse_transparent_inline_box(InlineBox {
             id: flag | node_id.as_u64(),
             kind: InlineBoxKind::InFlow,
             index: 0,
