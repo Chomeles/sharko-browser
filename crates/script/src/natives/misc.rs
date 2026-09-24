@@ -162,6 +162,59 @@ fn header_pairs(cx: &mut Cx, i: i32) -> Result<Vec<(String, String)>, JsErr> {
     Ok(headers)
 }
 
+fn socket_id(cx: &Cx) -> Result<u64, JsErr> {
+    let id = cx.num(0);
+    if !(1.0..9_007_199_254_740_992.0).contains(&id) {
+        return Err(JsErr::type_err("invalid socket id"));
+    }
+    Ok(id as u64)
+}
+
+/// Addition: `N.wsOpen(id, url, protocols, origin)` -> whether the host opened the
+/// socket. Its events come back through `hooks.onWebSocket(id, kind, ...)`.
+pub(crate) fn n_ws_open(cx: &mut Cx) -> NResult {
+    let id = socket_id(cx)?;
+    let url = cx.string(1)?;
+    let mut protocols = Vec::new();
+    let list = cx.arg(2);
+    if list.is_array() {
+        let arr: v8::Local<v8::Array> = list.try_into().unwrap();
+        for i in 0..arr.length() {
+            let v = arr.get_index(cx.scope, i).ok_or(JsErr::Thrown)?;
+            protocols.push(crate::cx::value_to_string(cx.scope, v).ok_or(JsErr::Thrown)?);
+        }
+    }
+    let origin = cx.string(3)?;
+    let ok = cx.st.host.ws_open(id, &url, protocols, &origin);
+    cx.ret_bool(ok);
+    Ok(())
+}
+
+/// Addition: `N.wsSend(id, stringOrArrayBuffer)`.
+pub(crate) fn n_ws_send(cx: &mut Cx) -> NResult {
+    let id = socket_id(cx)?;
+    let v = cx.arg(1);
+    let data = if v.is_string() {
+        common::protocol::WsData::Text(cx.string(1)?)
+    } else {
+        common::protocol::WsData::Binary(bytes_of(cx.scope, v).unwrap_or_default())
+    };
+    cx.st.host.ws_send(id, data);
+    cx.ret_undefined();
+    Ok(())
+}
+
+/// Addition: `N.wsClose(id, code (-1: none), reason)`.
+pub(crate) fn n_ws_close(cx: &mut Cx) -> NResult {
+    let id = socket_id(cx)?;
+    let code = cx.num(1);
+    let code = (0.0..=65535.0).contains(&code).then_some(code as u16);
+    let reason = cx.string(2)?;
+    cx.st.host.ws_close(id, code, &reason);
+    cx.ret_undefined();
+    Ok(())
+}
+
 /// Should a request with RequestCredentials `mode` to `url` carry cookies?
 fn send_credentials(cx: &Cx, mode: &str, url: &str) -> bool {
     match mode {

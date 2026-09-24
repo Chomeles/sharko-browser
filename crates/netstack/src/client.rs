@@ -13,7 +13,7 @@
 //! CPU-heavy and must not stall networking.
 
 use common::ipc::{self, IpcSender};
-use common::protocol::{NetRequest, NetResponse};
+use common::protocol::{NetRequest, NetResponse, WsData, WsEvent};
 use crossbeam_channel::Sender;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -29,10 +29,16 @@ use tokio::task::AbortHandle;
 use crate::config::NetConfig;
 use crate::core::{NetworkCore, error_response, net_response};
 use crate::error::NetError;
+use crate::websocket::{WsCommand, WsOpen};
 use crate::wire::{WireFromNetworkIn, WireRequest, WireToNetwork};
 
 /// Completion callback of [`NetClient::fetch`].
 pub(crate) type FetchCallback = Box<dyn FnOnce(NetResponse) + Send>;
+
+/// Event callback of [`NetClient::ws_open`]. Called in order, on an internal thread that
+/// also delivers other network messages: it must return quickly (e.g. just forward the
+/// event to a channel).
+pub type WsCallback = Box<dyn FnMut(WsEvent) + Send>;
 
 const COOKIE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -112,6 +118,7 @@ struct IpcBackend {
 
 struct IpcShared {
     pending: Mutex<HashMap<u64, FetchCallback>>,
+    sockets: Mutex<HashMap<u64, WsCallback>>,
     cookie_waiters: Mutex<HashMap<u64, Sender<String>>>,
     connected: AtomicBool,
     callbacks: CallbackPool,
@@ -131,9 +138,23 @@ impl IpcShared {
                     let _ = waiter.send(cookies);
                 }
             }
+            Some(WireFromNetworkIn::Ws { id, event }) => {
+                let mut sockets = self.sockets.lock();
+                let closed = matches!(event, WsEvent::Closed { .. });
+                if let Some(callback) = sockets.get_mut(&id) {
+                    callback(event);
+                }
+                if closed {
+                    sockets.remove(&id);
+                }
+            }
             None => {
                 self.connected.store(false, Ordering::Release);
                 self.cookie_waiters.lock().clear();
+                for (_, mut callback) in self.sockets.lock().drain() {
+                    callback(WsEvent::Error("network service disconnected".into()));
+                    callback(WsEvent::Closed { code: 1006, reason: String::new(), clean: false });
+                }
                 let pending: Vec<_> = self.pending.lock().drain().collect();
                 if !pending.is_empty() {
                     log::warn!("network service disconnected with {} requests in flight", pending.len());
@@ -160,6 +181,7 @@ struct InProcessBackend {
     runtime: Option<Runtime>,
     core: Arc<NetworkCore>,
     inflight: Arc<Mutex<HashMap<u64, AbortHandle>>>,
+    sockets: Arc<Mutex<HashMap<u64, tokio::sync::mpsc::UnboundedSender<WsCommand>>>>,
 }
 
 impl Drop for InProcessBackend {
@@ -182,6 +204,7 @@ impl NetClient {
         let callbacks = CallbackPool::new();
         let shared = Arc::new(IpcShared {
             pending: Mutex::new(HashMap::new()),
+            sockets: Mutex::new(HashMap::new()),
             cookie_waiters: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(true),
             callbacks: callbacks.clone(),
@@ -201,6 +224,7 @@ impl NetClient {
         let callbacks = CallbackPool::new();
         let shared = Arc::new(IpcShared {
             pending: Mutex::new(HashMap::new()),
+            sockets: Mutex::new(HashMap::new()),
             cookie_waiters: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(true),
             callbacks: callbacks.clone(),
@@ -241,6 +265,7 @@ impl NetClient {
                         runtime: Some(runtime),
                         core,
                         inflight: Arc::new(Mutex::new(HashMap::new())),
+                        sockets: Arc::new(Mutex::new(HashMap::new())),
                     }),
                     Err(e) => {
                         runtime.shutdown_background();
@@ -337,6 +362,92 @@ impl NetClient {
             Backend::InProcess(local) => {
                 if let Some(task) = local.inflight.lock().remove(&id) {
                     task.abort();
+                }
+            }
+            Backend::Failed(_) => {}
+        }
+    }
+
+    /// Opens a WebSocket to `url` (`ws:`/`wss:`). Returns its id. `on_event` receives the
+    /// socket's events in order, ending with exactly one [`WsEvent::Closed`].
+    pub fn ws_open(&self, url: &str, protocols: Vec<String>, origin: &str, mut on_event: WsCallback) -> u64 {
+        let id = self.next_id();
+        match &self.inner.backend {
+            Backend::Ipc(ipc) => {
+                if !ipc.shared.connected.load(Ordering::Acquire) {
+                    on_event(WsEvent::Error("network service disconnected".into()));
+                    on_event(WsEvent::Closed { code: 1006, reason: String::new(), clean: false });
+                    return id;
+                }
+                ipc.shared.sockets.lock().insert(id, on_event);
+                let message = WireToNetwork::WsOpen {
+                    id,
+                    url: url.to_owned(),
+                    protocols,
+                    origin: origin.to_owned(),
+                };
+                if ipc.sender.send(&message).is_err()
+                    && let Some(mut callback) = ipc.shared.sockets.lock().remove(&id)
+                {
+                    callback(WsEvent::Error("network service disconnected".into()));
+                    callback(WsEvent::Closed { code: 1006, reason: String::new(), clean: false });
+                }
+            }
+            Backend::InProcess(local) => {
+                let Some(runtime) = &local.runtime else { return id };
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                let core = Arc::clone(&local.core);
+                let sockets = Arc::clone(&local.sockets);
+                let open = WsOpen {
+                    url: url.to_owned(),
+                    protocols,
+                    origin: origin.to_owned(),
+                };
+                let mut guard = local.sockets.lock();
+                runtime.spawn(async move {
+                    let on_event = Mutex::new(on_event);
+                    core.websocket(open, rx, move |event| {
+                        let mut callback = on_event.lock();
+                        (&mut **callback)(event)
+                    })
+                    .await;
+                    sockets.lock().remove(&id);
+                });
+                guard.insert(id, tx);
+            }
+            Backend::Failed(error) => {
+                on_event(WsEvent::Error(error.clone()));
+                on_event(WsEvent::Closed { code: 1006, reason: String::new(), clean: false });
+            }
+        }
+        id
+    }
+
+    /// Sends a message on a WebSocket opened with [`ws_open`](Self::ws_open).
+    pub fn ws_send(&self, id: u64, data: WsData) {
+        match &self.inner.backend {
+            Backend::Ipc(ipc) => {
+                let _ = ipc.sender.send(&WireToNetwork::WsSend { id, data });
+            }
+            Backend::InProcess(local) => {
+                if let Some(tx) = local.sockets.lock().get(&id) {
+                    let _ = tx.send(WsCommand::Send(data));
+                }
+            }
+            Backend::Failed(_) => {}
+        }
+    }
+
+    /// Starts closing a WebSocket (aborts it if it is still connecting).
+    pub fn ws_close(&self, id: u64, code: Option<u16>, reason: &str) {
+        let reason = reason.to_owned();
+        match &self.inner.backend {
+            Backend::Ipc(ipc) => {
+                let _ = ipc.sender.send(&WireToNetwork::WsClose { id, code, reason });
+            }
+            Backend::InProcess(local) => {
+                if let Some(tx) = local.sockets.lock().get(&id) {
+                    let _ = tx.send(WsCommand::Close { code, reason });
                 }
             }
             Backend::Failed(_) => {}

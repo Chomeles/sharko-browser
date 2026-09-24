@@ -119,6 +119,8 @@ impl NetResponse {
 }
 
 /// Client -> network process.
+///
+/// New variants go at the end: postcard encodes the variant index.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ToNetwork {
     Fetch(NetRequest),
@@ -129,6 +131,12 @@ pub enum ToNetwork {
     SetCookie { url: String, cookie: String },
     /// Browser only: persist state and exit.
     Shutdown,
+    /// Open a WebSocket (`ws:`/`wss:` URL). Events come back as `FromNetwork::Ws`.
+    WsOpen { id: u64, url: String, protocols: Vec<String>, origin: String },
+    /// Send a message on an open WebSocket.
+    WsSend { id: u64, data: WsData },
+    /// Start the closing handshake (or abort a connection that is not open yet).
+    WsClose { id: u64, code: Option<u16>, reason: String },
 }
 
 /// Network process -> client.
@@ -136,6 +144,27 @@ pub enum ToNetwork {
 pub enum FromNetwork {
     Response(NetResponse),
     Cookies { id: u64, cookies: String },
+    Ws { id: u64, event: WsEvent },
+}
+
+/// A WebSocket message.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum WsData {
+    Text(String),
+    Binary(#[serde(with = "serde_bytes")] Vec<u8>),
+}
+
+/// What happened on a WebSocket, in order. Every socket ends with exactly one `Closed`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum WsEvent {
+    /// The opening handshake succeeded.
+    Open { protocol: String, extensions: String },
+    Message(WsData),
+    /// This many payload bytes of earlier `WsSend`s were written (for `bufferedAmount`).
+    Sent(u64),
+    /// The connection failed or broke; a `Closed` with `clean: false` follows.
+    Error(String),
+    Closed { code: u16, reason: String, clean: bool },
 }
 
 // ---------------------------------------------------------------------------

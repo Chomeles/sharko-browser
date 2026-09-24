@@ -383,3 +383,46 @@ test('performance, console formatting, navigator, screen, misc window props', as
   assert.strictEqual(e.run('innerWidth'), 5, '[Replaceable]');
   assert.strictEqual(e.run("String(fetch) + '|' + String(Object.getOwnPropertyDescriptor(Node.prototype, 'firstChild').get) + '|' + Function.prototype.toString.call(function mine() { return 1; })"), 'function fetch() { [native code] }|function get firstChild() { [native code] }|function mine() { return 1; }');
 });
+
+test('WebSocket: handshake, messages, bufferedAmount, close and failures', async () => {
+  const e = await env();
+  const err = (code) => e.run(`try { ${code}; 'no error' } catch (x) { x.name + ': ' + x.message }`);
+  e.run(`window.log = []; window.ws = new WebSocket('/chat', ['a', 'b']); ws.binaryType = 'arraybuffer';
+    for (const t of ['open', 'message', 'error', 'close']) ws.addEventListener(t, (ev) => log.push(t + ':' +
+      (t === 'message' ? (typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data).join(',')) + '@' + ev.origin
+        : t === 'close' ? ev.code + '/' + ev.reason + '/' + ev.wasClean + '/' + (ev instanceof CloseEvent) : '')));`);
+  assert.deepStrictEqual(e.mock.ws[0], ['open', 1, 'wss://example.com/chat', ['a', 'b'], 'https://example.com']);
+  assert.strictEqual(e.run('ws.readyState + " " + ws.url + " " + WebSocket.OPEN'), '0 wss://example.com/chat 1');
+  assert.match(err("ws.send('x')"), /^InvalidStateError: .*CONNECTING/);
+  e.hook('onWebSocket', 1, 'open', 'a', '');
+  assert.strictEqual(e.run('ws.readyState + ws.protocol'), '1a');
+  e.run("ws.send('h\u00e9llo'); ws.send(new Uint8Array([1, 2])); ws.send(new Blob(['xyz']))");
+  assert.strictEqual(e.run('ws.bufferedAmount'), 11);
+  e.hook('onWebSocket', 1, 'sent', 6);
+  assert.strictEqual(e.run('ws.bufferedAmount'), 5);
+  e.hook('onWebSocket', 1, 'message', 'hi');
+  e.hook('onWebSocket', 1, 'message', e.mock.ab(Buffer.from([7, 8])));
+  assert.match(err('ws.close(1001)'), /^InvalidAccessError/);
+  assert.match(err("ws.close(1000, 'x'.repeat(124))"), /^SyntaxError/);
+  e.run("ws.close(1000, 'bye')");
+  assert.strictEqual(e.run('ws.readyState'), 2);
+  e.run("ws.send('late')");
+  e.hook('onWebSocket', 1, 'close', 1000, 'bye', true);
+  assert.strictEqual(e.run('ws.readyState'), 3);
+  assert.deepStrictEqual(Array.from(e.run('log')), ['open:', 'message:hi@wss://example.com', 'message:7,8@wss://example.com', 'close:1000/bye/true/true']);
+  assert.deepStrictEqual(e.mock.ws.slice(1), [['send', 1, 'h\u00e9llo'], ['send', 1, [1, 2]], ['send', 1, [120, 121, 122]], ['close', 1, 1000, 'bye']]);
+
+  assert.match(err("new WebSocket('ftp://x/')"), /^SyntaxError: .*scheme/);
+  assert.match(err("new WebSocket('wss://x/#f')"), /^SyntaxError: .*fragment/);
+  assert.match(err("new WebSocket('wss://x/', ['a', 'a'])"), /^SyntaxError: .*duplicated/);
+  assert.match(err("new WebSocket('wss://x/', 'a b')"), /^SyntaxError: .*invalid/);
+  assert.match(err("new WebSocket('ws://insecure.example/')"), /^SecurityError/);
+
+  // A failed connection fires error, then close (1006, not clean); blob is the default binaryType.
+  e.run(`window.log2 = []; window.ws2 = new WebSocket('https://down.example/');
+    ws2.onerror = () => log2.push('error'); ws2.onclose = (ev) => log2.push('close:' + ev.code + ':' + ev.wasClean);`);
+  assert.strictEqual(e.run('ws2.url + " " + ws2.binaryType'), 'wss://down.example/ blob');
+  e.hook('onWebSocket', 2, 'error', 'refused');
+  e.hook('onWebSocket', 2, 'close', 1006, '', false);
+  assert.deepStrictEqual(Array.from(e.run('log2')), ['error', 'close:1006:false']);
+});

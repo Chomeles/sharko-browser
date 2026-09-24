@@ -251,6 +251,7 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `N.setDefined(id)` | (Rust addition) the custom element `id` was upgraded or created from its definition: CSS `:defined` matches it (built-in elements always match). |
 | `N.setIndeterminate(id, bool)` | (Rust addition) mirrors `input.indeterminate` for `:indeterminate` matching. |
 | `N.urlSet(href, field, value)` | (Rust addition) urlParse-style components after applying a WHATWG URL setter; used by `URL`/`Location`/`<a>` setters. (JS approximation) |
+| `N.wsOpen(id, url, protocols, origin)` / `N.wsSend(id, stringOrArrayBuffer)` / `N.wsClose(id, code, reason)` | (Rust addition) the `WebSocket` connection, opened in the network process. `url` is an absolute `ws:`/`wss:` URL, `code` is `-1` for none. `wsOpen` returns `false` when the host has no WebSocket support (JS then fires `error` and `close`). Events come back through `onWebSocket`. |
 
 ### Hooks (registered through `N.setHooks`, called by Rust)
 | hook | when / what JS does |
@@ -260,6 +261,7 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `onUnhandledRejection(promise, reason)` | end of a task, after the microtask checkpoint. JS fires the cancelable `unhandledrejection` and logs `Uncaught (in promise) …` unless it was canceled. Rust does not log when this hook is registered. |
 | `onRejectionHandled(promise, reason)` | queued as a task. JS fires `rejectionhandled`. |
 | `onError(msg, file, line, col, error)` | an uncaught exception reached Rust, which already logged it. JS dispatches the window `ErrorEvent` (`window.onerror`) and does not log. Not used for `N.evalScript`: JS catches the rethrown exception and dispatches the event itself. |
+| `onWebSocket(id, kind, ...)` | an event of a socket opened with `N.wsOpen`, in order: `open` (protocol, extensions), `message` (string or ArrayBuffer), `sent` (bytes written, for `bufferedAmount`), `error` (message) and finally `close` (code, reason, wasClean). |
 
 ### `onEvent`: return flag 4 and the default-action split
 Return value: `1` = canceled, `2` = propagation stopped, **`4` = the JS layer performed the

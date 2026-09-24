@@ -887,6 +887,7 @@
     onUnhandledRejection: guard(onUnhandledRejection),
     onRejectionHandled: guard(onRejectionHandled),
     onError: guard(onError),
+    onWebSocket: guard(L.onWebSocket),
   });
 
   // =======================================================================================

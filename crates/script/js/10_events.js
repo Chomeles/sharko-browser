@@ -589,6 +589,8 @@
     }
   }
 
+  const CloseEvent = simpleEvent('CloseEvent', Event, { wasClean: false, code: 0, reason: '' });
+
   class BeforeUnloadEvent extends Event {
     #rv = '';
     get returnValue() { return this.#rv; }
@@ -1171,14 +1173,14 @@
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
     HashChangeEvent, PageTransitionEvent, AnimationEvent, TransitionEvent, SubmitEvent, FormDataEvent,
     PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
-    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController,
+    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   });
   for (const [name, C] of Object.entries({
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
     HashChangeEvent, PageTransitionEvent, AnimationEvent, TransitionEvent, SubmitEvent, FormDataEvent,
     PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
-    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController,
+    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   })) L.expose(name, C);
   L.expose('DOMException', L.DOMException);
 

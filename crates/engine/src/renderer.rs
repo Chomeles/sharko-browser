@@ -40,6 +40,8 @@ pub enum LoopMsg {
     Document { generation: u64, resp: NetResponse },
     /// Response to a script-initiated fetch.
     ScriptFetch { generation: u64, resp: NetResponse },
+    /// Event of a page's WebSocket (`id` is the script's socket id).
+    ScriptWs { generation: u64, id: u64, event: common::protocol::WsEvent },
     /// Something happened on another thread (subresource loaded, redraw requested).
     Wake,
 }
@@ -262,6 +264,18 @@ impl Renderer {
                         page.host.inflight.borrow_mut().remove(&resp.id);
                         if let Some(rt) = page.rt.as_mut() {
                             rt.deliver_fetch(&mut page.doc, resp);
+                        }
+                    }
+                }
+            }
+            LoopMsg::ScriptWs { generation, id, event } => {
+                if let Some(page) = &mut self.page {
+                    if page.generation == generation {
+                        if matches!(event, common::protocol::WsEvent::Closed { .. }) {
+                            page.host.sockets.borrow_mut().remove(&id);
+                        }
+                        if let Some(rt) = page.rt.as_mut() {
+                            rt.deliver_ws(&mut page.doc, id, event);
                         }
                     }
                 }
@@ -612,6 +626,7 @@ impl Renderer {
             net: self.net.clone(),
             generation: self.generation,
             inflight: RefCell::new(HashMap::new()),
+            sockets: RefCell::new(HashMap::new()),
             referrer,
             verbose_console: self.config.verbose_console,
             title: RefCell::new(String::new()),

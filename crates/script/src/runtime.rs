@@ -387,6 +387,51 @@ impl ScriptRuntime {
         });
     }
 
+    /// Deliver an event of a WebSocket opened through [`ScriptHost::ws_open`]: hook
+    /// `onWebSocket(id, kind, ...)` with kind `open` (protocol, extensions), `message`
+    /// (string or ArrayBuffer), `sent` (bytes), `error` (message) or `close` (code,
+    /// reason, wasClean).
+    pub fn deliver_ws(&mut self, doc: &mut BaseDocument, id: u64, event: common::protocol::WsEvent) {
+        use common::protocol::{WsData, WsEvent};
+        let ptr = doc as *mut BaseDocument;
+        self.enter(ptr, |scope, st| {
+            let id = cx::num_value(scope, id as f64);
+            let args: Vec<v8::Local<v8::Value>> = match event {
+                WsEvent::Open { protocol, extensions } => vec![
+                    id,
+                    v8_str(scope, "open").into(),
+                    v8_str(scope, &protocol).into(),
+                    v8_str(scope, &extensions).into(),
+                ],
+                WsEvent::Message(data) => {
+                    let data = match data {
+                        WsData::Text(text) => v8_str(scope, &text).into(),
+                        WsData::Binary(bytes) => array_buffer_from_vec(scope, bytes).into(),
+                    };
+                    vec![id, v8_str(scope, "message").into(), data]
+                }
+                WsEvent::Sent(bytes) => vec![
+                    id,
+                    v8_str(scope, "sent").into(),
+                    cx::num_value(scope, bytes as f64),
+                ],
+                WsEvent::Error(message) => vec![
+                    id,
+                    v8_str(scope, "error").into(),
+                    v8_str(scope, &message).into(),
+                ],
+                WsEvent::Closed { code, reason, clean } => vec![
+                    id,
+                    v8_str(scope, "close").into(),
+                    v8::Integer::new(scope, code as i32).into(),
+                    v8_str(scope, &reason).into(),
+                    v8::Boolean::new(scope, clean).into(),
+                ],
+            };
+            call_hook(scope, st, Hook::WebSocket, &args);
+        });
+    }
+
     /// All subresources finished loading: hook `onResourcesLoaded`.
     pub fn resources_loaded(&mut self, doc: &mut BaseDocument) {
         let ptr = doc as *mut BaseDocument;

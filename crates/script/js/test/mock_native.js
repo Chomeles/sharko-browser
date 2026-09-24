@@ -45,6 +45,7 @@ class MockNative {
     this.titles = [];
     this.scrolledIntoView = [];
     this.scrollIntoViewArgs = [];
+    this.ws = [];
     this.opened = [];
     this.storage = [new Map(), new Map()];
     this.cookies = new Map();
@@ -721,6 +722,9 @@ class MockNative {
         const delay = spec && typeof spec === 'object' && spec.delay !== undefined ? spec.delay : 0;
         M.schedule(M.clock + delay, 'fetch', { reqId, spec, url: req.url });
       },
+      wsOpen: (id, url, protocols, origin) => { M.ws.push(['open', id, url, Array.from(protocols), origin]); return true; },
+      wsSend: (id, data) => { M.ws.push(['send', id, typeof data === 'string' ? data : Array.from(new Uint8Array(data))]); },
+      wsClose: (id, code, reason) => { M.ws.push(['close', id, code, reason]); },
       abortFetch: (reqId) => { M.events = M.events.filter((e) => !(e.kind === 'fetch' && e.reqId === reqId)); },
       getCookie: () => Array.from(M.cookies, ([k, v]) => (k === '' ? v : `${k}=${v}`)).join('; '),
       setCookie: (str) => {

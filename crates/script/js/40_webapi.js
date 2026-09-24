@@ -2218,6 +2218,131 @@
   L.defineConstants([XMLHttpRequest, XMLHttpRequest.prototype], { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
   L.defineEventHandlers(XMLHttpRequest.prototype, ['onreadystatechange']);
 
+  // =======================================================================================
+  // WebSocket (the connection itself lives in the network process: N.wsOpen/wsSend/wsClose,
+  // events come back through hooks.onWebSocket)
+  // =======================================================================================
+  let nextSocketId = 1;
+  const liveSockets = new Map(); // id -> WebSocket (keeps open sockets alive)
+  const WS_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+  class WebSocket extends EventTarget {
+    #id = 0; #url = ''; #origin = ''; #state = 0; #protocol = ''; #extensions = '';
+    #buffered = 0; #binaryType = 'blob'; #failed = false;
+    constructor(url, protocols) {
+      super();
+      const fail = (msg, name) => new DOMException(`Failed to construct 'WebSocket': ${msg}`, name || 'SyntaxError');
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'WebSocket': 1 argument required, but only 0 present.");
+      const base = L.location ? L.location.href : null;
+      const p = N.urlParse(`${url}`, base);
+      if (p === null) throw fail(`The URL '${url}' is invalid.`);
+      let href = p[0];
+      let scheme = href.slice(0, href.indexOf(':')).toLowerCase();
+      if (scheme === 'http' || scheme === 'https') { href = (scheme === 'http' ? 'ws' : 'wss') + href.slice(scheme.length); scheme = scheme === 'http' ? 'ws' : 'wss'; }
+      if (scheme !== 'ws' && scheme !== 'wss') throw fail(`The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '${scheme}' is not allowed.`);
+      if (href.includes('#')) throw fail(`The URL contains a fragment identifier ('${href.slice(href.indexOf('#') + 1)}'). Fragment identifiers are not allowed in WebSocket URLs.`);
+      if (scheme === 'ws' && L.location && L.location.protocol === 'https:') {
+        const host = N.urlParse(href, null);
+        const h = host === null ? '' : host[5];
+        if (h !== 'localhost' && h !== '127.0.0.1' && h !== '[::1]') {
+          throw fail(`An insecure WebSocket connection may not be initiated from a page loaded over HTTPS.`, 'SecurityError');
+        }
+      }
+      let list = [];
+      if (protocols !== undefined) list = typeof protocols === 'string' ? [protocols] : Array.from(protocols, (x) => `${x}`);
+      const seen = new Set();
+      for (const proto of list) {
+        if (!WS_TOKEN.test(proto)) throw fail(`The subprotocol '${proto}' is invalid.`);
+        if (seen.has(proto)) throw fail(`The subprotocol '${proto}' is duplicated.`);
+        seen.add(proto);
+      }
+      this.#url = href;
+      this.#origin = (N.urlParse(href, null) || [])[10] || 'null';
+      this.#id = nextSocketId++;
+      liveSockets.set(this.#id, this);
+      let ok = false;
+      try { ok = N.wsOpen(this.#id, href, list, L.location ? L.location.origin : 'null'); } catch (_) { ok = false; }
+      if (!ok) {
+        const id = this.#id;
+        L.postTask(() => { L.onWebSocket(id, 'error', 'WebSocket is not supported here'); L.onWebSocket(id, 'close', 1006, '', false); });
+      }
+    }
+    get url() { return this.#url; }
+    get readyState() { return this.#state; }
+    get bufferedAmount() { return this.#buffered; }
+    get protocol() { return this.#protocol; }
+    get extensions() { return this.#extensions; }
+    get binaryType() { return this.#binaryType; }
+    set binaryType(v) { v = `${v}`; if (v === 'blob' || v === 'arraybuffer') this.#binaryType = v; }
+    send(data) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'send' on 'WebSocket': 1 argument required, but only 0 present.");
+      if (this.#state === 0) throw new DOMException("Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.", 'InvalidStateError');
+      let payload, size;
+      if (data instanceof L.Blob) { const b = L.blobBytes(data); payload = copyToArrayBuffer(b); size = b.byteLength; }
+      else {
+        const bytes = toBytes(data);
+        if (bytes !== null) { payload = copyToArrayBuffer(bytes); size = bytes.byteLength; }
+        else { payload = `${data}`; size = utf8Encode(payload).byteLength; }
+      }
+      this.#buffered += size;
+      if (this.#state !== 1) return;
+      N.wsSend(this.#id, payload);
+    }
+    close(code, reason) {
+      if (code !== undefined) {
+        code = Number(code) & 0xffff;
+        if (code !== 1000 && (code < 3000 || code > 4999)) {
+          throw new DOMException(`Failed to execute 'close' on 'WebSocket': The close code must be either 1000, or between 3000 and 4999. ${code} is neither.`, 'InvalidAccessError');
+        }
+      }
+      reason = reason === undefined ? '' : `${reason}`;
+      if (utf8Encode(reason).byteLength > 123) {
+        throw new DOMException("Failed to execute 'close' on 'WebSocket': The close reason must not be greater than 123 UTF-8 bytes.", 'SyntaxError');
+      }
+      if (this.#state >= 2) return;
+      if (this.#state === 0) this.#failed = true;
+      this.#state = 2;
+      N.wsClose(this.#id, code === undefined ? -1 : code, reason);
+    }
+    static {
+      L.onWebSocket = function (id, kind, a, b, c) {
+        const ws = liveSockets.get(id);
+        if (ws === undefined) return;
+        switch (kind) {
+          case 'open':
+            if (ws.#state !== 0) return;
+            ws.#state = 1; ws.#protocol = `${a}`; ws.#extensions = `${b}`;
+            L.fire(ws, 'open', {});
+            break;
+          case 'message': {
+            if (ws.#state !== 1) return;
+            let data = a;
+            if (typeof a !== 'string') data = ws.#binaryType === 'arraybuffer' ? a : new L.Blob([a]);
+            L.fire(ws, 'message', { data, origin: ws.#origin }, L.MessageEvent);
+            break;
+          }
+          case 'sent':
+            ws.#buffered = Math.max(0, ws.#buffered - Number(a));
+            break;
+          case 'error':
+            ws.#failed = true;
+            if (L.console && typeof a === 'string' && a) L.console.error(`WebSocket connection to '${ws.#url}' failed: ${a}`);
+            break;
+          case 'close': {
+            liveSockets.delete(id);
+            ws.#state = 3;
+            if (ws.#failed || a === 1006) L.fire(ws, 'error', {});
+            L.fire(ws, 'close', { wasClean: !!c, code: Number(a), reason: `${b}` }, L.CloseEvent);
+            break;
+          }
+        }
+      };
+    }
+  }
+  L.defineConstants([WebSocket, WebSocket.prototype], { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+  L.defineEventHandlers(WebSocket.prototype, ['onopen', 'onmessage', 'onerror', 'onclose']);
+  L.expose('WebSocket', WebSocket);
+  L.WebSocket = WebSocket;
+
   L.part1 = { setTimeout, setInterval, clearTimeout, clearInterval, queueMicrotask, requestAnimationFrame,
     cancelAnimationFrame, requestIdleCallback, cancelIdleCallback, structuredClone, btoa, atob, fetch, randomUUIDRef: null };
   Object.assign(L, { MessagePort, MessageChannel, BroadcastChannel, URLSearchParams, TextEncoder, TextDecoder, Blob, File, FileList,

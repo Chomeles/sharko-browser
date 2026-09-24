@@ -124,6 +124,22 @@ pub trait ScriptHost {
         let _ = req;
         None
     }
+    /// Open a WebSocket for the page (`new WebSocket(url, protocols)`). Its events must
+    /// come back through [`ScriptRuntime::deliver_ws`] with the same `id`, ending with
+    /// exactly one `Closed`. Returns `false` if the host has no WebSocket support (the
+    /// default).
+    fn ws_open(&self, id: u64, url: &str, protocols: Vec<String>, origin: &str) -> bool {
+        let _ = (id, url, protocols, origin);
+        false
+    }
+    /// Send a message on a socket opened with [`ScriptHost::ws_open`].
+    fn ws_send(&self, id: u64, data: common::protocol::WsData) {
+        let _ = (id, data);
+    }
+    /// Close (or abort, while connecting) a socket opened with [`ScriptHost::ws_open`].
+    fn ws_close(&self, id: u64, code: Option<u16>, reason: &str) {
+        let _ = (id, code, reason);
+    }
     /// A same-document session history entry was added (`pushState`, fragment
     /// navigation) or, with `replace`, the current entry's URL was replaced
     /// (`replaceState`, `location.replace('#x')`). Followed by

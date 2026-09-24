@@ -37,6 +37,8 @@ pub(crate) struct NetworkCore {
     pub(crate) alt_svc_saver: Debouncer,
     /// Primary cache keys with a background (stale-while-revalidate) revalidation.
     pub(crate) revalidating: Mutex<HashSet<u128>>,
+    /// HTTP/1-only client for WebSocket handshakes, created on first use.
+    pub(crate) ws_client: Mutex<Option<reqwest::Client>>,
 }
 
 impl NetworkCore {
@@ -99,6 +101,7 @@ impl NetworkCore {
             cookie_saver,
             alt_svc_saver,
             revalidating: Mutex::new(HashSet::new()),
+            ws_client: Mutex::new(None),
         }))
     }
 

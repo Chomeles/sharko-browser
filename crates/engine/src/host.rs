@@ -200,10 +200,21 @@ pub struct RendererHost {
     pub generation: u64,
     /// JS request id -> network request id (for aborts).
     pub inflight: RefCell<HashMap<u64, u64>>,
+    /// Script socket id -> network socket id of the page's open WebSockets.
+    pub sockets: RefCell<HashMap<u64, u64>>,
     pub referrer: String,
     pub verbose_console: bool,
     pub title: RefCell<String>,
     pub history: Cell<(u32, u32)>,
+}
+
+impl Drop for RendererHost {
+    /// The document is gone (navigation, tab closed): close its sockets ("going away").
+    fn drop(&mut self) {
+        for (_, net_id) in self.sockets.borrow_mut().drain() {
+            self.net.ws_close(net_id, Some(1001), "");
+        }
+    }
 }
 
 impl script::ScriptHost for RendererHost {
@@ -224,6 +235,33 @@ impl script::ScriptHost for RendererHost {
     fn abort_fetch(&self, id: u64) {
         if let Some(net_id) = self.inflight.borrow_mut().remove(&id) {
             self.net.abort(net_id);
+        }
+    }
+
+    fn ws_open(&self, id: u64, url: &str, protocols: Vec<String>, origin: &str) -> bool {
+        let tx = self.shared.loop_tx.clone();
+        let generation = self.generation;
+        let net_id = self.net.ws_open(
+            url,
+            protocols,
+            origin,
+            Box::new(move |event| {
+                let _ = tx.send(LoopMsg::ScriptWs { generation, id, event });
+            }),
+        );
+        self.sockets.borrow_mut().insert(id, net_id);
+        true
+    }
+
+    fn ws_send(&self, id: u64, data: common::protocol::WsData) {
+        if let Some(&net_id) = self.sockets.borrow().get(&id) {
+            self.net.ws_send(net_id, data);
+        }
+    }
+
+    fn ws_close(&self, id: u64, code: Option<u16>, reason: &str) {
+        if let Some(&net_id) = self.sockets.borrow().get(&id) {
+            self.net.ws_close(net_id, code, reason);
         }
     }
 
