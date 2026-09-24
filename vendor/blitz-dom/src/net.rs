@@ -395,10 +395,28 @@ pub(crate) fn fetch_font_face(
                         .and_then(|range| range.0.compute().map(|w| w.value())),
                     style: descriptor.font_style.as_ref().map(stylo_to_fontique_style),
                 };
-                Some((src, overrides))
+                // PATCH: remember whether this face covers basic Latin letters.
+                let covers_latin = descriptor
+                    .unicode_range
+                    .as_ref()
+                    .map(|ranges| ranges.iter().any(|r| r.start <= 0x61 && r.end >= 0x7A))
+                    .unwrap_or(true);
+                let has_range = descriptor.unicode_range.is_some();
+                Some((src, overrides, covers_latin, has_range))
             }
             _ => None,
         })
+        .collect::<Vec<_>>()
+        // PATCH: `unicode-range` subsets (e.g. Google Fonts serves latin, latin-ext,
+        // cyrillic, ... as separate faces of one family). Parley can't select among
+        // subsets per character, so registering all of them makes it pick an arbitrary
+        // subset (often one without Latin glyphs). Like browsers, only download the
+        // subsets that are needed: for families that have a Latin-covering subset, skip
+        // the other subsets.
+        .into_iter()
+        .collect::<Vec<_>>()
+        .pipe_filter_subsets()
+        .into_iter()
         .for_each(|(source_list, overrides)| {
             // Find the first font source in the source list that specifies a font of a type
             // that we support.
@@ -606,5 +624,35 @@ mod tests {
             stylo_to_fontique_style(&oblique(10.0, 20.0)),
             Fq::Oblique(Some(10.0)),
         );
+    }
+}
+
+
+/// PATCH: helper for [`fetch_font_face`]: drop non-Latin `unicode-range` subsets of
+/// families that also have a Latin-covering subset with the same weight/style.
+trait FilterSubsets<'a, S> {
+    fn pipe_filter_subsets(self) -> Vec<(&'a S, FontFaceOverrides)>;
+}
+
+impl<'a, S> FilterSubsets<'a, S> for Vec<(&'a S, FontFaceOverrides, bool, bool)> {
+    fn pipe_filter_subsets(self) -> Vec<(&'a S, FontFaceOverrides)> {
+        let key = |o: &FontFaceOverrides| {
+            (
+                o.family_name.clone(),
+                o.weight.map(|w| w.to_bits()),
+                o.style.map(|s| format!("{s:?}")),
+            )
+        };
+        let latin_keys: std::collections::HashSet<_> = self
+            .iter()
+            .filter(|(_, _, latin, has_range)| *latin && *has_range)
+            .map(|(_, o, _, _)| key(o))
+            .collect();
+        self.into_iter()
+            .filter(|(_, o, latin, has_range)| {
+                !*has_range || *latin || !latin_keys.contains(&key(o))
+            })
+            .map(|(s, o, _, _)| (s, o))
+            .collect()
     }
 }

@@ -64,7 +64,6 @@ struct Page {
     dcl_sent: bool,
     last_ready_check: Instant,
     last_scroll: (f64, f64),
-    resources_were_pending: bool,
     last_title: String,
     parse_ms: f64,
     script_ms: f64,
@@ -592,7 +591,6 @@ impl Renderer {
             dcl_sent: false,
             last_ready_check: Instant::now(),
             last_scroll: (0.0, 0.0),
-            resources_were_pending: true,
             last_title: String::new(),
             parse_ms,
             script_ms: 0.0,
@@ -650,20 +648,19 @@ impl Renderer {
                 }
             }
 
-            // Subresources finished?
             let pending = self.shared.pending_resources.load(Ordering::SeqCst);
-            if pending == 0 && page.resources_were_pending {
-                page.resources_were_pending = false;
-                if let Some(rt) = page.rt.as_mut() {
-                    rt.resources_loaded(&mut page.doc);
-                }
-            } else if pending > 0 {
-                page.resources_were_pending = true;
-            }
 
             // Load state
             if !page.load_sent && page.last_ready_check.elapsed() >= Duration::from_millis(40) {
                 page.last_ready_check = Instant::now();
+                // Subresources finished? Tell JS (idempotent; it fires `load` once both
+                // DOMContentLoaded happened and nothing is pending). Checked periodically
+                // rather than on transitions: a fetch can start and finish between ticks.
+                if pending == 0 {
+                    if let Some(rt) = page.rt.as_mut() {
+                        rt.resources_loaded(&mut page.doc);
+                    }
+                }
                 let ready = match page.rt.as_mut() {
                     Some(rt) => rt
                         .eval(&mut page.doc, "document.readyState")
@@ -677,6 +674,14 @@ impl Renderer {
                         url: page.url.clone(),
                         error: None,
                     });
+                }
+                if std::env::var_os("BROWSER_DEBUG_LOAD").is_some()
+                    && page.created.elapsed().as_millis() % 1000 < 45
+                {
+                    eprintln!(
+                        "[load-debug] ready={ready} pending={pending} critical={}",
+                        page.doc.has_pending_critical_resources()
+                    );
                 }
                 if ready.contains("complete")
                     && pending == 0

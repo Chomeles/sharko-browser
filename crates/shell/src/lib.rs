@@ -576,28 +576,45 @@ impl ApplicationHandler<UserEvent> for App {
         self.scale = window.scale_factor();
 
         let use_gpu = !self.force_cpu && gpu_available();
-        let mut renderer = if use_gpu {
-            self.renderer_kind = "GPU (Vello/wgpu)";
-            Renderer::Gpu(Box::new(anyrender_vello::VelloWindowRenderer::new()))
-        } else {
-            self.renderer_kind = "CPU (vello_cpu)";
-            Renderer::Cpu(Box::new(anyrender_vello_cpu::VelloCpuWindowRenderer::new()))
-        };
         let handle: Arc<dyn anyrender::WindowHandle> = window.clone();
-        let proxy = self.proxy.clone();
-        match &mut renderer {
-            Renderer::Gpu(r) => {
-                r.resume(handle, self.size.width, self.size.height, move || {
+        let (w, h) = (self.size.width, self.size.height);
+        let mut renderer = None;
+        if use_gpu {
+            // GPU init can fail on exotic drivers (panics inside wgpu/vello): fall back to
+            // the CPU compositor instead of crashing.
+            let proxy = self.proxy.clone();
+            let handle2 = handle.clone();
+            let gpu = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                let mut r = anyrender_vello::VelloWindowRenderer::new();
+                r.resume(handle2, w, h, move || {
                     let _ = proxy.send_event(UserEvent::Redraw);
                 });
                 r.complete_resume();
+                r
+            }));
+            match gpu {
+                Ok(r) if r.is_active() || r.is_pending() => {
+                    self.renderer_kind = "GPU (Vello/wgpu)";
+                    renderer = Some(Renderer::Gpu(Box::new(r)));
+                }
+                _ => eprintln!("[ui] GPU compositor unavailable, using CPU"),
             }
-            Renderer::Cpu(r) => {
-                r.resume(handle, self.size.width, self.size.height, move || {
+        }
+        let mut renderer = match renderer {
+            Some(r) => r,
+            None => {
+                self.renderer_kind = "CPU (vello_cpu)";
+                let mut r = anyrender_vello_cpu::VelloCpuWindowRenderer::new();
+                let proxy = self.proxy.clone();
+                r.resume(handle, w, h, move || {
                     let _ = proxy.send_event(UserEvent::Redraw);
                 });
                 r.complete_resume();
+                Renderer::Cpu(Box::new(r))
             }
+        };
+        if let Renderer::Gpu(r) = &mut renderer {
+            r.complete_resume();
         }
         eprintln!("[ui] compositor: {}", self.renderer_kind);
         self.renderer = Some(renderer);
