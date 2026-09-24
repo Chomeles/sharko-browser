@@ -127,6 +127,8 @@ natives_table! {
     "createFragment" => tree::n_create_fragment,
     "cloneNode" => tree::n_clone_node,
     "templateContent" => tree::n_template_content,
+    "setShadowHost" => tree::n_set_shadow_host,
+    "setDefined" => tree::n_set_defined,
     "releaseNode" => tree::n_release_node,
     // Mutation
     "appendChild" => tree::n_append_child,

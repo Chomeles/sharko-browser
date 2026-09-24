@@ -506,6 +506,7 @@
   function onDocumentParsed() {
     L.milestones.responseEnd = N.now();
     L.extractTemplates(docId); // parsed template contents leave the document tree
+    L.attachDeclarativeShadowRoots(docId);
     // The native parser drops the doctype: recreate it (optional N.doctype() says which,
     // null = none in the source = quirks mode; without it assume <!DOCTYPE html>).
     let dt = ['html', '', ''];

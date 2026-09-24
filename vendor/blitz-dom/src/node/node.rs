@@ -62,6 +62,12 @@ bitflags! {
         const IS_TABLE_ROOT = 0b00000010;
         /// Whether the node is "in the document" (~= has a parent and isn't a template node)
         const IS_IN_DOCUMENT = 0b00000100;
+        /// PATCH: the element hosts a (emulated) shadow tree: stylesheets inside it are
+        /// scoped to it (see `shadow_css`).
+        const IS_SHADOW_HOST = 0b1_0000_0000;
+        /// PATCH: a custom element (name with `-`) that has been upgraded or created
+        /// from its definition, so it matches `:defined`.
+        const IS_CUSTOM_DEFINED = 0b10_0000_0000;
     }
 }
 

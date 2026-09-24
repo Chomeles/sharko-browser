@@ -59,7 +59,8 @@ pub enum Resource {
     Image(ImageType, u32, u32, Arc<Vec<u8>>),
     #[cfg(feature = "svg")]
     Svg(ImageType, crate::node::SvgImageData),
-    Css(DocumentStyleSheet),
+    /// PATCH: the stylesheet and its source text (re-parsed when scoped to a shadow tree).
+    Css(DocumentStyleSheet, Arc<str>),
     Font(Bytes, FontFaceOverrides),
     /// HTML fetched for an `<iframe>` element's `src`
     DocumentSrc(String),
@@ -167,7 +168,7 @@ impl NetHandler for ResourceHandler<StylesheetHandler> {
 
         self.respond(
             resolved_url,
-            Ok(Resource::Css(DocumentStyleSheet(ServoArc::new(sheet)))),
+            Ok(Resource::Css(DocumentStyleSheet(ServoArc::new(sheet)), Arc::from(css))),
         );
     }
 }

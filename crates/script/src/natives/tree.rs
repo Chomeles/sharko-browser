@@ -248,6 +248,31 @@ pub(crate) fn n_template_content(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.setShadowHost(id, isHost)`: `id` hosts an (emulated) shadow tree, so
+/// stylesheets inside it are scoped to it (see `blitz_dom::shadow_css`).
+pub(crate) fn n_set_shadow_host(cx: &mut Cx) -> NResult {
+    let on = cx.bool(1);
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    if doc.get_node(id).is_some_and(|n| n.is_element()) {
+        doc.set_shadow_host(id, on);
+        cx.st.invalidate_layout();
+    }
+    cx.ret_undefined();
+    Ok(())
+}
+
+/// Addition: `N.setDefined(id)`: the custom element `id` was upgraded (or created from
+/// its definition), so CSS `:defined` matches it.
+pub(crate) fn n_set_defined(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    doc.set_custom_element_defined(id);
+    cx.st.invalidate_layout();
+    cx.ret_undefined();
+    Ok(())
+}
+
 /// Addition: `N.releaseNode(id)`: the JS layer dropped its wrapper for `id` (e.g. from a
 /// `FinalizationRegistry`). The node stops counting as exposed, and its tree is freed if
 /// it is detached from the document and no other node in it is exposed. Ids of freed

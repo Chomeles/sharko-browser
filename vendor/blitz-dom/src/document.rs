@@ -52,6 +52,7 @@ use style::queries::values::PrefersColorScheme;
 use style::selector_parser::ServoElementSnapshot;
 use style::servo::media_features::PointerCapabilities;
 use style::servo_arc::Arc as ServoArc;
+use style::stylesheets::OriginSet;
 use style::values::GenericAtomIdent;
 use style::values::computed::UserSelect;
 use style::values::computed::ui::CursorKind;
@@ -1135,8 +1136,81 @@ impl BaseDocument {
     pub fn process_style_element(&mut self, target_id: NodeId) {
         let css = self.nodes[target_id].text_content();
         let css = html_escape::decode_html_entities(&css);
-        let sheet = self.make_stylesheet(&css, Origin::Author);
+        // PATCH: `<style>` in template contents is inert; in a shadow tree it is scoped.
+        let sheet = match self.style_scope(target_id) {
+            StyleScope::Inert => {
+                self.remove_stylesheet_for_node(target_id);
+                return;
+            }
+            StyleScope::Document => self.make_stylesheet(&css, Origin::Author),
+            StyleScope::ShadowHost(host) => {
+                let scoped = crate::shadow_css::scope_shadow_css(&css, &host.to_string());
+                self.make_stylesheet(&scoped, Origin::Author)
+            }
+        };
         self.add_stylesheet_for_node(sheet, target_id);
+    }
+
+    /// PATCH: where a `<style>`/`<link>` element's stylesheet applies: nowhere inside
+    /// `<template>` contents, only to the host's subtree inside an emulated shadow tree.
+    pub fn style_scope(&self, node_id: NodeId) -> StyleScope {
+        let mut cur = self.nodes.get(node_id).and_then(|n| n.parent);
+        while let Some(id) = cur {
+            let Some(node) = self.nodes.get(id) else { break };
+            if node.flags.contains(NodeFlags::IS_SHADOW_HOST) {
+                return StyleScope::ShadowHost(id);
+            }
+            if node.data.is_element_with_tag_name(&local_name!("template")) {
+                return StyleScope::Inert;
+            }
+            cur = node.parent;
+        }
+        StyleScope::Document
+    }
+
+    /// PATCH: mark or unmark `host` as the host of an emulated shadow tree. Stylesheets
+    /// inside it are re-scoped and the subtree is restyled.
+    pub fn set_shadow_host(&mut self, host: NodeId, is_host: bool) {
+        let Some(node) = self.nodes.get_mut(host) else { return };
+        if node.flags.contains(NodeFlags::IS_SHADOW_HOST) == is_host {
+            return;
+        }
+        node.flags.set(NodeFlags::IS_SHADOW_HOST, is_host);
+        node.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        let mut styles = Vec::new();
+        let mut stack = vec![host];
+        while let Some(id) = stack.pop() {
+            let node = &self.nodes[id];
+            if node.data.is_element_with_tag_name(&local_name!("style")) {
+                styles.push(id);
+            }
+            stack.extend(node.children.iter().copied());
+        }
+        for id in styles {
+            self.process_style_element(id);
+        }
+    }
+
+    /// PATCH: the custom element `id` is now defined (`:defined` matches).
+    pub fn set_custom_element_defined(&mut self, id: NodeId) {
+        let Some(node) = self.nodes.get_mut(id) else { return };
+        if node.flags.contains(NodeFlags::IS_CUSTOM_DEFINED) {
+            return;
+        }
+        node.flags.insert(NodeFlags::IS_CUSTOM_DEFINED);
+        node.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+    }
+
+    fn remove_stylesheet_for_node(&mut self, node_id: NodeId) {
+        if let Some(old) = self.nodes_to_stylesheet.remove(&node_id) {
+            self.stylist.remove_stylesheet(old, &self.guard.read());
+            self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+            if let Some(el) = self.nodes[node_id].element_data_mut() {
+                if matches!(el.special_data, SpecialElementData::Stylesheet(_)) {
+                    el.special_data = SpecialElementData::None;
+                }
+            }
+        }
     }
 
     pub fn remove_user_agent_stylesheet(&mut self, contents: &str) {
@@ -1290,9 +1364,19 @@ impl BaseDocument {
         };
 
         match resource {
-            Resource::Css(css) => {
+            Resource::Css(css, source) => {
                 let node_id = res.node_id.unwrap();
-                self.add_stylesheet_for_node(css, node_id);
+                // PATCH: linked stylesheets follow the same scoping as `<style>`.
+                match self.style_scope(node_id) {
+                    StyleScope::Document => self.add_stylesheet_for_node(css, node_id),
+                    StyleScope::Inert => {}
+                    StyleScope::ShadowHost(host) => {
+                        let scoped =
+                            crate::shadow_css::scope_shadow_css(&source, &host.to_string());
+                        let sheet = self.make_stylesheet(&scoped, Origin::Author);
+                        self.add_stylesheet_for_node(sheet, node_id);
+                    }
+                }
             }
             Resource::Image(_kind, width, height, image_data) => {
                 // Create the ImageData and cache it
@@ -3234,4 +3318,15 @@ mod font_face_override_tests {
              not the font file's internal `name` table entry",
         );
     }
+}
+
+/// PATCH: where the stylesheet of a `<style>`/`<link>` element applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleScope {
+    /// The whole document.
+    Document,
+    /// Nowhere (template contents).
+    Inert,
+    /// Only the subtree of this (emulated) shadow host.
+    ShadowHost(NodeId),
 }

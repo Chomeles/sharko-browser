@@ -54,6 +54,7 @@ mod query_selector;
 mod resolve;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
+pub mod shadow_css;
 mod selection;
 /// Implementations that interact with servo's style engine
 mod stylo;
@@ -82,7 +83,7 @@ pub use crate::node::Widget;
 
 pub use blitz_traits::node_id::NodeId;
 pub use config::{DocumentConfig, StyleThreading};
-pub use document::{BaseDocument, DocGuard, DocGuardMut, Document, PlainDocument};
+pub use document::{BaseDocument, DocGuard, DocGuardMut, Document, PlainDocument, StyleScope};
 pub use markup5ever::{
     LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
     namespace_prefix, namespace_url, ns,

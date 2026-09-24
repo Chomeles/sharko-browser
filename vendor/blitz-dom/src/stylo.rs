@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 
 use crate::StyleThreading;
 use crate::layout::damage::compute_layout_damage;
-use crate::node::Node;
+use crate::node::{Node, NodeFlags};
 use crate::node::NodeData;
 use markup5ever::{LocalName, LocalNameStaticSet, Namespace, NamespaceStaticSet, local_name};
 use selectors::bloom::BLOOM_HASH_MASK;
@@ -399,6 +399,12 @@ impl selectors::Element for BlitzNode<'_> {
         local_name: &GenericAtomIdent<LocalNameStaticSet>,
         operation: &AttrSelectorOperation<&AtomString>,
     ) -> bool {
+        // PATCH: virtual attribute of emulated shadow hosts (see `shadow_css`).
+        if self.flags.contains(NodeFlags::IS_SHADOW_HOST)
+            && &*local_name.0 == crate::shadow_css::SHADOW_HOST_ATTR
+        {
+            return operation.eval_str(&self.id.to_string());
+        }
         match self.data.attr(local_name.0.clone()) {
             None => false,
             Some(attr_value) => operation.eval_str(attr_value),
@@ -418,7 +424,14 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Checked => self.element_state().contains(ElementState::CHECKED),
             NonTSPseudoClass::Valid => false,
             NonTSPseudoClass::Invalid => false,
-            NonTSPseudoClass::Defined => false,
+            // PATCH: built-in elements are always defined; custom elements once upgraded.
+            NonTSPseudoClass::Defined => {
+                self.flags.contains(NodeFlags::IS_CUSTOM_DEFINED)
+                    || !self
+                        .data
+                        .downcast_element()
+                        .is_some_and(|el| el.name.local.contains('-'))
+            }
             NonTSPseudoClass::Disabled => self.element_state().contains(ElementState::DISABLED),
             NonTSPseudoClass::Enabled => self.element_state().contains(ElementState::ENABLED),
             NonTSPseudoClass::Focus => self.element_state().contains(ElementState::FOCUS),
@@ -517,15 +530,14 @@ impl selectors::Element for BlitzNode<'_> {
         search_name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
         case_sensitivity: selectors::attr::CaseSensitivity,
     ) -> bool {
+        // PATCH: compare the class tokens as bytes instead of interning an `Atom` per
+        // token (hashing + the global atom-set lock) on every class selector test.
         let class_attr = self.data.attr(local_name!("class"));
         if let Some(class_attr) = class_attr {
-            // split the class attribute
-            for pheme in class_attr.split_ascii_whitespace() {
-                let atom = Atom::from(pheme);
-                if case_sensitivity.eq_atom(&atom, search_name) {
-                    return true;
-                }
-            }
+            let needle: &str = &search_name.0;
+            return class_attr
+                .split_ascii_whitespace()
+                .any(|pheme| case_sensitivity.eq(pheme.as_bytes(), needle.as_bytes()));
         }
 
         false
@@ -653,6 +665,12 @@ impl<'a> TElement for BlitzNode<'a> {
             for attr in attrs.iter() {
                 callback(&GenericAtomIdent(attr.name.local.clone()));
             }
+        }
+        // PATCH: virtual attribute of emulated shadow hosts (bloom filter).
+        if self.flags.contains(NodeFlags::IS_SHADOW_HOST) {
+            callback(&GenericAtomIdent(LocalName::from(
+                crate::shadow_css::SHADOW_HOST_ATTR,
+            )));
         }
     }
 

@@ -8,6 +8,20 @@
   const idOf = L.idOf, typeOf = L.typeOf, lnOf = L.lnOf, nsOf = L.nsOf, isNode = L.isNode;
   const wrap = L.wrap;
   const state = L.state;
+  const treeChanged = L.treeChanged;
+  // Child-list version per parent id. Live `children`/`childNodes` collections only
+  // recompute when their own parent's child list changed (or on untracked changes),
+  // so e.g. setting `textContent` on one child does not invalidate `parent.children`.
+  const childVer = new Map();
+  function childListChanged(pid, other) {
+    const v = ++state.tree;
+    childVer.set(pid, v);
+    if (other !== 0) childVer.set(other, v);
+  }
+  function childVerOf(id) {
+    const v = childVer.get(id);
+    return v === undefined ? 0 : v;
+  }
   const cache = L.cache;
   const EventTarget = L.EventTarget;
   const HTML = 0, SVG = 1, MATHML = 2, OTHER = 3, NONE = 4;
@@ -192,7 +206,7 @@
     let c;
     while ((c = N.firstChild(hostId)) !== 0) N.appendChild(frag, c);
     info.lightFrag = frag;
-    state.tree++;
+    treeChanged();
   }
   function shadowDistribute(sr) {
     const info = shadowInfo.get(sr);
@@ -219,12 +233,73 @@
       }
       N.appendChild(slot, c);
     }
-    state.tree++;
+    treeChanged();
   }
   function lightFragOf(hostW) {
     const sr = shadowOfHost.get(hostW);
     if (sr === undefined) return 0;
     return shadowInfo.get(sr).lightFrag;
+  }
+  function attachShadowImpl(host, mode, init) {
+    const sr = Object.create(ShadowRoot.prototype);
+    L.stamp(sr, idOf(host), 11, '', HTML);
+    shadowInfo.set(sr, {
+      host, mode, delegatesFocus: !!init.delegatesFocus, clonable: !!init.clonable,
+      serializable: !!init.serializable, slotAssignment: init.slotAssignment === 'manual' ? 'manual' : 'named',
+      lightFrag: 0, cleared: new Set(), declarative: !!init.declarative,
+    });
+    shadowOfHost.set(host, sr);
+    // Stylesheets inside the host are scoped to it from now on (native style scoping).
+    if (typeof N.setShadowHost === 'function') N.setShadowHost(idOf(host), true);
+    return sr;
+  }
+  // Remove the shadow content of `sr` (slotted light nodes go back to the light fragment).
+  function clearShadowContent(sr) {
+    const info = shadowInfo.get(sr);
+    const hostId = idOf(info.host);
+    if (info.lightFrag !== 0) {
+      for (const slot of info.cleared) {
+        if (!N.contains(hostId, slot)) continue;
+        let c;
+        while ((c = N.firstChild(slot)) !== 0) N.appendChild(info.lightFrag, c);
+      }
+    }
+    info.cleared = new Set();
+    N.setTextContent(hostId, '');
+    treeChanged();
+  }
+  // Declarative shadow DOM: <template shadowrootmode> attaches a shadow root to its
+  // parent when the document is parsed (innermost first).
+  L.attachDeclarativeShadowRoots = function (rootId) {
+    // Nested declarative roots surface once their outer content moved into the document.
+    for (let round = 0; round < 32 && attachDeclarativeRound(rootId) !== 0; round++);
+  };
+  function attachDeclarativeRound(rootId) {
+    let attached = 0;
+    const ids = N.querySelectorAll(rootId, 'template[shadowrootmode]');
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const tid = ids[i];
+      const mode = L.asciiLower(N.getAttr(tid, 'shadowrootmode') || '');
+      const pid = N.parent(tid);
+      if ((mode !== 'open' && mode !== 'closed') || pid === 0 || N.nodeType(pid) !== 1) continue;
+      const host = wrap(pid);
+      const ln = lnOf(host);
+      if (nsOf(host) !== HTML || !(L.isValidCEName(ln) || SHADOW_HOSTS.has(ln)) || shadowOfHost.has(host)) continue;
+      const content = L.templateInfo !== null ? L.templateInfo(wrap(tid)) : tid;
+      const sr = attachShadowImpl(host, mode, {
+        declarative: true,
+        delegatesFocus: N.getAttr(tid, 'shadowrootdelegatesfocus') !== null,
+        clonable: N.getAttr(tid, 'shadowrootclonable') !== null,
+        serializable: N.getAttr(tid, 'shadowrootserializable') !== null,
+      });
+      N.removeChild(pid, tid);
+      shadowPrepare(sr);
+      for (const c of N.childIds(content)) N.appendChild(pid, c);
+      shadowDistribute(sr);
+      treeChanged();
+      attached++;
+    }
+    return attached;
   }
 
   // ---------------------------------------------------------------------------------------
@@ -405,6 +480,7 @@
       return;
     }
     def.stack.pop();
+    if (typeof N.setDefined === 'function') N.setDefined(id);
     if (def.callbacks.attributeChangedCallback !== undefined) {
       for (const name of N.attrNames(id)) {
         if (def.observed.has(name)) ceCallback(w, def, 'attributeChangedCallback', [name, null, N.getAttr(id, name), null]);
@@ -471,15 +547,15 @@
       added = N.childIds(nid);
       if (added.length === 0) return;
       if (mo) queueMutation('childList', nid, null, null, null, added, 0, 0);
-    } else if (mo || ce) {
+    } else {
       oldParent = N.parent(nid);
-      if (oldParent !== 0) {
+      if (oldParent !== 0 && (mo || ce)) {
         if (mo) { oldPrev = N.prevSibling(nid); oldNext = N.nextSibling(nid); }
         if (ce && N.isConnected(nid)) ceMoved = collectCE(nid, true);
       }
     }
     nativeCall(() => N.insertBefore(pid, nid, refId));
-    state.tree++;
+    childListChanged(pid, isFrag ? nid : oldParent);
     const insertedIds = isFrag ? added : [nid];
     if (mo) {
       if (oldParent !== 0) queueMutation('childList', oldParent, null, null, null, [nid], oldPrev, oldNext);
@@ -497,7 +573,7 @@
     if (mo) { prev = N.prevSibling(nid); next = N.nextSibling(nid); }
     if (ceActive() && N.isConnected(nid)) ceList = collectCE(nid, true);
     nativeCall(() => N.removeChild(pid, nid));
-    state.tree++;
+    childListChanged(pid, 0);
     if (mo) queueMutation('childList', pid, null, null, null, [nid], prev, next);
     if (ceList !== null && ceList.length) ceDisconnected(ceList);
     childrenChanged(pid, parentW);
@@ -507,7 +583,8 @@
 
   // Replace all children of `pid` by the children produced by `mutate()` (innerHTML,
   // textContent, …). Produces a single childList record.
-  function replaceAllCore(pid, parentW, mutate) {
+  // `moves`: `mutate` may take nodes out of other parents (untracked child-list change).
+  function replaceAllCore(pid, parentW, mutate, moves) {
     const mo = moRegCount !== 0;
     const ce = ceActive();
     let removed = null, ceList = null;
@@ -515,7 +592,8 @@
     const connected = ce ? N.isConnected(pid) : false;
     if (ce && connected) ceList = collectCE(pid, false);
     nativeCall(mutate);
-    state.tree++;
+    if (moves === true) treeChanged();
+    childListChanged(pid, 0);
     const added = mo || ce ? N.childIds(pid) : null;
     if (mo && (removed.length || added.length)) queueMutation('childList', pid, null, null, added, removed, 0, 0);
     if (ceList !== null && ceList.length) ceDisconnected(ceList);
@@ -641,16 +719,16 @@
       if (prev === nid) prev = N.prevSibling(nid);
     }
     if (isFrag) added = N.childIds(nid);
-    else if (mo || ce) {
+    else {
       oldParent = N.parent(nid);
-      if (oldParent !== 0) {
+      if (oldParent !== 0 && (mo || ce)) {
         if (mo) { oldPrev = N.prevSibling(nid); oldNext = N.nextSibling(nid); }
         if (ce && N.isConnected(nid)) ceMoved = collectCE(nid, true);
       }
     }
     if (ce && N.isConnected(cid)) ceRemoved = collectCE(cid, true);
     nativeCall(() => N.replaceChild(pid, nid, cid));
-    state.tree++;
+    childListChanged(pid, isFrag ? nid : oldParent);
     const insertedIds = isFrag ? added : [nid];
     if (mo) {
       if (oldParent !== 0 && oldParent !== pid) queueMutation('childList', oldParent, null, null, null, [nid], oldPrev, oldNext);
@@ -686,7 +764,7 @@
         N.appendChild(frag, N.createText(`${a}`));
       }
     }
-    state.tree++;
+    treeChanged();
     return wrap(frag);
   }
 
@@ -1059,7 +1137,7 @@
       Object.getPrototypeOf(w) === HTMLDocument.prototype ? HTMLDocument.prototype : Object.getPrototypeOf(w));
     if (deep) {
       for (const c of N.childIds(idOf(w))) N.appendChild(idOf(d), idOf(cloneNodeImpl(wrap(c), true)));
-      state.tree++;
+      treeChanged();
     }
     return d;
   }
@@ -1069,7 +1147,7 @@
   // ---------------------------------------------------------------------------------------
   // kind 0: static ids, 1: live childNodes of a parent id, 2: static wrappers
   class NodeList {
-    #kind; #src; #ids = null; #epoch = -1;
+    #kind; #src; #ids = null; #epoch = -1; #pv = -1;
     constructor(token, kind, src) {
       if (token !== INTERNAL) throw L.illegal();
       this.#kind = kind;
@@ -1079,9 +1157,11 @@
       L.nlIds = (o) => {
         const k = o.#kind;
         if (k === 1) {
-          if (o.#epoch !== state.tree) {
+          const pv = childVerOf(o.#src);
+          if (o.#epoch !== state.untracked || o.#pv !== pv) {
             o.#ids = N.childIds(o.#src);
-            o.#epoch = state.tree;
+            o.#epoch = state.untracked;
+            o.#pv = pv;
           }
           return o.#ids;
         }
@@ -1160,9 +1240,11 @@
     let ep;
     switch (d.kind) {
       case 0: return d.ids; // static
-      case 1: // children
-        if (d.epoch !== state.tree) { d.ids = N.childElementIds(d.src); d.epoch = state.tree; }
+      case 1: { // children
+        const pv = childVerOf(d.src);
+        if (d.epoch !== state.untracked || d.pv !== pv) { d.ids = N.childElementIds(d.src); d.epoch = state.untracked; d.pv = pv; }
         return d.ids;
+      }
       default:
         ep = state.tree * 1048576 + state.attr;
         if (d.epoch !== ep) { d.ids = d.compute(); d.epoch = ep; }
@@ -1888,18 +1970,18 @@
       if (nsOf(this) !== HTML || !(L.isValidCEName(ln) || SHADOW_HOSTS.has(ln))) {
         throw new DOMException(`Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow`, 'NotSupportedError');
       }
-      if (shadowOfHost.has(this)) {
+      const existing = shadowOfHost.get(this);
+      if (existing !== undefined) {
+        const info = shadowInfo.get(existing);
+        // A declarative shadow root is emptied and reused by the first attachShadow().
+        if (info.declarative && info.mode === mode) {
+          info.declarative = false;
+          clearShadowContent(existing);
+          return existing;
+        }
         throw new DOMException("Failed to execute 'attachShadow' on 'Element': Shadow root cannot be created on a host which already hosts a shadow tree.", 'NotSupportedError');
       }
-      const sr = Object.create(ShadowRoot.prototype);
-      L.stamp(sr, idOf(this), 11, '', HTML);
-      shadowInfo.set(sr, {
-        host: this, mode, delegatesFocus: !!init.delegatesFocus, clonable: !!init.clonable,
-        serializable: !!init.serializable, slotAssignment: init.slotAssignment === 'manual' ? 'manual' : 'named',
-        lightFrag: 0, cleared: new Set(),
-      });
-      shadowOfHost.set(this, sr);
-      return sr;
+      return attachShadowImpl(this, mode, init);
     },
     get shadowRoot() {
       const sr = shadowOfHost.get(this);
@@ -2069,7 +2151,7 @@
       replaceAllCore(id, sr !== null ? undefined : this, () => {
         N.setTextContent(id, '');
         if (!isFrag || N.firstChild(nid) !== 0) N.appendChild(id, nid);
-      });
+      }, true);
       if (L.pendingScripts.size !== 0 && L.checkPendingScripts !== null) L.checkPendingScripts();
       if (sr !== null) shadowDistribute(sr);
     },
@@ -3267,7 +3349,7 @@
         // approximate: disabling a <style> sheet empties its rendered text
         if (b) { d.savedText = N.textContent(idOf(d.owner)); N.setTextContent(idOf(d.owner), ''); d.text = ''; }
         else if (d.savedText !== undefined) { N.setTextContent(idOf(d.owner), d.savedText); d.text = d.savedText; d.savedText = undefined; }
-        state.tree++;
+        treeChanged();
       }
     }
   }
@@ -3351,7 +3433,7 @@
     }
     d.pending = '';
     d.rewrite = false;
-    state.tree++;
+    treeChanged();
   }
   const ownerSheets = new WeakMap();
   // Sheet object of a <style> or <link rel=stylesheet> element (created lazily).
@@ -4057,7 +4139,7 @@
       const subFrag = rangeProcess(sub, mode);
       N.appendChild(clone, subFrag);
     }
-    state.tree++;
+    treeChanged();
     if (extract) L.rangeSet(r, newNode, newOffset, newNode, newOffset);
     return frag;
   }
@@ -4541,7 +4623,7 @@
       if (kind === 'html') extractTemplates(backing, src);
       ensureDoctype(backing, kind === 'html' ? parseDoctype(src) : ['html', '', '']);
       const w = newDocWrapper(backing, proto || HTMLDocument.prototype, 'text/html');
-      state.tree++;
+      treeChanged();
       return w;
     }
     const backing = N.createFragment();
@@ -4691,7 +4773,7 @@
         const w = Object.create(XMLDocument.prototype);
         L.stamp(w, backing, 9, '', HTML);
         L.registerDetachedDocument(w, backing, { main: false, contentType: t, url: 'about:blank' });
-        state.tree++;
+        treeChanged();
         return w;
       }
       throw new TypeError(`Failed to execute 'parseFromString' on 'DOMParser': The provided value '${t}' is not a valid enum value of type DOMParserSupportedType.`);
@@ -4814,7 +4896,7 @@
     }
     const w = makeDoctype(info.name, info.publicId, info.systemId);
     N.insertBefore(backingId, idOf(w), N.firstChild(backingId));
-    state.tree++;
+    treeChanged();
   }
   L.ensureDoctype = ensureDoctype;
   L.mixin(DocumentType.prototype, {

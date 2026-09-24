@@ -381,3 +381,29 @@ test('MutationObserver records', async () => {
   await e.flush();
   assert.strictEqual(e.run('prev'), '2');
 });
+
+test('live children/childNodes stay correct with per-parent invalidation', async () => {
+  const e = await env();
+  assert.strictEqual(e.run(`
+    var a = document.createElement('div'), b = document.createElement('div');
+    document.body.append(a, b);
+    for (var i = 0; i < 3; i++) a.appendChild(document.createElement('span'));
+    var ac = a.children, an = a.childNodes, bc = b.children;
+    var r = [ac.length, an.length, bc.length];
+    a.firstChild.textContent = 'x';                       // grandchild change: a's lists unchanged
+    r.push(ac.length, an.length);
+    b.appendChild(a.firstChild);                           // move: both parents change
+    r.push(ac.length, an.length, bc.length);
+    var f = document.createDocumentFragment(); f.append(document.createElement('i'), 'txt');
+    var fn = f.childNodes; r.push(fn.length);
+    a.appendChild(f);                                      // fragment emptied
+    r.push(fn.length, ac.length, an.length);
+    b.replaceChildren(a.lastElementChild);                 // replaceChildren moves out of a
+    r.push(ac.length, bc.length);
+    a.replaceChild(b.firstChild, a.firstChild);            // replaceChild moves out of b
+    r.push(ac.length, bc.length);
+    a.textContent = '';
+    r.push(ac.length, an.length);
+    r.join(',');
+  `), '3,3,0,3,3,2,2,1,2,0,3,4,2,1,2,0,0,0');
+});
