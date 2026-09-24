@@ -58,6 +58,7 @@ pub struct NetRequest {
     pub url: String,
     pub method: String,
     pub headers: Vec<(String, String)>,
+    #[serde(with = "serde_bytes")]
     pub body: Option<Vec<u8>>,
     pub destination: Destination,
     pub referrer: Option<String>,
@@ -95,6 +96,7 @@ pub struct NetResponse {
     pub url: String,
     pub headers: Vec<(String, String)>,
     /// Decoded (decompressed) body.
+    #[serde(with = "serde_bytes")]
     pub body: Vec<u8>,
     pub error: Option<String>,
     pub from_cache: bool,

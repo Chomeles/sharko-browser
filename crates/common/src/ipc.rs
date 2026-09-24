@@ -63,6 +63,24 @@ impl IpcListener {
         })
     }
 
+    /// Create a listener for a pre-generated endpoint (see [`random_endpoint`]). Used when
+    /// the parent must know a child's server endpoint before the child starts (e.g. the
+    /// browser hands the network process endpoint to renderers).
+    pub fn bind(endpoint: &str) -> io::Result<Self> {
+        let (name, token) = endpoint
+            .split_once('#')
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad ipc endpoint"))?;
+        let listener = ListenerOptions::new()
+            .name(socket_name(name)?)
+            .try_overwrite(true)
+            .create_sync()?;
+        Ok(Self {
+            listener,
+            name: name.to_string(),
+            token: token.to_string(),
+        })
+    }
+
     /// The endpoint string to hand to a client (`name#token`).
     pub fn endpoint(&self) -> String {
         format!("{}#{}", self.name, self.token)
@@ -85,6 +103,27 @@ impl IpcListener {
                     // Wrong token or broken handshake: drop and keep listening.
                     continue;
                 }
+            }
+        }
+    }
+}
+
+/// Generate a fresh random endpoint string (`name#token`) for [`IpcListener::bind`].
+pub fn random_endpoint(prefix: &str) -> String {
+    format!("{prefix}-{}-{}#{}", std::process::id(), random_hex(8), random_hex(16))
+}
+
+/// [`connect`], retrying until `timeout` while the server is not up yet.
+pub fn connect_retry(endpoint: &str, timeout: std::time::Duration) -> io::Result<Connection> {
+    let start = std::time::Instant::now();
+    let mut delay = std::time::Duration::from_millis(2);
+    loop {
+        match connect(endpoint) {
+            Ok(c) => return Ok(c),
+            Err(e) if start.elapsed() >= timeout => return Err(e),
+            Err(_) => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(std::time::Duration::from_millis(50));
             }
         }
     }

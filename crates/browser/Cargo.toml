@@ -1,0 +1,11 @@
+[package]
+name = "browser"
+version.workspace = true
+edition.workspace = true
+description = "Browser process: process management, tabs, session history, headless driver"
+
+[dependencies]
+common = { path = "../common" }
+engine = { path = "../engine" }
+netstack = { path = "../netstack" }
+crossbeam-channel = "0.5"

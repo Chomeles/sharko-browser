@@ -2,8 +2,12 @@
 name = "engine"
 version.workspace = true
 edition.workspace = true
+description = "Renderer process: document loading, layout, JS, painting"
 
 [dependencies]
+common = { path = "../common" }
+netstack = { path = "../netstack" }
+script = { path = "../script" }
 blitz-dom.workspace = true
 blitz-html.workspace = true
 blitz-paint.workspace = true
@@ -12,6 +16,10 @@ anyrender.workspace = true
 anyrender_vello_cpu.workspace = true
 url.workspace = true
 png = "0.17"
-common = { path = "../common" }
-postcard = { version = "1.1", features = ["use-std"] }
 kurbo = "0.13"
+peniko = "0.6"
+crossbeam-channel = "0.5"
+encoding_rs = "0.8"
+keyboard-types = "0.7"
+smol_str = "0.3"
+cursor-icon = "1"
