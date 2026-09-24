@@ -44,6 +44,7 @@ class MockNative {
     this.defaultActions = [];
     this.titles = [];
     this.scrolledIntoView = [];
+    this.scrollIntoViewArgs = [];
     this.opened = [];
     this.storage = [new Map(), new Map()];
     this.cookies = new Map();
@@ -604,7 +605,7 @@ class MockNative {
         if (n.name === 'html' || n.name === 'body') { nat.scrollTo(l, t); return; }
         M.scroll.set(id, [l, t]);
       },
-      scrollIntoView: (id) => { M.scrolledIntoView.push(id); },
+      scrollIntoView: (id, block, inline, behavior) => { M.scrolledIntoView.push(id); M.scrollIntoViewArgs.push([block, inline, behavior]); },
       elementFromPoint: (x, y) => {
         let found = 0;
         for (const [id, r] of M.rects) {

@@ -615,23 +615,93 @@ impl BaseDocument {
         }
     }
 
-    /// Scroll the viewport so that the given element has the requested alignment in each axis.
+    /// Scroll the element's scrolling ancestors and the viewport so that it has the
+    /// requested alignment in each axis (CSSOM View "scroll a target into view").
+    ///
+    /// PATCH: nested scroll containers (e.g. horizontal carousels / tab strips) are
+    /// scrolled first, innermost to outermost; previously only the viewport moved, so a
+    /// `scrollIntoView({inline: "center"})` inside a carousel jumped the whole page.
+    /// Returns the scroll containers (not the viewport) whose offset changed.
     pub fn scroll_into_view(
         &mut self,
         node_id: NodeId,
         behavior: ScrollBehavior,
         vertical: ScrollLogicalPosition,
         horizontal: ScrollLogicalPosition,
-    ) {
+    ) -> Vec<NodeId> {
+        let mut scrolled = Vec::new();
+        let Some(root_id) = self.try_root_element().map(|root| root.id) else {
+            return scrolled;
+        };
         let Some(node) = self.nodes.get(node_id) else {
-            return;
+            return scrolled;
+        };
+        let mut ancestor = node.layout_parent.get();
+        while let Some(container_id) = ancestor {
+            let Some(container) = self.nodes.get(container_id) else {
+                break;
+            };
+            ancestor = container.layout_parent.get();
+            if container_id == root_id || !container.is_element() {
+                continue;
+            }
+            let (current, max) = self.scroll_state(ScrollTarget::Node(container_id), true);
+            if max.x <= 0.0 && max.y <= 0.0 {
+                continue;
+            }
+            let container = &self.nodes[container_id];
+            let target_node = &self.nodes[node_id];
+            let target = target_node.absolute_position(
+                target_node.scroll_offset().x as f32,
+                target_node.scroll_offset().y as f32,
+            );
+            let target_size = target_node.final_layout().size;
+            let origin = container.absolute_position(
+                container.scroll_offset().x as f32,
+                container.scroll_offset().y as f32,
+            );
+            let layout = container.final_layout();
+            let client_width = (layout.size.width
+                - layout.border.left
+                - layout.border.right
+                - layout.scrollbar_size.width)
+                .max(0.0) as f64;
+            let client_height = (layout.size.height
+                - layout.border.top
+                - layout.border.bottom
+                - layout.scrollbar_size.height)
+                .max(0.0) as f64;
+            // Target position in the container's scroll coordinates.
+            let target_x = (target.x - origin.x - layout.border.left) as f64 + current.x;
+            let target_y = (target.y - origin.y - layout.border.top) as f64 + current.y;
+            let x = Self::aligned_scroll_offset(
+                current.x,
+                client_width,
+                target_x,
+                target_size.width as f64,
+                horizontal,
+            )
+            .clamp(0.0, max.x.max(0.0));
+            let y = Self::aligned_scroll_offset(
+                current.y,
+                client_height,
+                target_y,
+                target_size.height as f64,
+                vertical,
+            )
+            .clamp(0.0, max.y.max(0.0));
+            if (x - current.x).abs() >= 0.5 || (y - current.y).abs() >= 0.5 {
+                self.scroll_to(container_id, x, y, behavior);
+                scrolled.push(container_id);
+            }
+        }
+
+        let Some(node) = self.nodes.get(node_id) else {
+            return scrolled;
         };
         let target =
             node.absolute_position(node.scroll_offset().x as f32, node.scroll_offset().y as f32);
         let target_size = node.final_layout().size;
-        let Some(root_id) = self.try_root_element().map(|root| root.id) else {
-            return;
-        };
         let scale = self.viewport.scale() as f64;
         let viewport_width = self.viewport.window_size.0 as f64 / scale;
         let viewport_height = self.viewport.window_size.1 as f64 / scale;
@@ -650,6 +720,7 @@ impl BaseDocument {
             vertical,
         );
         self.scroll_to(root_id, x, y, behavior);
+        scrolled
     }
 
     /// Resolve a URL fragment (the `#...` part of a URL) to a scroll target.

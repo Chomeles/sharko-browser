@@ -276,6 +276,8 @@ test('geometry, scrolling, elementFromPoint', async () => {
   assert.strictEqual(e.run("scrollY + pageYOffset + document.documentElement.scrollTop"), 300);
   e.run("p.scrollIntoView()");
   assert.deepStrictEqual(e.mock.scrolledIntoView, [id]);
+  e.run("p.scrollIntoView(false); p.scrollIntoView({block: 'nearest', inline: 'center', behavior: 'smooth'})");
+  assert.deepStrictEqual(e.mock.scrollIntoViewArgs, [['start', 'nearest', 'auto'], ['end', 'nearest', 'auto'], ['nearest', 'center', 'smooth']]);
   assert.strictEqual(e.run("document.elementFromPoint(50, 30).id"), 'p1');
   assert.strictEqual(e.run("document.createElement('div').getBoundingClientRect().width"), 0);
   assert.strictEqual(e.run("innerWidth + 'x' + innerHeight + ' ' + devicePixelRatio + ' ' + screen.width"), '1280x720 1 1920');

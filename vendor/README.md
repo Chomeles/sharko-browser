@@ -123,3 +123,6 @@ Patches so far:
 41. `blitz-dom/src/node/node.rs`, `stylo.rs`: nodes remember their index in the parent's
     child list, so sibling lookups during selector matching (`+`, `~`, `:nth-*`) no longer
     scan the whole child list at every step.
+42. `blitz-dom/src/scrolling.rs`: `scroll_into_view` scrolls every scrolling ancestor
+    (innermost first) before the viewport and honours `block`/`inline`, so carousels and
+    tab strips scroll themselves instead of the whole page jumping.

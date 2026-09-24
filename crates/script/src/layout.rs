@@ -278,18 +278,37 @@ pub(crate) fn n_set_scroll(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// `N.scrollIntoView(id, block, inline, behavior)`; the strings are already normalized
+/// from the `scrollIntoView()` argument by the JS layer.
 pub(crate) fn n_scroll_into_view(cx: &mut Cx) -> NResult {
-    // Read the (optional) `block` argument first: converting it may run user code, and
-    // the document must not be borrowed across that.
-    let block = if cx.len() > 1 {
-        cx.with_str(1, |s| match s {
+    // Read the string arguments first: converting them may run user code, and the
+    // document must not be borrowed across that.
+    fn position(s: &str, default: ScrollLogicalPosition) -> ScrollLogicalPosition {
+        match s {
+            "start" => ScrollLogicalPosition::Start,
             "center" => ScrollLogicalPosition::Center,
             "end" => ScrollLogicalPosition::End,
             "nearest" => ScrollLogicalPosition::Nearest,
-            _ => ScrollLogicalPosition::Start,
-        })?
+            _ => default,
+        }
+    }
+    let block = if cx.len() > 1 {
+        cx.with_str(1, |s| position(s, ScrollLogicalPosition::Start))?
     } else {
         ScrollLogicalPosition::Start
+    };
+    let inline = if cx.len() > 2 {
+        cx.with_str(2, |s| position(s, ScrollLogicalPosition::Nearest))?
+    } else {
+        ScrollLogicalPosition::Nearest
+    };
+    let behavior = if cx.len() > 3 {
+        cx.with_str(3, |s| match s {
+            "smooth" => ScrollBehavior::Smooth,
+            _ => ScrollBehavior::Instant,
+        })?
+    } else {
+        ScrollBehavior::Instant
     };
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;
@@ -298,16 +317,14 @@ pub(crate) fn n_scroll_into_view(cx: &mut Cx) -> NResult {
         return Ok(());
     }
     let before = doc.viewport_scroll();
-    doc.scroll_into_view(
-        id,
-        ScrollBehavior::Instant,
-        block,
-        ScrollLogicalPosition::Nearest,
-    );
+    let scrolled = doc.scroll_into_view(id, behavior, block, inline);
+    for container in scrolled {
+        cx.st.queue_task(InternalTask::ElementScroll(container));
+    }
     if doc.viewport_scroll() != before {
         cx.st.queue_task(InternalTask::ViewportScroll);
-        cx.st.host.request_redraw();
     }
+    cx.st.host.request_redraw();
     Ok(())
 }
 

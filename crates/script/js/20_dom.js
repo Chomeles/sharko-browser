@@ -2064,8 +2064,17 @@
     scroll(a, b) { elementScroll(this, a, b, false); },
     scrollTo(a, b) { elementScroll(this, a, b, false); },
     scrollBy(a, b) { elementScroll(this, a, b, true); },
-    scrollIntoView(arg) { N.scrollIntoView(idOf(this)); },
-    scrollIntoViewIfNeeded(center) { N.scrollIntoView(idOf(this)); },
+    scrollIntoView(arg) {
+      let block = 'start', inline = 'nearest', behavior = 'auto';
+      if (arg === false) block = 'end';
+      else if (arg !== null && typeof arg === 'object') {
+        if (arg.block !== undefined) block = String(arg.block);
+        if (arg.inline !== undefined) inline = String(arg.inline);
+        if (arg.behavior !== undefined) behavior = String(arg.behavior);
+      }
+      N.scrollIntoView(idOf(this), block, inline, behavior);
+    },
+    scrollIntoViewIfNeeded(center) { N.scrollIntoView(idOf(this), 'nearest', 'nearest', 'auto'); },
     checkVisibility(options) {
       const id = idOf(this);
       if (!N.isConnected(id)) return false;
