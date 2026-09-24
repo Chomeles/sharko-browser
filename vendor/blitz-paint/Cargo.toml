@@ -87,7 +87,7 @@ default-features = false
 version = "1"
 
 [dependencies.style]
-version = "0.20.0"
+version = "0.21.0"
 package = "stylo"
 
 [dependencies.taffy]

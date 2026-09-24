@@ -8,6 +8,8 @@ a `// PATCH:` comment so it can be upstreamed or re-applied on upgrades.
 * `anyrender_vello` 0.14.0 — Vello GPU backend (DioxusLabs/anyrender).
 * `parley` 0.11.1 — text layout (linebender/parley).
 * `taffy` 0.14.0 — box layout: block/flex/grid (DioxusLabs/taffy).
+* `stylo_taffy` 0.3.0-beta.2 — Stylo→Taffy style conversion (DioxusLabs/blitz), unmodified
+  except for its dependency on Stylo 0.21.
 
 Patches so far:
 1. `blitz-dom/src/layout/table.rs`: anonymous table objects (non-table children of a
@@ -114,3 +116,10 @@ Patches so far:
 39. `blitz-dom/assets/default.css`, `layout/mod.rs`: form controls use the 13.33px control
     font and Chromium's box metrics; text inputs are sized by their `size` attribute
     (20 characters by default) instead of 300px.
+40. Stylo 0.21 with `:has()` and `:nth-child(An+B of S)` enabled (`document.rs`);
+    `blitz-dom/src/has_invalidation.rs` runs Stylo's relative-selector invalidation
+    (as Gecko's glue does) for attribute/class/id/state changes before each style pass
+    and for insertions/removals in `mutator.rs`, so `:has()` rules follow DOM changes.
+41. `blitz-dom/src/node/node.rs`, `stylo.rs`: nodes remember their index in the parent's
+    child list, so sibling lookups during selector matching (`+`, `~`, `:nth-*`) no longer
+    scan the whole child list at every step.

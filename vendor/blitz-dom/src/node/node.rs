@@ -139,6 +139,9 @@ pub struct Node {
     pub sticky_offset: Cell<(f32, f32)>,
     /// PATCH: the parent's absolute position used when this node's layout was last rounded.
     pub round_origin: Cell<(f32, f32)>,
+    /// PATCH: last known index in the parent's `children` (validated on use), so sibling
+    /// lookups during selector matching are O(1) instead of a scan of the child list.
+    child_idx_hint: std::sync::atomic::AtomicUsize,
     pub stacking_context: Option<Box<HoistedPaintChildren>>,
 
     // Flags
@@ -328,6 +331,7 @@ impl Node {
             stacking_context: None,
             sticky_offset: Cell::new((0.0, 0.0)),
             round_origin: Cell::new((f32::NAN, f32::NAN)),
+            child_idx_hint: std::sync::atomic::AtomicUsize::new(0),
 
             flags: NodeFlags::empty(),
             data,
@@ -876,10 +880,15 @@ impl Node {
 
     // Get the index of the current node in the parents child list
     pub fn child_index(&self) -> Option<usize> {
-        self.tree()[self.parent?]
-            .children
-            .iter()
-            .position(|id| *id == self.id)
+        use std::sync::atomic::Ordering::Relaxed;
+        let children = &self.tree()[self.parent?].children;
+        let hint = self.child_idx_hint.load(Relaxed);
+        if children.get(hint) == Some(&self.id) {
+            return Some(hint);
+        }
+        let idx = children.iter().position(|id| *id == self.id)?;
+        self.child_idx_hint.store(idx, Relaxed);
+        Some(idx)
     }
 
     // Get the nth node in the parents child list

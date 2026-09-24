@@ -77,6 +77,8 @@ impl crate::document::BaseDocument {
         self.stylist
             .flush(&guards)
             .process_style(root, Some(&self.snapshots));
+        // PATCH: `:has()` invalidation for attribute/class/id/state changes.
+        crate::has_invalidation::invalidate_for_snapshots(self);
 
         // Mark actively animating nodes as dirty
         let mut sets = self.animations.sets.write();
@@ -346,30 +348,25 @@ impl selectors::Element for BlitzNode<'_> {
         matches!(self.data, NodeData::AnonymousBlock(_))
     }
 
-    // These methods are implemented naively since we only threaded real nodes and not fake nodes
-    // we should try and use `find` instead of this foward/backward stuff since its ugly and slow
     fn prev_sibling_element(&self) -> Option<Self> {
-        let mut n = 1;
-        while let Some(node) = self.backward(n) {
-            if node.is_element() {
-                return Some(node);
-            }
-            n += 1;
-        }
-
-        None
+        // PATCH: one child-index lookup plus a scan, instead of re-locating this node in
+        // the parent's child list for every step (quadratic for `~` / `:nth-*` on long lists).
+        let children = &self.tree()[self.parent?].children;
+        let idx = self.child_index()?;
+        children[..idx]
+            .iter()
+            .rev()
+            .map(|id| self.with(*id))
+            .find(|node| node.is_element())
     }
 
     fn next_sibling_element(&self) -> Option<Self> {
-        let mut n = 1;
-        while let Some(node) = self.forward(n) {
-            if node.is_element() {
-                return Some(node);
-            }
-            n += 1;
-        }
-
-        None
+        let children = &self.tree()[self.parent?].children;
+        let idx = self.child_index()?;
+        children[idx + 1..]
+            .iter()
+            .map(|id| self.with(*id))
+            .find(|node| node.is_element())
     }
 
     fn first_element_child(&self) -> Option<Self> {

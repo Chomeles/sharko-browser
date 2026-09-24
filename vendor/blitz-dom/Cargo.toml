@@ -147,19 +147,19 @@ version = "1.0.7"
 version = "1"
 
 [dependencies.style]
-version = "0.20.0"
+version = "0.21.0"
 package = "stylo"
 
 [dependencies.style_config]
-version = "0.20.0"
+version = "0.21.0"
 package = "stylo_static_prefs"
 
 [dependencies.style_dom]
-version = "0.20.0"
+version = "0.21.0"
 package = "stylo_dom"
 
 [dependencies.style_traits]
-version = "0.20.0"
+version = "0.21.0"
 package = "stylo_traits"
 
 [dependencies.stylo_taffy]

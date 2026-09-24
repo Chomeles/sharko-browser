@@ -44,6 +44,7 @@ mod debug;
 mod events;
 mod font_metrics;
 mod form;
+mod has_invalidation;
 mod html;
 /// Loading of `<iframe>` elements into sub-documents.
 mod iframe;
