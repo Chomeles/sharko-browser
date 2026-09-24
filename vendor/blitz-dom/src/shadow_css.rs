@@ -54,7 +54,13 @@ fn rewrite_rule_list(input: &str, host: &str, out: &mut String) {
         let (stop, stop_char) = scan_prelude(b, i);
         let prelude = &input[i..stop];
         if stop_char != Some(b'{') {
-            // Statement at-rule (`@import …;`) or garbage at EOF.
+            // Statement at-rule (`@import …;`) or garbage at EOF. An imported sheet is
+            // fetched and parsed separately, so its rules could not be scoped and would
+            // apply to the whole document: `@import` is dropped instead.
+            if prelude.trim_start().get(..7).is_some_and(|p| p.eq_ignore_ascii_case("@import")) {
+                i = if stop_char == Some(b';') { stop + 1 } else { stop };
+                continue;
+            }
             out.push_str(&input[i..stop.min(b.len())]);
             if stop_char == Some(b';') {
                 out.push(';');
@@ -360,6 +366,13 @@ fn rewrite_complex(sel: &str, host: &str) -> (String, bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn imports_are_dropped() {
+        let out = super::scope_shadow_css("@import url(a.css); p { color: red }", "7");
+        assert!(!out.contains("@import"), "{out}");
+        assert!(out.contains("color: red"), "{out}");
+    }
+
     use super::*;
 
     const H: &str = "[sharko-shadow-host=\"7\"]";

@@ -63,7 +63,7 @@ use style::{
     media_queries::MediaList,
     selector_parser::SnapshotMap,
     shared_lock::{SharedRwLock, StylesheetGuards},
-    stylesheets::{AllowImportRules, DocumentStyleSheet, Origin, Stylesheet},
+    stylesheets::{AllowImportRules, DocumentStyleSheet, Origin, Stylesheet, StylesheetInDocument, UrlExtraData},
     stylist::Stylist,
 };
 use style_dom::ElementState;
@@ -307,6 +307,8 @@ pub struct BaseDocument {
     /// PATCH: inline roots whose line breaks a measurement overwrote after their final
     /// layout (see `relayout_stale_inline_roots`).
     pub(crate) stale_inline_roots: Vec<NodeId>,
+    /// PATCH: the URL each `<img>` last loaded (a `load` event fires once per source).
+    pub(crate) image_loaded_src: HashMap<NodeId, String>,
     /// PATCH: nodes whose unrounded layout changed and whose layout ancestors are not yet
     /// flagged, and all nodes carrying layout-dirty flags (cleared after rounding).
     pub(crate) layout_dirty_pending: Vec<NodeId>,
@@ -505,6 +507,7 @@ impl BaseDocument {
             has_canvas: false,
             sub_document_nodes: HashSet::new(),
             stale_inline_roots: Vec::new(),
+            image_loaded_src: HashMap::new(),
             layout_dirty_pending: Vec::new(),
             layout_dirty_touched: Vec::new(),
             abspos_viewport: None,
@@ -1411,9 +1414,20 @@ impl BaseDocument {
         origin: Origin,
         media: MediaList,
     ) -> DocumentStyleSheet {
+        self.make_stylesheet_at(css, origin, media, self.url.url_extra_data())
+    }
+
+    /// PATCH: a stylesheet whose relative URLs resolve against `url_data`.
+    pub(crate) fn make_stylesheet_at(
+        &self,
+        css: impl AsRef<str>,
+        origin: Origin,
+        media: MediaList,
+        url_data: UrlExtraData,
+    ) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
             css.as_ref(),
-            self.url.url_extra_data(),
+            url_data,
             origin,
             ServoArc::new(self.guard.wrap(media)),
             self.guard.clone(),
@@ -1580,7 +1594,17 @@ impl BaseDocument {
                     StyleScope::ShadowHost(host) => {
                         let scoped =
                             crate::shadow_css::scope_shadow_css(&source, &host.to_string());
-                        let sheet = self.make_stylesheet(&scoped, Origin::Author);
+                        // Keep the linked sheet's URL (relative `url()`s, `@import`s)
+                        // and its `media` attribute.
+                        let (url_data, media) = {
+                            let guard = self.guard.read();
+                            (
+                                css.0.contents(&guard).url_data.clone(),
+                                css.0.media.read_with(&guard).clone(),
+                            )
+                        };
+                        let sheet =
+                            self.make_stylesheet_at(&scoped, Origin::Author, media, url_data);
                         self.add_stylesheet_for_node(sheet, node_id);
                     }
                 }
@@ -1688,6 +1712,7 @@ impl BaseDocument {
                     // Clear layout cache
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
+                    self.image_loaded_src.insert(node_id, url.to_string());
                     self.push_element_load_event(node_id, true);
                 }
                 ImageType::Background(idx) | ImageType::Mask(idx) => {
