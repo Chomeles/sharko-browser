@@ -1,0 +1,30 @@
+name: Bug report
+description: A page renders wrong, something crashes, or doesn't work
+labels: [bug]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Page URL
+      description: Where does it happen? (if applicable)
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens / what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `browser --version`
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, Linux, macOS]
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or headless output
+      description: "`browser --headless --screenshot=out.png --console <url>` helps a lot"

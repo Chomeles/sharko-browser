@@ -56,6 +56,8 @@ Headless options:
 Installation:
   --install                 install for the current user (+ Start menu shortcut)
   --uninstall               remove the installation (keeps the profile)
+  --check-update            check for an update now and install it
+  --no-update               disable background updates for this session
   --version                 print the version
 
 Common options:
@@ -83,7 +85,7 @@ pub fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| {
         a == "--headless" || a == "--help" || a == "--version" || a.starts_with("--type=")
-            || a == "--install" || a == "--uninstall"
+            || a == "--install" || a == "--uninstall" || a == "--check-update"
     }) {
         attach_console();
     }
@@ -146,8 +148,14 @@ pub fn run() -> i32 {
         profile_dir: get("profile").map(PathBuf::from).unwrap_or_else(default_profile_dir),
         javascript: !has("no-js"),
         verbose,
+        app_version: VERSION.to_string(),
+        auto_update: !has("no-update"),
         ..Default::default()
     };
+
+    if has("check-update") {
+        return check_update(bopts);
+    }
 
     if has("headless") {
         let mut o = HeadlessOptions {
@@ -208,6 +216,37 @@ pub fn run() -> i32 {
             1
         }
     }
+}
+
+/// `--check-update`: run one update check synchronously and report.
+fn check_update(bopts: BrowserOptions) -> i32 {
+    use browser::update::{UpdateConfig, UpdateStatus, check_and_install};
+    let cfg = match UpdateConfig::detect(VERSION) {
+        Ok(c) => c,
+        Err(why) => {
+            println!("updates disabled: {why}");
+            return 0;
+        }
+    };
+    let mut b = match browser::Browser::new(BrowserOptions { auto_update: false, ..bopts }) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{e}");
+            return 1;
+        }
+    };
+    let status = check_and_install(b.net(), &cfg);
+    b.shutdown();
+    match status {
+        UpdateStatus::UpToDate => println!("up to date ({VERSION})"),
+        UpdateStatus::Installed(v) => println!("installed {v}; restart to use it"),
+        UpdateStatus::Disabled(w) => println!("updates disabled: {w}"),
+        UpdateStatus::Failed(e) => {
+            println!("update failed: {e}");
+            return 1;
+        }
+    }
+    0
 }
 
 /// Turn user input into a URL: keep explicit schemes, map existing file paths to file://,

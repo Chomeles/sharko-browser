@@ -30,6 +30,8 @@ pub const HOME_URL: &str = "about:newtab";
 enum UserEvent {
     Browser(BrowserEvent),
     Redraw,
+    /// A newer version was installed in the background.
+    UpdateReady(String),
 }
 
 enum Renderer {
@@ -659,6 +661,13 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::Browser(ev) => self.handle_browser_event(ev),
             UserEvent::Redraw => self.request_redraw(),
+            UserEvent::UpdateReady(version) => {
+                eprintln!("[ui] update {version} installed; active after restart");
+                if let Some(c) = self.chrome.as_mut() {
+                    c.set_update_ready(true);
+                }
+                self.request_redraw();
+            }
         }
     }
 
@@ -1009,6 +1018,36 @@ pub fn run(opts: BrowserOptions, start_urls: Vec<String>) -> Result<(), String> 
             }
         })
         .map_err(|e| e.to_string())?;
+
+    // Background updates (GitHub Releases, signed manifests).
+    if browser.opts.auto_update {
+        match browser::update::UpdateConfig::detect(&browser.opts.app_version) {
+            Ok(cfg) => {
+                let net = browser.net().clone();
+                let proxy = proxy.clone();
+                std::thread::Builder::new()
+                    .name("updater".into())
+                    .spawn(move || {
+                        std::thread::sleep(Duration::from_secs(20));
+                        loop {
+                            match browser::update::check_and_install(&net, &cfg) {
+                                browser::update::UpdateStatus::Installed(v) => {
+                                    let _ = proxy.send_event(UserEvent::UpdateReady(v));
+                                    return;
+                                }
+                                browser::update::UpdateStatus::Failed(e) => {
+                                    log::warn!("update check failed: {e}")
+                                }
+                                _ => {}
+                            }
+                            std::thread::sleep(Duration::from_secs(6 * 3600));
+                        }
+                    })
+                    .map_err(|e| e.to_string())?;
+            }
+            Err(why) => log::info!("auto-update disabled: {why}"),
+        }
+    }
 
     let mut app = App {
         browser,

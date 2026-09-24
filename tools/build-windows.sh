@@ -25,5 +25,5 @@ export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-C target-feature=+crt-sta
 # Resource compiler for the exe icon/manifest (if any crate needs it).
 export RC="llvm-rc"
 
-cargo build --release --target x86_64-pc-windows-msvc -p app "$@"
-ls -la target/x86_64-pc-windows-msvc/release/browser.exe
+cargo build --release --target x86_64-pc-windows-msvc -p browser-core -p browser-launcher "$@"
+cargo xtask package --target x86_64-pc-windows-msvc

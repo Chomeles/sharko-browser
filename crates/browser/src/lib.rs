@@ -3,6 +3,7 @@
 //! messages. Used by both the windowed UI and the headless driver.
 
 pub mod headless;
+pub mod update;
 
 use common::display_list::ResourceCache;
 use common::ipc::{self, IpcListener, IpcSender};
@@ -28,6 +29,10 @@ pub struct BrowserOptions {
     pub user_agent: String,
     /// Print page console messages to stderr.
     pub verbose: bool,
+    /// Version of the running build (for the updater).
+    pub app_version: String,
+    /// Check for and install updates in the background.
+    pub auto_update: bool,
 }
 
 impl Default for BrowserOptions {
@@ -38,6 +43,8 @@ impl Default for BrowserOptions {
             javascript: true,
             user_agent: common::USER_AGENT.to_string(),
             verbose: false,
+            app_version: String::new(),
+            auto_update: true,
         }
     }
 }

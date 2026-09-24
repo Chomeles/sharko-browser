@@ -1,93 +1,89 @@
-# Browser (Prototyp, ohne Namen)
+# Browser
 
-Ein eigener Web-Browser in Rust – aus den schnellsten verfügbaren Komponenten zusammengesetzt,
-mit echter Multi-Prozess-Architektur wie Chrome.
+**A web browser written in Rust, assembled from the fastest open-source engine components,
+with a Chromium-style multi-process architecture.** *(Working title — the project has no name
+yet.)*
 
-## Komponenten
+> Status: **early prototype (0.x)**. Many sites work well, complex web apps partially.
+> Not a daily driver yet. [Deutsch](README.de.md)
 
-| Aufgabe | Komponente | Sprache |
-|---|---|---|
-| HTML-Parser | html5ever (Servo) | Rust |
-| CSS / Style | Stylo (Firefox-Style-Engine, parallel) | Rust |
-| Layout | Taffy (Flexbox, Grid, Block) + Parley (Text) über Blitz | Rust |
-| Text-Shaping | HarfRust (HarfBuzz-Port) + Skrifa (Fontations, auch in Chrome) | Rust |
-| Rendering | Vello (GPU, Compute-Shader) über wgpu; vello_cpu als Fallback | Rust |
-| GPU-API | wgpu (DirectX 12 / Vulkan / Metal) | Rust |
-| JavaScript | V8 (Chrome-Engine) über rusty_v8, mit Startup-Snapshot | C++ |
-| Netzwerk | hyper + reqwest, HTTP/1.1, HTTP/2, HTTP/3 (QUIC) | Rust |
-| TLS | rustls + aws-lc-rs (inkl. Post-Quanten-Schlüsseltausch) | Rust/C |
-| Zertifikate | rustls-platform-verifier (Windows-Zertifikatsspeicher) | Rust |
-| Cache / Cookies | eigener RFC-9111-Cache (Speicher + Festplatte), cookie_store mit Public-Suffix-Liste | Rust |
-| IPC | Named Pipes (Windows) / Unix-Sockets, postcard-Serialisierung | Rust |
-| Fenster | winit | Rust |
-
-## Prozesse
-
-```
-browser.exe                     Browser-Prozess: Fenster, Tabs, Verlauf, GPU-Compositor
-browser.exe --type=network      Netzwerk-Prozess: HTTP, TLS, Cache, Cookies (1x)
-browser.exe --type=renderer     Renderer-Prozess: DOM, CSS, Layout, JavaScript (1 pro Tab)
-```
-
-Der Renderer malt jede Seite in eine **Display-Liste** (Zeichenbefehle), schickt sie per IPC an
-den Browser-Prozess, und der rendert sie mit Vello auf der GPU. Stürzt ein Tab ab, laufen die
-anderen weiter (der Tab zeigt „Diese Seite ist abgestürzt“ + Neu laden).
-
-## Ordnerstruktur
-
-```
-crates/common     IPC, Nachrichten-Protokoll, Display-Listen
-crates/netstack   Netzwerk-Stack + Netzwerk-Prozess
-crates/script     V8-Einbindung + native DOM-Bindings (Rust)
-crates/script/js  DOM- und Web-API-Schicht in JavaScript (auf den nativen Bindings)
-crates/engine     Renderer-Prozess: Laden, Parsen, Style, Layout, JS, Painting
-crates/browser    Browser-Prozess: Prozessverwaltung, Tabs, Verlauf, Headless-Modus
-crates/shell      Oberfläche: Fenster, Tab-Leiste, Adressleiste (selbst als HTML/CSS gerendert)
-vendor/           angepasste Blitz-Crates (Engine-Fixes, markiert mit „PATCH:“)
-app/              main(): startet je nach --type die richtige Rolle
-tools/            Build-Skripte (Windows-Cross-Build)
-```
-
-## Bedienung
-
-| Taste | Funktion |
+| Area | Component |
 |---|---|
-| Strg+T / Strg+W | Neuer Tab / Tab schließen |
-| Strg+L, F6, Alt+D | Adressleiste |
-| Strg+Tab, Strg+Bild↑/↓, Strg+1…9 | Tab wechseln |
-| Alt+← / Alt+→ | Zurück / Vor |
-| F5 / Strg+R | Neu laden |
-| Strg + / − / 0, Strg+Mausrad | Zoom |
-| F11 | Vollbild |
+| HTML parsing | [html5ever](https://github.com/servo/html5ever) (Servo) |
+| CSS / style | [Stylo](https://github.com/servo/stylo) — Firefox's parallel style engine |
+| Layout | [Taffy](https://github.com/DioxusLabs/taffy) (flex, grid, block) + [Parley](https://github.com/linebender/parley) (text), integrated via [Blitz](https://github.com/DioxusLabs/blitz) |
+| Fonts / shaping | [Skrifa](https://github.com/googlefonts/fontations) + [HarfRust](https://github.com/harfbuzz/harfrust) |
+| Rendering | [Vello](https://github.com/linebender/vello) (GPU compute) on [wgpu](https://wgpu.rs) (DX12/Vulkan/Metal); vello_cpu fallback |
+| JavaScript | [V8](https://v8.dev) via [rusty_v8](https://github.com/denoland/rusty_v8), with startup snapshots |
+| Networking | [hyper](https://hyper.rs)/[reqwest](https://github.com/seanmonstar/reqwest): HTTP/1.1, HTTP/2, HTTP/3 (QUIC) |
+| TLS | [rustls](https://github.com/rustls/rustls) + aws-lc-rs (post-quantum key exchange), OS certificate store |
+| Windowing | [winit](https://github.com/rust-windowing/winit) |
 
-In der Adressleiste: URL oder Suchbegriff (Suche über DuckDuckGo).
+## Install (Windows)
 
-## Headless-Modus (ohne Fenster, zum Testen)
+1. Download `browser-<version>-windows-x64.zip` from the [latest release](../../releases/latest).
+2. Unzip anywhere and run `browser.exe` — or run `browser.exe --install` for a per-user
+   installation with Start menu shortcut and automatic updates.
 
+Updates are downloaded in the background, verified (ed25519 signature + SHA-256) and become
+active on the next start.
+
+## Architecture
+
+```text
+browser.exe                  launcher (tiny): picks the active version, loads the core library
+<version>/browser_core.dll   all browser code (one library, like chrome.dll)
+<version>/resources/         ICU data, built-in pages, UI, translations
+
+Processes (all = launcher + core library, role chosen by --type):
+  browser   window, tabs, history, GPU compositor, updater
+  network   HTTP/1.1/2/3, TLS, cache, cookies        (one)
+  renderer  DOM, CSS, layout, JavaScript, paint      (one per tab, crash-isolated)
 ```
-browser.exe --headless --screenshot=bild.png https://de.wikipedia.org
-browser.exe --headless --full-page --screenshot=ganz.png https://news.ycombinator.com
-browser.exe --headless --eval="document.title" https://example.com
-browser.exe --headless --dump-dom https://example.com
+
+Renderers paint pages into serializable **display lists** which the browser process
+rasterizes with Vello on the GPU. More in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Build from source
+
+Requirements: Rust (stable), Python 3 (Stylo's build script), and on Windows the Visual
+Studio C++ Build Tools. On Linux also `clang lld libfontconfig1-dev`.
+
+```sh
+cargo build                      # debug: target/debug/browser + browser_core library
+cargo run -p browser-launcher    # start the browser
+cargo run -p browser-launcher -- --headless --screenshot=out.png https://example.com
 ```
 
-Weitere Optionen: `browser.exe --help`.
+Release package: `cargo build --release -p browser-core -p browser-launcher` then
+`cargo xtask package --target <triple>`. Releases are built and signed by GitHub Actions
+([docs/RELEASING.md](docs/RELEASING.md)).
 
-## Selbst bauen
+## Headless mode
 
-Windows (nativ): Rust (rustup), Visual Studio Build Tools (C++), Python 3 (für Stylo).
+```sh
+browser --headless --screenshot=page.png https://en.wikipedia.org
+browser --headless --full-page --screenshot=full.png https://news.ycombinator.com
+browser --headless --eval="document.title" --console https://example.com
+browser --headless --dump-dom https://example.com
 ```
-cargo build --release -p app
-target\release\browser.exe
-```
 
-Linux → Windows (Cross-Build): `tools/build-windows.sh` (clang-cl + lld-link + xwin).
+## Keyboard shortcuts
 
-## Grenzen des Prototyps
+`Ctrl+T` new tab · `Ctrl+W` close · `Ctrl+L` address bar · `Ctrl+Tab` next tab ·
+`Alt+←/→` back/forward · `F5` reload · `Ctrl+ +/−/0` zoom · `F11` fullscreen
 
-- Komplexe Web-Apps (YouTube, Google Docs) funktionieren nur teilweise.
-- Kein `<canvas>`-Zeichnen, keine Videos/Audio, keine WebSockets, keine Web-Worker.
-- iframes werden angezeigt, aber haben kein eigenes JavaScript.
-- Shadow DOM nur angenähert, `:has()`-Selektoren fehlen.
-- Keine Downloads, Lesezeichen, Erweiterungen, Passwortspeicher.
-- Bot-Schutz-Seiten (Cloudflare-Challenge, Amazon) erkennen den Browser als Bot.
+## Known limitations
+
+- No `<canvas>` drawing, video/audio, WebSockets, Web Workers, WebGL yet
+- iframes render but run no JavaScript; Shadow DOM is approximated; no `:has()`, no `position: sticky`
+- No downloads, bookmarks, extensions, password manager yet
+- Bot-protection pages (Cloudflare challenges etc.) may block the browser
+
+## Contributing & license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your
+option. Third-party components keep their licenses (Stylo and a few others are MPL-2.0, V8 is
+BSD-3-Clause) — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

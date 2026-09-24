@@ -5,10 +5,14 @@
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=lld", "--cfg", "reqwest_unstable"]
 
+# Windows: static CRT, so the release needs no Visual C++ runtime installed.
 [target.x86_64-pc-windows-msvc]
-rustflags = ["--cfg", "reqwest_unstable"]
+rustflags = ["--cfg", "reqwest_unstable", "-C", "target-feature=+crt-static"]
 
 [target.aarch64-pc-windows-msvc]
+rustflags = ["--cfg", "reqwest_unstable", "-C", "target-feature=+crt-static"]
+
+[target.aarch64-unknown-linux-gnu]
 rustflags = ["--cfg", "reqwest_unstable"]
 
 [target.'cfg(target_os = "macos")']
@@ -16,3 +20,6 @@ rustflags = ["--cfg", "reqwest_unstable"]
 
 [build]
 jobs = 2
+
+[alias]
+xtask = "run --quiet --package xtask --"
