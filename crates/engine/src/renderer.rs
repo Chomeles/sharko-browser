@@ -69,6 +69,8 @@ struct Page {
     script_ms: f64,
     metrics_sent: bool,
     first_frame_costs: Option<(f64, f64)>,
+    /// `<!DOCTYPE>` of the document (for a JS runtime created later, see `ensure_runtime`).
+    doctype: Option<(String, String, String)>,
 }
 
 pub struct RendererConfig {
@@ -327,6 +329,7 @@ impl Renderer {
                 }
             }
             ToRenderer::Eval { id, source } => {
+                self.ensure_runtime();
                 let (ok, value) = match &mut self.page {
                     Some(Page {
                         rt: Some(rt), doc, ..
@@ -623,6 +626,7 @@ impl Renderer {
             script_ms: 0.0,
             metrics_sent: false,
             first_frame_costs: None,
+            doctype: script::parse_doctype(html),
         };
         if self.config.javascript {
             // Scripting is on: <noscript> content must not render.
@@ -636,30 +640,55 @@ impl Renderer {
 
         common::trace::mark("renderer: document parsed");
         let t1 = Instant::now();
-        if self.config.javascript {
-            let mut rt = ScriptRuntime::new(
-                host.clone(),
-                RuntimeOptions {
-                    document_url: url.to_string(),
-                    user_agent: self.config.user_agent.clone(),
-                    profile_dir: self.config.profile_dir.clone(),
-                    load_js_layer: true,
-                },
-            );
-            let doctype = script::parse_doctype(html);
-            rt.set_doctype(
-                doctype
-                    .as_ref()
-                    .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())),
-            );
-            rt.document_parsed(&mut page.doc);
+        // A JS runtime (V8 isolate + DOM layer: 50-200 ms) is only created for documents
+        // that can run script. Others — like the new tab page — paint right away; a
+        // runtime is created later if something needs one (`ensure_runtime`).
+        if self.config.javascript && document_uses_script(&page.doc) {
+            let rt = self.create_runtime(&mut page);
             page.rt = Some(rt);
+            common::trace::mark("renderer: scripts started (runtime ready)");
+        } else {
+            common::trace::mark("renderer: no scripts, no JS runtime needed");
         }
         page.script_ms = t1.elapsed().as_secs_f64() * 1000.0;
-        common::trace::mark("renderer: scripts started (runtime ready)");
 
         self.page = Some(page);
         self.shared.redraw.store(true, Ordering::SeqCst);
+    }
+
+    fn create_runtime(&self, page: &mut Page) -> ScriptRuntime {
+        let mut rt = ScriptRuntime::new(
+            page.host.clone(),
+            RuntimeOptions {
+                document_url: page.url.clone(),
+                user_agent: self.config.user_agent.clone(),
+                profile_dir: self.config.profile_dir.clone(),
+                load_js_layer: true,
+            },
+        );
+        rt.set_doctype(
+            page.doctype
+                .as_ref()
+                .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())),
+        );
+        rt.document_parsed(&mut page.doc);
+        rt
+    }
+
+    /// Create the JS runtime of a script-less page on demand (e.g. for `Eval`).
+    fn ensure_runtime(&mut self) {
+        if !self.config.javascript {
+            return;
+        }
+        let Some(mut page) = self.page.take() else { return };
+        if page.rt.is_none() {
+            let mut rt = self.create_runtime(&mut page);
+            if self.shared.pending_resources.load(Ordering::SeqCst) == 0 {
+                rt.resources_loaded(&mut page.doc);
+            }
+            page.rt = Some(rt);
+        }
+        self.page = Some(page);
     }
 
     // -----------------------------------------------------------------------
@@ -899,6 +928,27 @@ fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {
             driver.handle_ui_event(ui);
         }
     }
+}
+
+/// Whether a document can run script: script elements, inline event handlers or
+/// `javascript:` URLs.
+fn document_uses_script(doc: &BaseDocument) -> bool {
+    doc.tree().iter().any(|(_, node)| {
+        if node.data.is_element_with_tag_name(&blitz_dom::local_name!("script")) {
+            return true;
+        }
+        node.data.attrs().is_some_and(|attrs| {
+            attrs.iter().any(|a| {
+                let name = a.name.local.as_ref();
+                let js_url = matches!(name, "href" | "src" | "action" | "formaction")
+                    && a.value
+                        .trim_start()
+                        .get(..11)
+                        .is_some_and(|p| p.eq_ignore_ascii_case("javascript:"));
+                (name.len() > 2 && name.starts_with("on")) || js_url
+            })
+        })
+    })
 }
 
 fn error_page(url: &str, err: &str) -> String {

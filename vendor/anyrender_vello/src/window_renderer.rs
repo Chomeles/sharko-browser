@@ -36,7 +36,21 @@ struct InitOutput {
     device_handle: DeviceHandle,
     renderer: VelloRenderer,
     alpha_mode: CompositeAlphaMode,
+    /// Keeps the window alive while the surface exists (dropped after `surface`).
+    _window: Arc<dyn WindowHandle>,
 }
+
+/// PATCH: raw window/display handles, taken on the UI thread. winit only hands out window
+/// handles on the thread that owns the window (Windows, macOS), but surface creation for
+/// Vulkan/DX12 works from any thread.
+struct RawHandles {
+    window: wgpu::rwh::RawWindowHandle,
+    display: wgpu::rwh::RawDisplayHandle,
+}
+
+// SAFETY: plain handle values (HWND, X11 window id, …); the window they refer to is kept
+// alive by an `Arc` travelling with them.
+unsafe impl Send for RawHandles {}
 
 #[allow(clippy::large_enum_variant)]
 enum RenderState {
@@ -277,6 +291,18 @@ impl VelloWindowRenderer {
         #[cfg(not(target_vendor = "apple"))]
         let early: Option<(Instance, Result<Surface<'static>, String>)> = None;
 
+        // Elsewhere only the handles are taken here; instance and surface are created on
+        // the background thread (creating a Vulkan instance can take 100+ ms).
+        use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
+        let raw = match (window_handle.window_handle(), window_handle.display_handle()) {
+            (Ok(w), Ok(d)) => Ok(RawHandles {
+                window: w.as_raw(),
+                display: d.as_raw(),
+            }),
+            (Err(e), _) | (_, Err(e)) => Err(format!("window handle unavailable: {e}")),
+        };
+        let window_keepalive = window_handle.clone();
+
         let spawned = std::thread::Builder::new()
             .name("gpu-init".into())
             .spawn(move || {
@@ -284,14 +310,22 @@ impl VelloWindowRenderer {
                     let (instance, surface) = match early {
                         Some((instance, surface)) => (instance, surface?),
                         None => {
+                            let raw = raw?;
                             let instance = create_instance(&config);
-                            let surface = instance
-                                .create_surface(window_handle)
-                                .map_err(|e| format!("cannot create surface: {e}"))?;
+                            // SAFETY: the handles belong to the window kept alive by
+                            // `window_keepalive`, which is stored next to the surface (in
+                            // `InitOutput`, then in the renderer) and dropped after it.
+                            let surface = unsafe {
+                                instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                                    raw_display_handle: Some(raw.display),
+                                    raw_window_handle: raw.window,
+                                })
+                            }
+                            .map_err(|e| format!("cannot create surface: {e}"))?;
                             (instance, surface)
                         }
                     };
-                    pollster::block_on(init_gpu(instance, surface, &config))
+                    pollster::block_on(init_gpu(instance, surface, &config, window_keepalive))
                 }));
                 let result = result.unwrap_or_else(|panic| {
                     Err(panic
@@ -501,6 +535,7 @@ async fn init_gpu(
     instance: Instance,
     surface: Surface<'static>,
     config: &VelloRendererOptions,
+    window: Arc<dyn WindowHandle>,
 ) -> Result<InitOutput, String> {
     let adapter = select_adapter(&instance, &surface, config).await?;
     let info = adapter.get_info();
@@ -580,6 +615,7 @@ async fn init_gpu(
         },
         renderer,
         alpha_mode,
+        _window: window,
     })
 }
 
