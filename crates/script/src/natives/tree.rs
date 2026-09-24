@@ -89,7 +89,7 @@ pub(crate) fn n_first_child(cx: &mut Cx) -> NResult {
         .get_node(id)
         .and_then(|n| dom::dom_children(n).first().copied());
     if let Some(c) = c {
-        cx.st.sibling_hint.set((c, 0));
+        cx.st.sibling_hint(id).set((c, 0));
     }
     cx.ret_node(doc, c);
     Ok(())
@@ -101,7 +101,7 @@ pub(crate) fn n_last_child(cx: &mut Cx) -> NResult {
     let kids = dom::dom_children(doc.get_node(id).unwrap());
     let c = kids.last().copied();
     if let Some(c) = c {
-        cx.st.sibling_hint.set((c, kids.len() - 1));
+        cx.st.sibling_hint(id).set((c, kids.len() - 1));
     }
     cx.ret_node(doc, c);
     Ok(())
@@ -112,7 +112,7 @@ pub(crate) fn n_last_child(cx: &mut Cx) -> NResult {
 fn sibling_index(st: &RuntimeState, doc: &BaseDocument, child: NodeId) -> Option<(NodeId, usize)> {
     let parent = doc.get_node(child)?.parent?;
     let kids = dom::dom_children(doc.get_node(parent)?);
-    let (hint_id, hint_idx) = st.sibling_hint.get();
+    let (hint_id, hint_idx) = st.sibling_hint(parent).get();
     if hint_id == child && kids.get(hint_idx) == Some(&child) {
         return Some((parent, hint_idx));
     }
@@ -124,7 +124,7 @@ pub(crate) fn n_next_sibling(cx: &mut Cx) -> NResult {
     let id = cx.node(doc, 0)?;
     let next = sibling_index(cx.st, doc, id).and_then(|(p, i)| {
         let c = dom::dom_children(doc.get_node(p)?).get(i + 1).copied()?;
-        cx.st.sibling_hint.set((c, i + 1));
+        cx.st.sibling_hint(p).set((c, i + 1));
         Some(c)
     });
     cx.ret_node(doc, next);
@@ -139,7 +139,7 @@ pub(crate) fn n_prev_sibling(cx: &mut Cx) -> NResult {
             return None;
         }
         let c = dom::dom_children(doc.get_node(p)?).get(i - 1).copied()?;
-        cx.st.sibling_hint.set((c, i - 1));
+        cx.st.sibling_hint(p).set((c, i - 1));
         Some(c)
     });
     cx.ret_node(doc, prev);
@@ -245,6 +245,31 @@ pub(crate) fn n_template_content(cx: &mut Cx) -> NResult {
     }
     let f = dom::template_content(cx.st, doc, id);
     cx.ret_node(doc, Some(f));
+    Ok(())
+}
+
+/// Addition: `N.setShadowHost(id, isHost)`: `id` hosts an (emulated) shadow tree, so
+/// stylesheets inside it are scoped to it (see `blitz_dom::shadow_css`).
+pub(crate) fn n_set_shadow_host(cx: &mut Cx) -> NResult {
+    let on = cx.bool(1);
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    if doc.get_node(id).is_some_and(|n| n.is_element()) {
+        doc.set_shadow_host(id, on);
+        cx.st.invalidate_layout();
+    }
+    cx.ret_undefined();
+    Ok(())
+}
+
+/// Addition: `N.setDefined(id)`: the custom element `id` was upgraded (or created from
+/// its definition), so CSS `:defined` matches it.
+pub(crate) fn n_set_defined(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    doc.set_custom_element_defined(id);
+    cx.st.invalidate_layout();
+    cx.ret_undefined();
     Ok(())
 }
 
@@ -528,15 +553,116 @@ fn selector_list(
     if let Some(l) = st.selector_cache.borrow().get(sel) {
         return Ok(l.clone());
     }
-    let list = doc
-        .try_parse_selector_list(sel)
-        .map_err(|_| JsErr::dom("SyntaxError", format!("'{sel}' is not a valid selector")))?;
+    let list = parse_dom_selector_list(doc, sel)
+        .ok_or_else(|| JsErr::dom("SyntaxError", format!("'{sel}' is not a valid selector")))?;
     let mut cache = st.selector_cache.borrow_mut();
     if cache.len() >= 256 {
         cache.clear();
     }
     cache.insert(sel.to_string(), list.clone());
     Ok(list)
+}
+
+/// Parse a selector list for the DOM selector APIs (`querySelector*`, `matches`,
+/// `closest`). Stylo's Servo parser disables `:has()` and `:nth-child(An+B of S)` (they
+/// need style invalidation support); for one-off matching against the live tree they
+/// work, so this parser enables them and delegates everything else.
+fn parse_dom_selector_list(doc: &BaseDocument, sel: &str) -> Option<blitz_dom::SelectorList> {
+    use style::selector_parser::SelectorParser;
+    use style::stylesheets::{Namespaces, Origin, UrlExtraData};
+    let namespaces = Namespaces::default();
+    let url_data = UrlExtraData::from(doc.url().clone());
+    let parser = DomSelectorParser(SelectorParser {
+        stylesheet_origin: Origin::Author,
+        namespaces: &namespaces,
+        url_data: &url_data,
+        for_supports_rule: false,
+    });
+    let mut input = cssparser::ParserInput::new(sel);
+    selectors::SelectorList::parse(
+        &parser,
+        &mut cssparser::Parser::new(&mut input),
+        selectors::parser::ParseRelative::No,
+    )
+    .ok()
+}
+
+struct DomSelectorParser<'a>(style::selector_parser::SelectorParser<'a>);
+
+impl<'a, 'i> selectors::parser::Parser<'i> for DomSelectorParser<'a> {
+    type Impl = style::selector_parser::SelectorImpl;
+    type Error = style_traits::StyleParseErrorKind<'i>;
+
+    fn parse_has(&self) -> bool {
+        true
+    }
+    fn parse_nth_child_of(&self) -> bool {
+        true
+    }
+    fn parse_is_and_where(&self) -> bool {
+        self.0.parse_is_and_where()
+    }
+    fn parse_parent_selector(&self) -> bool {
+        self.0.parse_parent_selector()
+    }
+    fn parse_part(&self) -> bool {
+        self.0.parse_part()
+    }
+    fn parse_host(&self) -> bool {
+        self.0.parse_host()
+    }
+    fn parse_slotted(&self) -> bool {
+        self.0.parse_slotted()
+    }
+    fn allow_forgiving_selectors(&self) -> bool {
+        self.0.allow_forgiving_selectors()
+    }
+    fn is_is_alias(&self, name: &str) -> bool {
+        self.0.is_is_alias(name)
+    }
+    fn parse_non_ts_pseudo_class(
+        &self,
+        location: cssparser::SourceLocation,
+        name: cssparser::CowRcStr<'i>,
+    ) -> Result<
+        style::selector_parser::NonTSPseudoClass,
+        cssparser::ParseError<'i, Self::Error>,
+    > {
+        self.0.parse_non_ts_pseudo_class(location, name)
+    }
+    fn parse_non_ts_functional_pseudo_class<'t>(
+        &self,
+        name: cssparser::CowRcStr<'i>,
+        parser: &mut cssparser::Parser<'i, 't>,
+        after_part: bool,
+    ) -> Result<
+        style::selector_parser::NonTSPseudoClass,
+        cssparser::ParseError<'i, Self::Error>,
+    > {
+        self.0.parse_non_ts_functional_pseudo_class(name, parser, after_part)
+    }
+    fn parse_pseudo_element(
+        &self,
+        location: cssparser::SourceLocation,
+        name: cssparser::CowRcStr<'i>,
+    ) -> Result<style::selector_parser::PseudoElement, cssparser::ParseError<'i, Self::Error>>
+    {
+        self.0.parse_pseudo_element(location, name)
+    }
+    fn parse_functional_pseudo_element<'t>(
+        &self,
+        name: cssparser::CowRcStr<'i>,
+        arguments: &mut cssparser::Parser<'i, 't>,
+    ) -> Result<style::selector_parser::PseudoElement, cssparser::ParseError<'i, Self::Error>>
+    {
+        self.0.parse_functional_pseudo_element(name, arguments)
+    }
+    fn default_namespace(&self) -> Option<style::Namespace> {
+        self.0.default_namespace()
+    }
+    fn namespace_for_prefix(&self, prefix: &style::Prefix) -> Option<style::Namespace> {
+        self.0.namespace_for_prefix(prefix)
+    }
 }
 
 /// Selector matching over a subtree in tree order. blitz's `TNode::next_sibling`
@@ -599,6 +725,105 @@ fn query(
     }
 }
 
+/// A selector simple enough to match without the selector engine.
+enum SimpleSelector<'a> {
+    Class(&'a str),
+    Tag(&'a str),
+}
+
+fn is_plain_ident(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && !b[0].is_ascii_digit()
+        && !(b[0] == b'-' && b.get(1).is_some_and(|c| c.is_ascii_digit()))
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_')
+}
+
+/// `.class` and `tag` selectors (no escapes, combinators or pseudo-classes).
+fn simple_selector(sel: &str) -> Option<SimpleSelector<'_>> {
+    let sel = sel.trim();
+    match sel.strip_prefix('.') {
+        Some(class) => is_plain_ident(class).then_some(SimpleSelector::Class(class)),
+        None => (is_plain_ident(sel) && sel.as_bytes()[0] != b'-').then_some(SimpleSelector::Tag(sel)),
+    }
+}
+
+/// Whether the whitespace-separated token list `list` contains `token`.
+fn has_token(list: &str, token: &str) -> bool {
+    let hay = list.as_bytes();
+    let is_ws = |c: u8| matches!(c, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c');
+    let mut from = 0;
+    while let Some(pos) = list[from..].find(token) {
+        let start = from + pos;
+        let end = start + token.len();
+        if (start == 0 || is_ws(hay[start - 1])) && (end == hay.len() || is_ws(hay[end])) {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
+/// PATCH: `query` for a [`SimpleSelector`]: the same traversal with a direct test per
+/// element (the selector engine's per-element setup dominated `querySelectorAll('.x')`).
+fn query_simple(
+    doc: &BaseDocument,
+    scope: NodeId,
+    sel: &SimpleSelector,
+    first_only: bool,
+    out: &mut Vec<NodeId>,
+) {
+    let Some(root) = doc.get_node(scope) else {
+        return;
+    };
+    let lower_tag = match sel {
+        SimpleSelector::Tag(t) => t.to_ascii_lowercase(),
+        SimpleSelector::Class(_) => String::new(),
+    };
+    let matches = |node: &blitz_dom::Node| -> bool {
+        let Some(el) = node.element_data() else {
+            return false;
+        };
+        match sel {
+            SimpleSelector::Class(class) => el
+                .attr(blitz_dom::local_name!("class"))
+                .is_some_and(|list| has_token(list, class)),
+            SimpleSelector::Tag(tag) => {
+                if el.name.ns == blitz_dom::ns!(html) {
+                    &*el.name.local == lower_tag.as_str()
+                } else {
+                    &*el.name.local == *tag
+                }
+            }
+        }
+    };
+    let mut stack: smallvec::SmallVec<[(&blitz_dom::Node, usize); 32]> = smallvec::SmallVec::new();
+    stack.push((root, 0));
+    while let Some(top) = stack.last_mut() {
+        let (parent, idx) = *top;
+        let Some(&child_id) = dom::dom_children(parent).get(idx) else {
+            stack.pop();
+            continue;
+        };
+        top.1 += 1;
+        let Some(child) = doc.get_node(child_id) else {
+            continue;
+        };
+        if !child.is_element() {
+            continue;
+        }
+        if matches(child) {
+            out.push(child_id);
+            if first_only {
+                return;
+            }
+        }
+        if !dom::dom_children(child).is_empty() {
+            stack.push((child, 0));
+        }
+    }
+}
+
 /// `#ident` selectors (no escapes) can use the document's id map.
 fn simple_id_selector(sel: &str) -> Option<&str> {
     let id = sel.trim().strip_prefix('#')?;
@@ -634,7 +859,10 @@ pub(crate) fn n_query_selector(cx: &mut Cx) -> NResult {
         }
     }
     let mut out = Vec::with_capacity(1);
-    query(cx.st, doc, scope, &list, true, &mut out);
+    match simple_selector(&sel) {
+        Some(simple) => query_simple(doc, scope, &simple, true, &mut out),
+        None => query(cx.st, doc, scope, &list, true, &mut out),
+    }
     cx.ret_node(doc, out.first().copied());
     Ok(())
 }
@@ -649,7 +877,10 @@ pub(crate) fn n_query_selector_all(cx: &mut Cx) -> NResult {
         kind(cx, doc, scope),
         Kind::Document | Kind::Element | Kind::Fragment
     ) {
-        query(cx.st, doc, scope, &list, false, &mut out);
+        match simple_selector(&sel) {
+            Some(simple) => query_simple(doc, scope, &simple, false, &mut out),
+            None => query(cx.st, doc, scope, &list, false, &mut out),
+        }
     }
     cx.ret_nodes(doc, &out);
     Ok(())

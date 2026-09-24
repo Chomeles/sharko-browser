@@ -61,6 +61,8 @@ class MockNative {
     this.R = vm.runInContext('({Array, ArrayBuffer, Uint8Array, Error, TypeError, RangeError, Promise, Object})', this.ctx);
     this.cloneInRealm = vm.runInContext(CLONE_SRC, this.ctx);
     this.templateContents = new Map();
+    this.shadowHosts = new Set(); // ids passed to N.setShadowHost(id, true)
+    this.definedIds = new Set(); // ids passed to N.setDefined(id)
     this.docId = this.createNode({ type: 9 });
     this.verbose = !!process.env.VERBOSE;
   }
@@ -500,6 +502,8 @@ class MockNative {
         return clone(id);
       },
       templateContent: (id) => (M.isTemplate(M.n(id)) ? M.templateContentOf(id) : 0),
+      setShadowHost: (id, on) => { M.n(id); if (on) M.shadowHosts.add(id); else M.shadowHosts.delete(id); },
+      setDefined: (id) => { M.n(id); M.definedIds.add(id); },
       appendChild: (p, c) => nat.insertBefore(p, c, 0),
       insertBefore: (p, c, ref) => {
         const pn = M.n(p), cn = M.n(c);

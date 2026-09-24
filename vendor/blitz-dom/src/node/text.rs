@@ -26,6 +26,12 @@ pub struct TextLayout {
     pub text: String,
     pub content_widths: Option<ContentWidths>,
     pub layout: parley::layout::Layout<TextBrush>,
+    /// PATCH: width (layout units) the lines were broken at by the last final layout,
+    /// and that layout's inputs.
+    pub(crate) last_perform: Option<(f32, taffy::LayoutInput)>,
+    /// PATCH: a size measurement re-broke the lines at another width after the last
+    /// final layout (see `BaseDocument::relayout_stale_inline_roots`).
+    pub(crate) lines_stale: bool,
 }
 
 impl TextLayout {
@@ -65,6 +71,8 @@ pub struct TextInputData {
     /// vertical offset. It is kept up to date so that the caret remains visible within the
     /// input's content box.
     pub scroll_offset: f32,
+    /// PATCH: layout of the `placeholder` attribute, shown while the value is empty.
+    pub placeholder: Option<Box<parley::Layout<TextBrush>>>,
 }
 
 // FIXME: Implement Clone for PlainEditor
@@ -80,6 +88,7 @@ impl TextInputData {
         Self {
             editor,
             is_multiline,
+            placeholder: None,
             scroll_offset: 0.0,
         }
     }

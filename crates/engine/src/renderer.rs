@@ -63,6 +63,8 @@ struct Page {
     load_sent: bool,
     dcl_sent: bool,
     last_ready_check: Instant,
+    /// Pending subresources at the last ready check (a change triggers the next check).
+    last_ready_pending: usize,
     last_scroll: (f64, f64),
     last_title: String,
     parse_ms: f64,
@@ -560,7 +562,11 @@ impl Renderer {
             Arc::new(move || waker_shared.wake()),
         );
         if self.font_ctx.is_none() {
-            self.font_ctx = Some(FontContext::default());
+            let mut font_ctx = FontContext::default();
+            // Arial/Times New Roman defaults and metric-compatible substitutes, as in
+            // other browsers (page layouts depend on these metrics).
+            blitz_dom::apply_web_font_defaults(&mut font_ctx);
+            self.font_ctx = Some(font_ctx);
         }
         let mut config = DocumentConfig {
             viewport: Some(self.viewport()),
@@ -596,7 +602,9 @@ impl Renderer {
         // "already sent" set: fonts are shared across documents.
 
         let config = self.document_config(url);
-        let doc = parse_document(html, config, self.config.javascript);
+        let mut doc = parse_document(html, config, self.config.javascript);
+        // Stylesheets inserted by scripts from now on don't block rendering.
+        doc.set_parser_done();
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let host = Rc::new(RendererHost {
@@ -620,6 +628,7 @@ impl Renderer {
             load_sent: false,
             dcl_sent: false,
             last_ready_check: Instant::now(),
+            last_ready_pending: usize::MAX,
             last_scroll: (0.0, 0.0),
             last_title: String::new(),
             parse_ms,
@@ -706,11 +715,30 @@ impl Renderer {
                 }
             }
 
+            // `load`/`error` events of <img>, <link rel=stylesheet> and <iframe>: apply the
+            // finished subresources now (not only at the next frame) and tell the page.
+            page.doc.handle_messages();
+            let events = page.doc.take_element_load_events();
+            if !events.is_empty() {
+                if let Some(rt) = page.rt.as_mut() {
+                    for (node, ok) in events {
+                        rt.element_event(&mut page.doc, node, if ok { "load" } else { "error" });
+                    }
+                }
+                self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+
             let pending = self.shared.pending_resources.load(Ordering::SeqCst);
 
             // Load state
-            if !page.load_sent && page.last_ready_check.elapsed() >= Duration::from_millis(40) {
+            // Checked periodically, and right away when the number of pending subresources
+            // changed (the last one finishing usually completes the load).
+            if !page.load_sent
+                && (page.last_ready_check.elapsed() >= Duration::from_millis(40)
+                    || pending != page.last_ready_pending)
+            {
                 page.last_ready_check = Instant::now();
+                page.last_ready_pending = pending;
                 // Subresources finished? Tell JS (idempotent; it fires `load` once both
                 // DOMContentLoaded happened and nothing is pending). Checked periodically
                 // rather than on transitions: a fetch can start and finish between ticks.

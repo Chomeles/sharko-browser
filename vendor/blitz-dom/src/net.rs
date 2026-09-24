@@ -59,7 +59,8 @@ pub enum Resource {
     Image(ImageType, u32, u32, Arc<Vec<u8>>),
     #[cfg(feature = "svg")]
     Svg(ImageType, crate::node::SvgImageData),
-    Css(DocumentStyleSheet),
+    /// PATCH: the stylesheet and its source text (re-parsed when scoped to a shadow tree).
+    Css(DocumentStyleSheet, Arc<str>),
     Font(Bytes, FontFaceOverrides),
     /// HTML fetched for an `<iframe>` element's `src`
     DocumentSrc(String),
@@ -136,6 +137,8 @@ pub struct StylesheetHandler {
     pub guard: SharedRwLock,
     pub net_provider: Arc<dyn NetProvider>,
     pub abort_signal: Option<AbortSignal>,
+    /// PATCH: the `<link media>` the sheet applies to.
+    pub media: MediaList,
 }
 
 impl NetHandler for ResourceHandler<StylesheetHandler> {
@@ -151,7 +154,7 @@ impl NetHandler for ResourceHandler<StylesheetHandler> {
             css,
             self.data.source_url.clone().into(),
             Origin::Author,
-            ServoArc::new(self.data.guard.wrap(MediaList::empty())),
+            ServoArc::new(self.data.guard.wrap(self.data.media.clone())),
             self.data.guard.clone(),
             Some(&StylesheetLoader {
                 tx: self.tx.clone(),
@@ -167,7 +170,7 @@ impl NetHandler for ResourceHandler<StylesheetHandler> {
 
         self.respond(
             resolved_url,
-            Ok(Resource::Css(DocumentStyleSheet(ServoArc::new(sheet)))),
+            Ok(Resource::Css(DocumentStyleSheet(ServoArc::new(sheet)), Arc::from(css))),
         );
     }
 }
@@ -431,17 +434,36 @@ pub(crate) fn fetch_font_face(
                 .find_map(|url_source| {
                     let mut format = match &url_source.format_hint {
                         Some(FontFaceSourceFormat::Keyword(fmt)) => *fmt,
-                        Some(FontFaceSourceFormat::String(str)) => match str.as_str() {
-                            "woff2" => FontFaceSourceFormatKeyword::Woff2,
-                            "ttf" => FontFaceSourceFormatKeyword::Truetype,
-                            "otf" => FontFaceSourceFormatKeyword::Opentype,
-                            _ => FontFaceSourceFormatKeyword::None,
-                        },
+                        // PATCH: all format strings (`format('woff')`, `'embedded-opentype'`,
+                        // …): an unrecognized one used to make the source "unknown" and
+                        // therefore acceptable, so the bulletproof syntax
+                        // `url(f.eot?#iefix) format('embedded-opentype'), url(f.woff) …`
+                        // fetched the EOT file and the web font failed.
+                        Some(FontFaceSourceFormat::String(str)) => {
+                            match str.to_ascii_lowercase().as_str() {
+                                "woff2" => FontFaceSourceFormatKeyword::Woff2,
+                                "woff" => FontFaceSourceFormatKeyword::Woff,
+                                "ttf" | "truetype" => FontFaceSourceFormatKeyword::Truetype,
+                                "otf" | "opentype" => FontFaceSourceFormatKeyword::Opentype,
+                                "svg" => FontFaceSourceFormatKeyword::Svg,
+                                "eot" | "embedded-opentype" => {
+                                    FontFaceSourceFormatKeyword::EmbeddedOpentype
+                                }
+                                _ => FontFaceSourceFormatKeyword::None,
+                            }
+                        }
                         _ => FontFaceSourceFormatKeyword::None,
                     };
                     if format == FontFaceSourceFormatKeyword::None {
-                        let (_, end) = url_source.url.as_str().rsplit_once('.')?;
-                        format = match end {
+                        // PATCH: the extension of the URL path (ignoring `?query#fragment`);
+                        // sources without one (`data:` URLs) are sniffed after loading.
+                        let path = url_source
+                            .url
+                            .url()
+                            .map(|u| u.path().to_string())
+                            .unwrap_or_else(|| url_source.url.as_str().to_string());
+                        let end = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+                        format = match end.to_ascii_lowercase().as_str() {
                             "woff2" => FontFaceSourceFormatKeyword::Woff2,
                             "woff" => FontFaceSourceFormatKeyword::Woff,
                             "ttf" => FontFaceSourceFormatKeyword::Truetype,

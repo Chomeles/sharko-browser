@@ -65,6 +65,11 @@ pub(crate) fn query_font_family(input: &stylo::SingleFontFamily) -> parley::Quer
                     break 'ret parley::QueryFamily::Generic(parley::GenericFamily::SystemUi);
                 }
 
+                // PATCH: metric-compatible substitute for a missing Arial/Times/…
+                if let Some(alias) = crate::font_defaults::family_alias(name) {
+                    break 'ret parley::QueryFamily::Named(alias);
+                }
+
                 break 'ret parley::QueryFamily::Named(name);
             }
         }
@@ -299,7 +304,8 @@ pub(crate) fn style(
     // Convert font size and line height
     let font_size = font_styles.font_size.used_size.0.px();
     let line_height = match font_styles.line_height {
-        stylo::LineHeight::Normal => parley::LineHeight::FontSizeRelative(1.2),
+        // PATCH: `normal` uses the font's metrics (like browsers), not 1.2em.
+        stylo::LineHeight::Normal => parley::LineHeight::MetricsRelative(1.0),
         stylo::LineHeight::Number(num) => parley::LineHeight::FontSizeRelative(num.0),
         stylo::LineHeight::Length(value) => parley::LineHeight::Absolute(value.0.px()),
     };
@@ -345,6 +351,11 @@ pub(crate) fn style(
                         break 'ret parley::FontFamilyName::Generic(
                             parley::GenericFamily::SystemUi,
                         );
+                    }
+
+                    // PATCH: metric-compatible substitute for a missing Arial/Times/…
+                    if let Some(alias) = crate::font_defaults::family_alias(name) {
+                        break 'ret parley::FontFamilyName::Named(Cow::Borrowed(alias));
                     }
 
                     break 'ret parley::FontFamilyName::Named(Cow::Owned(name.to_string()));

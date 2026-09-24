@@ -54,6 +54,8 @@ pub struct DocumentMutator<'doc> {
     title_node: Option<NodeId>,
     style_nodes: HashSet<NodeId>,
     form_nodes: HashSet<NodeId>,
+    /// PATCH: `<select>`s whose options changed (default selectedness, see `sync_select`).
+    select_nodes: HashSet<NodeId>,
 
     /// Whether an element/attribute that affect animation status has been seen
     recompute_is_animating: bool,
@@ -83,6 +85,7 @@ impl DocumentMutator<'_> {
             title_node: None,
             style_nodes: HashSet::new(),
             form_nodes: HashSet::new(),
+            select_nodes: HashSet::new(),
             recompute_is_animating: false,
             mutations_occurred: false,
             #[cfg(feature = "autofocus")]
@@ -333,6 +336,15 @@ impl DocumentMutator<'_> {
             return;
         }
 
+        // PATCH: `<link media>`/`<style media>` changes (e.g. the async-CSS pattern
+        // `media="print" onload="this.media='all'"`).
+        if *attr == local_name!("media")
+            && matches!(element.name.local.as_ref(), "link" | "style")
+        {
+            self.doc.update_stylesheet_media(node_id);
+            return;
+        }
+
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.disable();
             return;
@@ -341,6 +353,11 @@ impl DocumentMutator<'_> {
         // If node if not in the document, then don't apply any special behaviours
         // and simply set the attribute value
         if !node.flags.is_in_document() {
+            // PATCH: images load (and fire `load`) without being in the document
+            // (`new Image().src = …`, preloading).
+            if (tag, attr) == tag_and_attr!("img", "src") {
+                self.load_image(node_id);
+            }
             return;
         }
 
@@ -853,6 +870,12 @@ impl<'doc> DocumentMutator<'doc> {
             self.doc.reset_form_owner(id);
         }
 
+        for id in self.select_nodes.drain() {
+            if self.doc.nodes.contains_key(id) {
+                self.doc.apply_default_select_state(id);
+            }
+        }
+
         #[cfg(feature = "autofocus")]
         if let Some(node_id) = self.node_to_autofocus.take() {
             if self.doc.get_node(node_id).is_some() {
@@ -922,6 +945,21 @@ impl<'doc> DocumentMutator<'doc> {
                     self.eager_op_queue
                         .push(SpecialOp::ProcessButtonInput(node_id));
                     self.form_nodes.insert(node_id);
+                    if tag == "select" {
+                        self.select_nodes.insert(node_id);
+                    }
+                }
+                // PATCH: options added to a select change its displayed option.
+                "option" | "optgroup" => {
+                    let mut parent = doc.nodes[node_id].parent;
+                    for _ in 0..2 {
+                        let Some(pid) = parent else { break };
+                        if doc.nodes[pid].data.is_element_with_tag_name(&local_name!("select")) {
+                            self.select_nodes.insert(pid);
+                            break;
+                        }
+                        parent = doc.nodes[pid].parent;
+                    }
                 }
                 _ => {}
             }
@@ -1065,10 +1103,23 @@ impl<'doc> DocumentMutator<'doc> {
                 guard: self.doc.guard.clone(),
                 net_provider: self.doc.net_provider.clone(),
                 abort_signal: self.doc.abort_signal.clone(),
+                media: self.doc.media_list_of(target_id),
             },
         );
 
-        if is_in_head && !self.doc.net_provider.is_noop() {
+        // PATCH: stylesheets for other media (`media="print"`) don't block rendering.
+        let matches_media = {
+            use style::media_queries::MediaList;
+            let media: MediaList = self.doc.media_list_of(target_id);
+            media.media_queries.is_empty()
+                || media.evaluate(
+                    self.doc.stylist.device(),
+                    style::context::QuirksMode::NoQuirks,
+                    &mut style::stylesheets::CustomMediaEvaluator::none(),
+                )
+        };
+        if is_in_head && matches_media && !self.doc.parser_done && !self.doc.net_provider.is_noop()
+        {
             self.doc
                 .pending_critical_resources
                 .insert(handler.request_id());
@@ -1111,10 +1162,16 @@ impl<'doc> DocumentMutator<'doc> {
                     #[cfg(feature = "tracing")]
                     tracing::info!("Loading image {src_string} from cache");
                     let node = &mut self.doc.nodes[target_id];
-                    node.element_data_mut().unwrap().special_data =
-                        SpecialElementData::Image(Box::new(cached_image.clone()));
+                    let el = node.element_data_mut().unwrap();
+                    // PATCH: `load` event (once: a detached image loaded before insertion
+                    // already has its image data).
+                    let already_loaded = matches!(el.special_data, SpecialElementData::Image(_));
+                    el.special_data = SpecialElementData::Image(Box::new(cached_image.clone()));
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
+                    if !already_loaded {
+                        self.doc.element_load_events.push((target_id, true));
+                    }
                     return;
                 }
 

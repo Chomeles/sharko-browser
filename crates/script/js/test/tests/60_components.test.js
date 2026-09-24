@@ -228,3 +228,37 @@ test('form controls: elements/named access, select & options, textarea, defaults
     ':checked reflects live selectedness');
   assert.deepStrictEqual(e.errors(), []);
 });
+
+test('declarative shadow DOM: attached at parse, slots filled, reused by attachShadow', async () => {
+  const html = '<!DOCTYPE html><html><head></head><body>' +
+    '<my-card id="c"><template shadowrootmode="open"><style>p{color:red}</style><p id="sp">shadow</p>' +
+    '<my-inner><template shadowrootmode="open"><b>inner</b></template></my-inner><slot></slot></template>' +
+    '<span id="light">light</span></my-card>' +
+    '<div id="closed"><template shadowrootmode="closed"><i>c</i></template></div>' +
+    '<template id="plain"><p>not shadow</p></template></body></html>';
+  const e = await createEnv({ html });
+  assert.strictEqual(e.run(`
+    var c = document.getElementById('c'), sr = c.shadowRoot;
+    [sr !== null, sr instanceof ShadowRoot, sr.mode, !!sr.querySelector('#sp'),
+     c.querySelector('template') === null, document.querySelector('my-inner').shadowRoot !== null,
+     document.getElementById('closed').shadowRoot === null, document.getElementById('plain').content.childNodes.length,
+     !!sr.querySelector('slot') && sr.querySelector('slot').contains(document.getElementById('light'))].join(',')
+  `), 'true,true,open,true,true,true,true,1,true');
+  // Hosts are reported to the native side (style scoping).
+  assert.strictEqual(e.mock.shadowHosts.size, 3);
+  assert.ok(e.mock.shadowHosts.has(e.node('#c').id));
+  assert.strictEqual(e.run(`
+    var again = c.attachShadow({ mode: 'open' });
+    var r = [again === sr, sr.querySelector('#sp') === null];
+    try { c.attachShadow({ mode: 'open' }); r.push('no-throw'); } catch (err) { r.push(err.name); }
+    r.join(',');
+  `), 'true,true,NotSupportedError');
+});
+
+test('custom elements report :defined to the native side on upgrade and construction', async () => {
+  const e = await createEnv({ html: CE_PAGE });
+  e.run(CE_CLASS + "customElements.define('x-a', XA); window.__n = new XA();");
+  assert.ok(e.mock.definedIds.has(e.id('#a1')));
+  assert.ok(e.mock.definedIds.has(e.id('#a2')));
+  assert.strictEqual(e.mock.definedIds.size, 3); // a1, a2 and the constructed one (not the template's)
+});

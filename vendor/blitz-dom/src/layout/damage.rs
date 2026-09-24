@@ -418,6 +418,18 @@ impl BaseDocument {
         }
     }
 
+    /// PATCH: whether the styles of `node_id`'s subtree need no flush (see
+    /// `flush_styles_to_layout_impl`).
+    fn flush_is_clean(&self, node_id: NodeId, parent_is_flex_or_grid: bool) -> bool {
+        let node = &self.nodes[node_id];
+        node.flags.contains(NodeFlags::FLUSHED)
+            && !node.flags.contains(NodeFlags::HAS_HOISTED)
+            && node.flags.contains(NodeFlags::FLUSHED_AS_ITEM) == parent_is_flex_or_grid
+            && !node.is_anonymous()
+            && !node.has_damaged_descendants()
+            && node.damage().is_some_and(|d| d.is_empty())
+    }
+
     pub fn flush_styles_to_layout(&mut self, node_id: NodeId) {
         self.flush_styles_to_layout_impl(node_id, None);
     }
@@ -558,7 +570,23 @@ impl BaseDocument {
                     return;
                 };
 
-                (stylo_taffy::to_taffy_style(style), style.clone_display())
+                let mut taffy_style = stylo_taffy::to_taffy_style(style);
+                // PATCH: stylo_taffy maps `static` and `sticky` to taffy's `Relative`, which
+                // applies `top`/`left`/… as a relative offset. Static boxes ignore insets, and
+                // sticky offsets are applied at paint time (blitz-paint `sticky_shift`).
+                use style::computed_values::position::T as PositionProperty;
+                if matches!(
+                    style.clone_position(),
+                    PositionProperty::Static | PositionProperty::Sticky
+                ) {
+                    taffy_style.inset = taffy::Rect {
+                        left: taffy::LengthPercentageAuto::auto(),
+                        right: taffy::LengthPercentageAuto::auto(),
+                        top: taffy::LengthPercentageAuto::auto(),
+                        bottom: taffy::LengthPercentageAuto::auto(),
+                    };
+                }
+                (taffy_style, style.clone_display())
             };
             taffy_style.item_is_replaced = node
                 .data
@@ -593,6 +621,12 @@ impl BaseDocument {
 
             // Recursively call flush_styles_to_layout on each child
             for &child in children.iter() {
+                // PATCH: a subtree without damage keeps the taffy styles, paint order and
+                // stacking contexts of its last flush (unless it contributes hoisted
+                // children to this stacking context, or its flex/grid item status changed).
+                if incremental && self.flush_is_clean(child, is_flex_or_grid) {
+                    continue;
+                }
                 self.flush_styles_to_layout_impl(
                     child,
                     match self.nodes[child].is_stacking_context_root(is_flex_or_grid) {
@@ -600,6 +634,7 @@ impl BaseDocument {
                         false => Some(stacking_context),
                     },
                 );
+                self.nodes[child].flags.set(NodeFlags::FLUSHED_AS_ITEM, is_flex_or_grid);
             }
 
             // Sort layout_children
@@ -657,6 +692,10 @@ impl BaseDocument {
             // Put children back
             *self.nodes[node_id].layout_children.borrow_mut() = Some(children);
         }
+
+        self.nodes[node_id].flags.insert(NodeFlags::FLUSHED);
+        let has_hoisted = parent_stacking_context.is_some() && !stacking_context.children.is_empty();
+        self.nodes[node_id].flags.set(NodeFlags::HAS_HOISTED, has_hoisted);
 
         if let Some(parent_stacking_context) = parent_stacking_context {
             let position = self.nodes[node_id].final_layout().location;

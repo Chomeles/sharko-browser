@@ -62,6 +62,30 @@ bitflags! {
         const IS_TABLE_ROOT = 0b00000010;
         /// Whether the node is "in the document" (~= has a parent and isn't a template node)
         const IS_IN_DOCUMENT = 0b00000100;
+        /// PATCH: the element hosts a (emulated) shadow tree: stylesheets inside it are
+        /// scoped to it (see `shadow_css`).
+        const IS_SHADOW_HOST = 0b1_0000_0000;
+        /// PATCH: a custom element (name with `-`) that has been upgraded or created
+        /// from its definition, so it matches `:defined`.
+        const IS_CUSTOM_DEFINED = 0b10_0000_0000;
+        /// PATCH: a `<select>` whose displayed option is managed by the script runtime
+        /// (which knows the selectedness set through the DOM API).
+        const IS_SELECT_SCRIPT_MANAGED = 0b100_0000_0000;
+        /// PATCH: laying out this block placed floats into its parent's block formatting
+        /// context (a side effect a cached layout would skip).
+        const PLACES_FLOATS = 0b1000_0000_0000;
+        /// PATCH: the unrounded layout of this node or of a layout descendant changed
+        /// since the last rounding pass (`round_layout_incremental` skips clean subtrees).
+        const LAYOUT_DIRTY = 1 << 12;
+        /// PATCH: the subtree contributes hoisted (z-index) children to an ancestor's
+        /// stacking context, so style flushing cannot skip it.
+        const HAS_HOISTED = 1 << 13;
+        /// PATCH: styles of this subtree were flushed to layout at least once, the node
+        /// being a flex/grid item (`FLUSHED_AS_ITEM`) or not.
+        const FLUSHED = 1 << 14;
+        const FLUSHED_AS_ITEM = 1 << 15;
+        /// PATCH: the unrounded layout of this node itself changed since the last rounding.
+        const LAYOUT_SELF_CHANGED = 1 << 16;
     }
 }
 
@@ -113,6 +137,8 @@ pub struct Node {
     /// PATCH: offset (CSS px) applied to a `position: sticky` box during the last paint,
     /// so hit testing matches what is on screen.
     pub sticky_offset: Cell<(f32, f32)>,
+    /// PATCH: the parent's absolute position used when this node's layout was last rounded.
+    pub round_origin: Cell<(f32, f32)>,
     pub stacking_context: Option<Box<HoistedPaintChildren>>,
 
     // Flags
@@ -301,6 +327,7 @@ impl Node {
             paint_children: RefCell::new(None),
             stacking_context: None,
             sticky_offset: Cell::new((0.0, 0.0)),
+            round_origin: Cell::new((f32::NAN, f32::NAN)),
 
             flags: NodeFlags::empty(),
             data,

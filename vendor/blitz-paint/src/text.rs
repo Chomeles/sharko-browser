@@ -567,6 +567,39 @@ fn flush_line_decorations(
     }
 }
 
+/// PATCH: draw a text layout in a single color, without decorations (placeholders).
+pub(crate) fn draw_plain_layout(
+    scene: &mut impl PaintScene,
+    layout: &parley::Layout<TextBrush>,
+    transform: Affine,
+    color: Color,
+) {
+    for line in layout.lines() {
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                let run = glyph_run.run();
+                scene.draw_glyphs(
+                    run.font(),
+                    run.font_size(),
+                    !FONT_EMBOLDEN_ENABLED,
+                    run.normalized_coords(),
+                    kurbo::Vec2::default(),
+                    Fill::NonZero,
+                    &anyrender::Paint::from(color),
+                    1.0,
+                    transform,
+                    None,
+                    glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
+                        id: glyph.id as _,
+                        x: glyph.x,
+                        y: glyph.y,
+                    }),
+                );
+            }
+        }
+    }
+}
+
 pub(crate) fn stroke_text<'a>(
     scene: &mut impl PaintScene,
     lines: impl Iterator<Item = Line<'a, TextBrush>>,
@@ -586,6 +619,10 @@ pub(crate) fn stroke_text<'a>(
     path_scratch.clear();
     deco_boxes.clear();
 
+    // PATCH: `text-overflow: ellipsis` on the inline root (with `overflow` not visible):
+    // the end of the content box in layout units.
+    let ellipsis_limit = text_overflow_ellipsis_limit(doc, inline_root_id, scale);
+
     // Persistent stack mirroring the ancestor path (inline root -> current run's
     // node) as we walk the runs. The `text-decoration-*` properties are *not*
     // inherited; instead a decoration set on an ancestor is propagated to the
@@ -599,6 +636,37 @@ pub(crate) fn stroke_text<'a>(
         // draws one decoration per box rather than one stepped segment per differently-sized
         // run. Clearing preserves the allocation for the next line and inline context.
         deco_boxes.clear();
+
+        // PATCH: overflowing line: glyphs past `cut` are dropped and "…" is drawn after the
+        // last visible glyph.
+        let mut ellipsis: Option<LineEllipsis> = None;
+        if let Some(limit) = ellipsis_limit {
+            let line_end = line
+                .items()
+                .map(|item| match item {
+                    PositionedLayoutItem::GlyphRun(r) => r.offset() + r.advance(),
+                    PositionedLayoutItem::InlineBox(b) => b.x + b.width,
+                })
+                .fold(0.0f32, f32::max);
+            if line_end > limit + 0.5 {
+                let first_run = line.items().find_map(|item| match item {
+                    PositionedLayoutItem::GlyphRun(r) => Some(r),
+                    _ => None,
+                });
+                if let Some(run) = first_run {
+                    if let Some((glyphs, advance)) =
+                        ellipsis_glyphs(run.run().font(), run.run().font_size())
+                    {
+                        ellipsis = Some(LineEllipsis {
+                            cut: (limit - advance).max(0.0),
+                            glyphs,
+                            end: 0.0,
+                            drawn: None,
+                        });
+                    }
+                }
+            }
+        }
 
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
@@ -649,6 +717,17 @@ pub(crate) fn stroke_text<'a>(
                     kurbo::Vec2::default()
                 };
 
+                let cut = ellipsis.as_ref().map(|e| e.cut);
+                if let Some(e) = ellipsis.as_mut() {
+                    for glyph in glyph_run.positioned_glyphs() {
+                        if glyph.x + glyph.advance <= e.cut {
+                            e.end = e.end.max(glyph.x + glyph.advance);
+                        }
+                    }
+                    if e.drawn.is_none() {
+                        e.drawn = Some((font.clone(), font_size, text_color, glyph_run.baseline()));
+                    }
+                }
                 scene.draw_glyphs(
                     font,
                     font_size,
@@ -660,11 +739,14 @@ pub(crate) fn stroke_text<'a>(
                     1.0, // alpha
                     transform,
                     glyph_xform,
-                    glyph_run.positioned_glyphs().map(|glyph| anyrender::Glyph {
-                        id: glyph.id as _,
-                        x: glyph.x,
-                        y: glyph.y,
-                    }),
+                    glyph_run
+                        .positioned_glyphs()
+                        .filter(|glyph| cut.is_none_or(|c| glyph.x + glyph.advance <= c))
+                        .map(|glyph| anyrender::Glyph {
+                            id: glyph.id as _,
+                            x: glyph.x,
+                            y: glyph.y,
+                        }),
                 );
 
                 // Accumulate this run's contribution to each decorating box on its ancestor
@@ -719,8 +801,86 @@ pub(crate) fn stroke_text<'a>(
             }
         }
 
+        // PATCH: the ellipsis after the last visible glyph of an overflowing line.
+        if let Some(LineEllipsis { cut, glyphs, end, drawn: Some((font, size, color, baseline)) }) =
+            ellipsis
+        {
+            let start = end.min(cut);
+            let positioned: Vec<anyrender::Glyph> = glyphs
+                .iter()
+                .scan(start, |x, &(id, advance)| {
+                    let g = anyrender::Glyph { id, x: *x, y: baseline };
+                    *x += advance;
+                    Some(g)
+                })
+                .collect();
+            scene.draw_glyphs(
+                &font,
+                size,
+                !FONT_EMBOLDEN_ENABLED,
+                &[],
+                kurbo::Vec2::default(),
+                Fill::NonZero,
+                &anyrender::Paint::from(color),
+                1.0,
+                transform,
+                None,
+                positioned.into_iter(),
+            );
+        }
+
         flush_line_decorations(scene, transform, scale, deco_boxes, win_ascent_ratios);
     }
+}
+
+/// PATCH: state of `text-overflow: ellipsis` for one overflowing line.
+struct LineEllipsis {
+    /// Glyphs ending after this x are not drawn.
+    cut: f32,
+    /// The ellipsis glyphs (id, advance) in the line's first font.
+    glyphs: Vec<(u32, f32)>,
+    /// End of the last drawn glyph.
+    end: f32,
+    /// Font, size, color and baseline of the first drawn run (used for the ellipsis).
+    drawn: Option<(parley::FontData, f32, Color, f32)>,
+}
+
+/// The content-box width (in layout units) at which lines of `inline_root_id` are cut with
+/// an ellipsis, if it has `text-overflow: ellipsis` and clips its overflow.
+fn text_overflow_ellipsis_limit(doc: &BaseDocument, inline_root_id: NodeId, scale: f64) -> Option<f32> {
+    use style::values::specified::text::TextOverflowSide;
+    let node = doc.get_node(inline_root_id)?;
+    let styles = node.primary_styles()?;
+    if !matches!(styles.get_text().text_overflow.second, TextOverflowSide::Ellipsis) {
+        return None;
+    }
+    if styles.get_box().overflow_x == style::values::computed::Overflow::Visible {
+        return None;
+    }
+    let l = node.final_layout();
+    let width = l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right;
+    Some((width as f64 * scale) as f32)
+}
+
+/// Glyph ids and advances of "…" (or "..." if the font has no U+2026) at `font_size`.
+fn ellipsis_glyphs(font: &parley::FontData, font_size: f32) -> Option<(Vec<(u32, f32)>, f32)> {
+    use skrifa::MetadataProvider as _;
+    use skrifa::raw::FontRef;
+    let font_ref = FontRef::from_index(font.data.as_ref(), font.index).ok()?;
+    let charmap = font_ref.charmap();
+    let metrics = font_ref.glyph_metrics(
+        skrifa::instance::Size::new(font_size),
+        skrifa::instance::LocationRef::default(),
+    );
+    let glyphs: Vec<(u32, f32)> = match charmap.map('\u{2026}') {
+        Some(gid) => vec![(gid.to_u32(), metrics.advance_width(gid).unwrap_or(0.0))],
+        None => {
+            let gid = charmap.map('.')?;
+            vec![(gid.to_u32(), metrics.advance_width(gid).unwrap_or(0.0)); 3]
+        }
+    };
+    let advance = glyphs.iter().map(|g| g.1).sum();
+    Some((glyphs, advance))
 }
 
 /// Draw selection highlight rectangles for the given byte range in a layout.

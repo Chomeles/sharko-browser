@@ -49,11 +49,15 @@ mod html;
 mod iframe;
 /// Integration of taffy and the DOM.
 mod layout;
+mod legacy_hints;
 mod mutator;
 mod query_selector;
 mod resolve;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
+pub mod shadow_css;
+mod font_defaults;
+pub use font_defaults::apply_web_font_defaults;
 mod selection;
 /// Implementations that interact with servo's style engine
 mod stylo;
@@ -82,7 +86,7 @@ pub use crate::node::Widget;
 
 pub use blitz_traits::node_id::NodeId;
 pub use config::{DocumentConfig, StyleThreading};
-pub use document::{BaseDocument, DocGuard, DocGuardMut, Document, PlainDocument};
+pub use document::{BaseDocument, DocGuard, DocGuardMut, Document, PlainDocument, StyleScope};
 pub use markup5ever::{
     LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
     namespace_prefix, namespace_url, ns,

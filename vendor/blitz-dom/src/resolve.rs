@@ -99,6 +99,9 @@ impl BaseDocument {
         // Merge stylo into taffy
         self.flush_styles_to_layout(root_node_id);
         timer.record_time("flush");
+        if crate::layout::verify::enabled() {
+            crate::layout::verify::flushed_styles(self, root_node_id);
+        }
 
         // Next we resolve layout with the data resolved by stlist
         self.resolve_layout();
@@ -267,7 +270,15 @@ impl BaseDocument {
                         if !doc.nodes.contains_key(child_id) {
                             continue;
                         }
-                        resolve_layout_children_recursive(doc, child_id);
+                        // PATCH: a subtree without damage has nothing to reconstruct.
+                        let child = &doc.nodes[child_id];
+                        let clean = !child.is_anonymous()
+                            && !child.has_damaged_descendants()
+                            && child.damage().is_some_and(|d| d.is_empty())
+                            && child.layout_children.borrow().is_some();
+                        if !clean {
+                            resolve_layout_children_recursive(doc, child_id);
+                        }
                         doc.nodes[child_id].layout_parent.set(Some(node_id));
                     }
 
@@ -378,7 +389,23 @@ impl BaseDocument {
         // println!("\n\nRESOLVE LAYOUT\n===========\n");
 
         taffy::compute_root_layout(self, root_element_id, available_space);
-        taffy::round_layout(self, root_element_id);
+        // PATCH: text whose line breaks a measurement overwrote after its final layout.
+        self.relayout_stale_inline_roots();
+        // PATCH: absolutely positioned/fixed boxes against their real containing block.
+        let viewport = taffy::Size {
+            width: size.width.to_f32_px(),
+            height: size.height.to_f32_px(),
+        };
+        crate::layout::abspos::fixup_out_of_flow_boxes(self, viewport);
+        // PATCH: only subtrees whose layout changed (see `round_layout_incremental`).
+        let verify = crate::layout::verify::enabled();
+        if verify {
+            crate::layout::verify::out_of_flow(self, viewport);
+        }
+        self.round_layout_incremental(self.root_element().id);
+        if verify {
+            crate::layout::verify::rounding(self, root_element_id);
+        }
 
         // println!("\n\n");
         // taffy::print_tree(self, root_node_id)

@@ -162,9 +162,12 @@
   };
 
   // Mutation epochs used to validate caches of live collections.
-  //  tree: child-list changes anywhere, attr: attribute changes anywhere.
-  L.state = { tree: 1, attr: 1 };
-  L.bumpAll = function () { L.state.tree++; L.state.attr++; };
+  //  tree: child-list changes anywhere, attr: attribute changes anywhere,
+  //  untracked: child-list changes not recorded per parent (see `childVer` in 20_dom.js).
+  L.state = { tree: 1, attr: 1, untracked: 1 };
+  L.bumpAll = function () { L.state.tree++; L.state.attr++; L.state.untracked++; };
+  // A child-list change that is not attributed to specific parents.
+  L.treeChanged = function () { L.state.tree++; L.state.untracked++; };
 
   // ---------------------------------------------------------------------------------------
   // Error reporting (replaced by the full implementation in 90_bootstrap.js)

@@ -286,12 +286,22 @@ fn push_non_whitespace_children_and_pseudos(layout_children: &mut ThinVec<NodeId
     }
 }
 
+/// PATCH: the line height of an inline formatting context's root (its strut).
+#[derive(Clone, Copy)]
+struct RootLineHeight {
+    px: f32,
+    /// `line-height: normal` (then `px` is an approximation).
+    normal: bool,
+}
+
 /// Convert a relative line height to an absolute one
 fn resolve_line_height(line_height: parley::LineHeight, font_size: f32) -> f32 {
     match line_height {
         parley::LineHeight::FontSizeRelative(relative) => relative * font_size,
         parley::LineHeight::Absolute(absolute) => absolute,
-        parley::LineHeight::MetricsRelative(relative) => relative * font_size, //unreachable!(),
+        // PATCH: `normal` (the font's rounded metrics, computed by parley per run); where a
+        // number is needed up front, typical fonts' value (Arial: 1.15) stands in for it.
+        parley::LineHeight::MetricsRelative(relative) => relative * font_size * 1.15,
     }
 }
 
@@ -462,7 +472,10 @@ fn collect_layout_children_with_wrap(
 
         #[cfg(feature = "svg")]
         if matches!(tag_name, "svg") {
-            let mut outer_html = doc.get_node(container_node_id).unwrap().outer_html();
+            // PATCH: own serializer: keeps `currentColor` (resolved by usvg through the root
+            // `color`) and carries CSS-set `fill`/`stroke` as inline style.
+            let mut outer_html = String::new();
+            write_svg_markup(doc, container_node_id, &mut outer_html);
 
             // HACK: usvg fails to parse SVGs that don't have the SVG xmlns set. So inject it
             // if the generated source doesn't have it.
@@ -470,6 +483,12 @@ fn collect_layout_children_with_wrap(
                 outer_html =
                     outer_html.replace("<svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"");
             }
+
+            // PATCH: `<use href="#icon">` / `url(#gradient)` pointing outside this `<svg>`
+            // (icon sprites elsewhere in the page).
+            let outer_html = inline_external_svg_refs(doc, outer_html);
+            // PATCH: paint inherited through CSS (`.icon { fill: currentColor }`, `color`).
+            let outer_html = add_svg_root_paint(doc, container_node_id, outer_html);
 
             // Remove contruction damage from subtree
             doc.iter_subtree_mut(container_node_id, |id: NodeId, doc: &mut BaseDocument| {
@@ -880,13 +899,52 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
     editor.set_scale(doc.viewport.scale_f64() as f32);
     editor.set_width(None);
 
+    // PATCH: the page's font (family, weight, style, letter spacing), not just its size.
+    let text_styles = [
+        StyleProperty::FontFamily(parley_style.font_family.clone()),
+        StyleProperty::FontSize(parley_style.font_size),
+        StyleProperty::FontWeight(parley_style.font_weight),
+        StyleProperty::FontStyle(parley_style.font_style),
+        StyleProperty::FontWidth(parley_style.font_width),
+        StyleProperty::LetterSpacing(parley_style.letter_spacing),
+        StyleProperty::LineHeight(parley_style.line_height),
+        StyleProperty::Brush(parley_style.brush.clone()),
+    ];
     let styles = editor.edit_styles();
     styles.retain(|_| false);
-    styles.insert(StyleProperty::FontSize(parley_style.font_size));
-    styles.insert(StyleProperty::LineHeight(parley_style.line_height));
-    styles.insert(StyleProperty::Brush(parley_style.brush));
+    for property in text_styles.iter().cloned() {
+        styles.insert(property);
+    }
 
-    editor.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
+    let placeholder = element
+        .attr(local_name!("placeholder"))
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            // Line breaks in the attribute are removed for single-line inputs.
+            if is_multiline {
+                p.to_string()
+            } else {
+                p.replace(['\n', '\r'], "")
+            }
+        });
+    let scale = doc.viewport.scale_f64() as f32;
+    let SpecialElementData::TextInput(text_input_data) = &mut element.special_data else {
+        unreachable!();
+    };
+    let editor = &mut text_input_data.editor;
+    let mut font_ctx = doc.font_ctx.lock().unwrap();
+    editor.refresh_layout(&mut font_ctx, &mut doc.layout_ctx);
+
+    // PATCH: `placeholder` text (painted while the value is empty).
+    text_input_data.placeholder = placeholder.map(|text| {
+        let mut builder = doc.layout_ctx.ranged_builder(&mut font_ctx, &text, scale, true);
+        for property in text_styles {
+            builder.push_default(property);
+        }
+        let mut layout = builder.build(&text);
+        layout.break_all_lines(None);
+        Box::new(layout)
+    });
 }
 
 fn create_checkbox_input(doc: &mut BaseDocument, input_element_id: NodeId) {
@@ -1034,9 +1092,223 @@ fn inline_edge_extents(node: &crate::Node) -> ((f32, f32), (f32, f32)) {
     ((m.left, p.left + b.left), (p.right + b.right, m.right))
 }
 
+/// PATCH: copy the elements that an inline `<svg>` references by id but doesn't contain
+/// (`<use href="#id">`, gradient/pattern/filter `href`, `url(#id)`) into a `<defs>`, so
+/// usvg can resolve them. Sprites (`<svg style="display:none"><symbol id=…>`) are a
+/// common way to ship icons.
+#[cfg(feature = "svg")]
+fn inline_external_svg_refs(doc: &BaseDocument, mut svg: String) -> String {
+    const MAX_ELEMENTS: usize = 64;
+    const MAX_BYTES: usize = 512 * 1024;
+    let mut defs = String::new();
+    let mut seen: Vec<String> = Vec::new();
+    let mut queue = svg_refs(&svg);
+    let mut copied = 0;
+    while let Some(id) = queue.pop() {
+        if seen.iter().any(|s| *s == id) || copied >= MAX_ELEMENTS || defs.len() > MAX_BYTES {
+            continue;
+        }
+        seen.push(id.clone());
+        if svg.contains(&format!(" id=\"{id}\"")) {
+            continue;
+        }
+        let Some(&node_id) = doc.nodes_to_id.get(&id).and_then(|ids| ids.first()) else {
+            continue;
+        };
+        let node = &doc.nodes[node_id];
+        let is_svg_element = node
+            .element_data()
+            .is_some_and(|el| el.name.ns == markup5ever::ns!(svg));
+        if !is_svg_element {
+            continue;
+        }
+        // Serialized as authored: `currentColor` must resolve where the element is used,
+        // not with the color of the (hidden) sprite it lives in.
+        let mut html = String::new();
+        write_svg_markup(doc, node_id, &mut html);
+        queue.extend(svg_refs(&html));
+        defs.push_str(&html);
+        copied += 1;
+    }
+    if !defs.is_empty() {
+        if let Some(end) = svg.find('>') {
+            let self_closing = svg[..end].ends_with('/');
+            if !self_closing {
+                svg.insert_str(end + 1, &format!("<defs>{defs}</defs>"));
+            }
+        }
+    }
+    svg
+}
+
+/// Serialize an SVG subtree for usvg: attributes as authored (`currentColor` resolves
+/// through the root's `color`), plus `fill`/`stroke`/`stroke-width` that CSS rules set on
+/// an element (they differ from the parent's computed value) as inline style, since
+/// usvg doesn't see the page's stylesheets (`.icon path { fill: currentColor }`).
+#[cfg(feature = "svg")]
+fn write_svg_markup(doc: &BaseDocument, node_id: NodeId, out: &mut String) {
+    let node = &doc.nodes[node_id];
+    match &node.data {
+        NodeData::Text(t) => {
+            html_escape::encode_text_to_string(&t.content, out);
+        }
+        NodeData::Element(el) => {
+            out.push('<');
+            out.push_str(&el.name.local);
+            let css = svg_css_paint(doc, node_id);
+            let mut wrote_style = false;
+            for attr in el.attrs.iter() {
+                out.push(' ');
+                if let Some(prefix) = &attr.name.prefix {
+                    out.push_str(prefix);
+                    out.push(':');
+                }
+                out.push_str(&attr.name.local);
+                out.push_str("=\"");
+                if attr.name.local == local_name!("style") && attr.name.prefix.is_none() {
+                    wrote_style = true;
+                    let mut v = attr.value.to_string();
+                    if let Some(css) = &css {
+                        v.push(';');
+                        v.push_str(css);
+                    }
+                    html_escape::encode_double_quoted_attribute_to_string(&v, out);
+                } else {
+                    html_escape::encode_double_quoted_attribute_to_string(&attr.value, out);
+                }
+                out.push('"');
+            }
+            if let (false, Some(css)) = (wrote_style, &css) {
+                out.push_str(" style=\"");
+                html_escape::encode_double_quoted_attribute_to_string(css, out);
+                out.push('"');
+            }
+            out.push('>');
+            for &child in node.children.iter() {
+                write_svg_markup(doc, child, out);
+            }
+            out.push_str("</");
+            out.push_str(&el.name.local);
+            out.push('>');
+        }
+        _ => {}
+    }
+}
+
+/// `fill`/`stroke`/`stroke-width` declarations for SVG paint that differs from the
+/// parent's computed values (i.e. was set by a CSS rule on this element).
+#[cfg(feature = "svg")]
+fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
+    use style_traits::ToCss as _;
+    let node = &doc.nodes[node_id];
+    let styles = node.primary_styles()?;
+    let parent_styles = node.parent.and_then(|p| doc.nodes[p].primary_styles())?;
+    let (own, parent) = (styles.get_inherited_svg(), parent_styles.get_inherited_svg());
+    let mut decls = String::new();
+    if own.fill != parent.fill {
+        decls.push_str(&format!("fill:{};", own.fill.to_css_string()));
+    }
+    if own.stroke != parent.stroke {
+        decls.push_str(&format!("stroke:{};", own.stroke.to_css_string()));
+    }
+    if own.stroke_width != parent.stroke_width {
+        decls.push_str(&format!("stroke-width:{};", own.stroke_width.to_css_string()));
+    }
+    (!decls.is_empty()).then_some(decls)
+}
+
+/// Add `color`, `fill` and `stroke` presentation attributes to the root `<svg>` tag
+/// from its computed style when CSS (not an attribute) set them, so they reach usvg.
+#[cfg(feature = "svg")]
+fn add_svg_root_paint(doc: &BaseDocument, svg_id: NodeId, mut svg: String) -> String {
+    use style::values::generics::svg::SVGPaintKind;
+    use style_traits::ToCss as _;
+    let Some(styles) = doc.nodes[svg_id].primary_styles() else {
+        return svg;
+    };
+    let Some(end) = svg.find('>') else { return svg };
+    let tag = svg[..end].trim_end_matches('/').to_string();
+    let has_attr = |name: &str| {
+        tag.split(|c: char| c.is_ascii_whitespace())
+            .any(|a| a.split('=').next() == Some(name))
+    };
+    let mut extra = String::new();
+    let color = styles.clone_color().to_css_string();
+    if !has_attr("color") {
+        extra.push_str(&format!(" color=\"{color}\""));
+    }
+    let svg_style = styles.get_inherited_svg();
+    let paint_css = |paint: &style::values::computed::SVGPaint| -> Option<String> {
+        match &paint.kind {
+            SVGPaintKind::Color(c) => Some(c.resolve_to_absolute(&styles.clone_color()).to_css_string()),
+            SVGPaintKind::None => Some("none".to_string()),
+            _ => None,
+        }
+    };
+    let fill = &svg_style.fill;
+    if !has_attr("fill") && *fill != style::values::computed::SVGPaint::BLACK {
+        if let Some(v) = paint_css(fill) {
+            extra.push_str(&format!(" fill=\"{v}\""));
+        }
+    }
+    let stroke = &svg_style.stroke;
+    if !has_attr("stroke") && !matches!(stroke.kind, SVGPaintKind::None) {
+        if let Some(v) = paint_css(stroke) {
+            extra.push_str(&format!(" stroke=\"{v}\""));
+        }
+    }
+    if !extra.is_empty() {
+        let insert_at = if svg[..end].ends_with('/') { end - 1 } else { end };
+        svg.insert_str(insert_at, &extra);
+    }
+    svg
+}
+
+/// Ids referenced by `href="#id"` on referencing SVG elements and by `url(#id)`.
+#[cfg(feature = "svg")]
+fn svg_refs(markup: &str) -> Vec<String> {
+    const HREF_TAGS: &[&str] = &[
+        "use", "linearGradient", "radialGradient", "pattern", "filter", "textPath", "feImage",
+    ];
+    let mut out = Vec::new();
+    let mut rest = markup;
+    while let Some(lt) = rest.find('<') {
+        rest = &rest[lt + 1..];
+        let end = rest.find('>').unwrap_or(rest.len());
+        let tag = &rest[..end];
+        let name: &str = tag
+            .split(|c: char| c.is_ascii_whitespace() || c == '/')
+            .next()
+            .unwrap_or("");
+        if HREF_TAGS.contains(&name) {
+            for key in ["href=\"#", "href='#"] {
+                if let Some(p) = tag.find(key) {
+                    let v = &tag[p + key.len()..];
+                    let q = key.as_bytes()[5] as char;
+                    if let Some(e) = v.find(q) {
+                        out.push(v[..e].to_string());
+                    }
+                }
+            }
+        }
+        let mut t = tag;
+        while let Some(p) = t.find("url(") {
+            let v = t[p + 4..].trim_start_matches(['"', '\'', ' ']);
+            if let Some(id) = v.strip_prefix('#') {
+                let e = id.find([')', '"', '\'', ' ']).unwrap_or(id.len());
+                out.push(id[..e].to_string());
+            }
+            t = &t[p + 4..];
+        }
+        rest = &rest[end.min(rest.len())..];
+    }
+    out
+}
+
 fn push_spacer(builder: &mut TreeBuilder<TextBrush>, flag: u64, node_id: NodeId, width: f32) {
     if width > 0.0 {
-        builder.push_inline_box(InlineBox {
+        // Spacers don't take part in white-space collapsing (vendored parley PATCH).
+        builder.push_collapse_transparent_inline_box(InlineBox {
             id: flag | node_id.as_u64(),
             kind: InlineBoxKind::InFlow,
             index: 0,
@@ -1067,7 +1339,10 @@ pub(crate) fn build_inline_layout_into(
         .map(|s| stylo_to_parley::style(inline_context_root_node_id, s))
         .unwrap_or_default();
 
-    let root_line_height = resolve_line_height(parley_style.line_height, parley_style.font_size);
+    let root_line_height = RootLineHeight {
+        px: resolve_line_height(parley_style.line_height, parley_style.font_size),
+        normal: matches!(parley_style.line_height, parley::LineHeight::MetricsRelative(_)),
+    };
 
     // Create a parley tree builder
     let mut builder = layout_ctx.tree_builder(font_ctx, scale, true, &parley_style);
@@ -1157,7 +1432,7 @@ pub(crate) fn build_inline_layout_into(
         node_id: NodeId,
         collapse_mode: WhiteSpaceCollapse,
         parent_text_transform: TextTransform,
-        root_line_height: f32,
+        root_line_height: RootLineHeight,
         scale: f32,
     ) {
         let node = &nodes[node_id];
@@ -1258,10 +1533,18 @@ pub(crate) fn build_inline_layout_into(
 
                             // Floor the line-height of the span by the line-height of the inline context
                             // See https://www.w3.org/TR/CSS21/visudet.html#line-height
-                            style.line_height = parley::LineHeight::Absolute(
-                                resolve_line_height(style.line_height, font_size)
-                                    .max(root_line_height),
-                            );
+                            // PATCH: with both at `normal`, parley's per-run font metrics
+                            // give the exact heights (no approximation).
+                            let both_normal = matches!(
+                                style.line_height,
+                                parley::LineHeight::MetricsRelative(_)
+                            ) && root_line_height.normal;
+                            if !both_normal {
+                                style.line_height = parley::LineHeight::Absolute(
+                                    resolve_line_height(style.line_height, font_size)
+                                        .max(root_line_height.px),
+                                );
+                            }
 
                             // dbg!(node_id);
                             // dbg!(&style);
@@ -1273,6 +1556,23 @@ pub(crate) fn build_inline_layout_into(
                                 inline_edge_extents(node);
                             push_spacer(builder, INLINE_MARGIN_SPACER, node_id, margin_start * scale);
                             push_spacer(builder, INLINE_EDGE_SPACER, node_id, edge_start * scale);
+                            // PATCH: an empty inline element still has a (zero-width) box
+                            // at its position, e.g. for getClientRects() and
+                            // IntersectionObserver sentinels (`<span x-intersect>`).
+                            if node.children.is_empty()
+                                && node.before().is_none()
+                                && node.after().is_none()
+                                && edge_start <= 0.0
+                                && edge_end <= 0.0
+                            {
+                                builder.push_collapse_transparent_inline_box(InlineBox {
+                                    id: INLINE_EDGE_SPACER | node_id.as_u64(),
+                                    kind: InlineBoxKind::InFlow,
+                                    index: 0,
+                                    width: 0.0,
+                                    height: 0.0,
+                                });
+                            }
 
                             if let Some(before_id) = node.before() {
                                 build_inline_layout_recursive(

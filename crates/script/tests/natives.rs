@@ -1556,3 +1556,39 @@ fn natives_never_panic_on_garbage() {
         e.host.errors()
     );
 }
+
+#[test]
+fn selectors_has_and_nth_child_of() {
+    let mut e = env();
+    // `:has()` (relative selectors) and `:nth-child(An+B of S)` in the DOM selector APIs.
+    assert_eq!(
+        e.eval("N.querySelectorAll(N.documentId(), 'div:has(> #s2)').map(id => N.getAttr(id, 'id'))"),
+        "[\"a\"]"
+    );
+    assert_eq!(e.eval("N.querySelectorAll(N.documentId(), 'p:has(b), ul:has(li:nth-child(3))').length"), "2");
+    assert_eq!(e.eval("N.querySelectorAll(N.documentId(), 'body > :has(+ p)').length"), "1");
+    assert_eq!(e.eval("N.matches(N.getElementById('a'), ':has(span)')"), "true");
+    assert_eq!(e.eval("N.matches(N.getElementById('p'), ':has(span)')"), "false");
+    assert_eq!(
+        e.eval("N.getAttr(N.closest(N.getElementById('s1'), ':has(> span + span)'), 'id')"),
+        "\"a\""
+    );
+    assert_eq!(
+        e.eval("N.textContent(N.querySelector(N.documentId(), 'span:nth-child(1 of #s2, #s1)'))"),
+        "\"one\""
+    );
+    assert_eq!(e.eval("try { N.querySelector(N.documentId(), 'div:has(') } catch (e) { 'threw' }"), "\"threw\"");
+}
+
+#[test]
+fn foreign_xmlns_attribute_has_no_empty_prefix() {
+    let mut e = Env::new(r##"<!DOCTYPE html><html><body><svg id="s" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><use xlink:href="#a"/></svg></body></html>"##);
+    let doc = &mut e.doc;
+    e.rt.document_parsed(doc);
+    e.eval("globalThis.N = __native; 1");
+    // html5ever stores `xmlns` with an empty prefix; the DOM name is plain `xmlns`
+    // (Alpine.js treats attributes starting with ':' as bindings).
+    assert_eq!(e.eval("N.attrNames(N.getElementById('s'))"), "[\"id\",\"xmlns\",\"xmlns:xlink\"]");
+    assert_eq!(e.eval("N.getAttr(N.getElementById('s'), 'xmlns')"), "\"http://www.w3.org/2000/svg\"");
+    assert!(!e.eval("N.outerHTML(N.getElementById('s'))").contains(" :xmlns"));
+}

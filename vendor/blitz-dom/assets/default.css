@@ -53,6 +53,27 @@ input {
     display: inline-block;
 }
 
+/* PATCH: form controls use the browsers' small control font (13.33px Arial, monospace
+   for textarea) instead of inheriting the page font, and the box metrics of Chromium's
+   controls (2px + 1px border/padding per side for text fields, a 1px drawn border). */
+input,
+textarea,
+button {
+    font: 400 13.333333px Arial, sans-serif;
+    line-height: normal;
+    letter-spacing: normal;
+    word-spacing: normal;
+    text-transform: none;
+    text-indent: 0;
+    text-shadow: none;
+    text-align: start;
+    margin: 0;
+}
+
+textarea {
+    font-family: monospace;
+}
+
 input[type="checkbox"] {
     width: 14px;
     height: 14px;
@@ -69,8 +90,9 @@ input[type="radio"] {
 
 input,
 textarea {
-    border: 1px solid #999;
-    padding: 2px;
+    border: 1px solid #767676;
+    border-radius: 2px;
+    padding: 2px 3px;
     background-color: white;
 }
 
@@ -83,9 +105,9 @@ button,
 input[type="submit"],
 input[type="reset"],
 input[type="button"] {
-    border: 1px solid #999;
-    border-radius: 1px;
-    padding: 1px 6px;
+    border: 1px solid #767676;
+    border-radius: 3px;
+    padding: 2px 7px;
     color: black;
     background-color: #EFEFEF;
     text-align: center;
@@ -131,6 +153,71 @@ legend {
 
 option {
     display: none;
+}
+
+/* PATCH: form controls: <select>. A drop-down select shows its selected option (the
+   option with the `:checked` state, maintained by blitz/the script runtime); the other
+   options are laid out invisibly with zero height so the select is as wide as its
+   widest option, as in other browsers. The arrow is painted when `appearance` is not
+   `none`. */
+select {
+    display: inline-block;
+    box-sizing: border-box;
+    appearance: auto;
+    border: 1px solid #767676;
+    border-radius: 3px;
+    background-color: #ffffff;
+    color: #000000;
+    font: 13.333px Arial, sans-serif;
+    padding: 1px 22px 1px 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    vertical-align: baseline;
+    text-align: start;
+    text-indent: 0;
+    text-transform: none;
+    letter-spacing: normal;
+    word-spacing: normal;
+    cursor: default;
+}
+select:disabled {
+    color: rgba(16, 16, 16, 0.3);
+    border-color: rgba(118, 118, 118, 0.3);
+}
+select optgroup {
+    display: contents;
+}
+select option {
+    display: block;
+    height: 0;
+    padding: 0;
+    overflow: hidden;
+    visibility: hidden;
+    white-space: nowrap;
+    min-height: 0;
+}
+select option:checked {
+    height: auto;
+    overflow: visible;
+    visibility: inherit;
+}
+select[multiple],
+select[size]:not([size="0"]):not([size="1"]) {
+    padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    vertical-align: text-bottom;
+}
+select[multiple] option,
+select[size]:not([size="0"]):not([size="1"]) option {
+    height: auto;
+    overflow: visible;
+    visibility: inherit;
+    padding: 0 2px 1px;
+}
+select[multiple] option:checked,
+select[size]:not([size="0"]):not([size="1"]) option:checked {
+    background-color: #cecece;
 }
 
 picture {

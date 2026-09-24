@@ -496,12 +496,28 @@ impl NetworkCore {
         origin: &str,
     ) -> Result<(reqwest::Response, Option<OwnedSemaphorePermit>), NetError> {
         let permit = self.limiter.acquire(origin).await;
-        let response = self
-            .build_request(hop, headers, None)
-            .send()
-            .await
-            .map_err(|e| NetError::from_reqwest(&e))?;
-        Ok((response, permit))
+        // Like other browsers, retry once when the connection fails or is reset before a
+        // response arrives: always while connecting (nothing was sent), otherwise only for
+        // safe methods. Servers and proxies drop idle or rate-limited connections.
+        let mut retried = false;
+        loop {
+            match self.build_request(hop, headers.clone(), None).send().await {
+                Ok(response) => return Ok((response, permit)),
+                Err(e) => {
+                    let err = NetError::from_reqwest(&e);
+                    let reset = matches!(
+                        err.code(),
+                        "ERR_CONNECTION_RESET" | "ERR_CONNECTION_CLOSED" | "ERR_CONNECTION_ABORTED"
+                    );
+                    if retried || e.is_timeout() || !(e.is_connect() || (reset && is_safe(&hop.method))) {
+                        return Err(err);
+                    }
+                    log::debug!("{} {} failed ({err}); retrying once", hop.method, hop.url);
+                    retried = true;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
     }
 
     /// Sends the request over TCP or QUIC (see `alt_svc` for the policy) and reads the

@@ -208,8 +208,9 @@ pub(crate) struct RuntimeState {
     /// The runtime was created with the JS layer (it performs click activation behavior
     /// in its dispatch; see `activation::click_with_activation`).
     pub(crate) layer_loaded: Cell<bool>,
-    /// Last sibling lookup (node, index in parent) to make sibling iteration O(1).
-    pub(crate) sibling_hint: Cell<(NodeId, usize)>,
+    /// Last sibling lookups (node, index in parent), one slot per parent (hashed), to make
+    /// sibling iteration O(1) also while a recursive walk alternates between parents.
+    pub(crate) sibling_hints: [Cell<(NodeId, usize)>; 64],
     /// Pending synthetic-click activations (`activationBegin`/`activationEnd`).
     #[allow(clippy::type_complexity)]
     pub(crate) activations: RefCell<(
@@ -234,6 +235,13 @@ pub(crate) struct RuntimeState {
 }
 
 impl RuntimeState {
+    /// The sibling-lookup hint slot of `parent`.
+    #[inline]
+    pub(crate) fn sibling_hint(&self, parent: NodeId) -> &Cell<(NodeId, usize)> {
+        let k = parent.as_u64();
+        &self.sibling_hints[((k ^ (k >> 32)) as usize) & 63]
+    }
+
     pub(crate) fn new(
         host: Rc<dyn ScriptHost>,
         url: url::Url,
@@ -272,7 +280,7 @@ impl RuntimeState {
             input: RefCell::new(InputTracking::default()),
             js_layer: Cell::new(false),
             layer_loaded: Cell::new(false),
-            sibling_hint: Cell::new((NodeId::default(), 0)),
+            sibling_hints: std::array::from_fn(|_| Cell::new((NodeId::default(), 0))),
             activations: RefCell::new((HashMap::new(), 0)),
             sync_fetch_seq: Cell::new(0),
             blob_urls: RefCell::new(Vec::new()),

@@ -52,6 +52,7 @@ use style::queries::values::PrefersColorScheme;
 use style::selector_parser::ServoElementSnapshot;
 use style::servo::media_features::PointerCapabilities;
 use style::servo_arc::Arc as ServoArc;
+use style::stylesheets::OriginSet;
 use style::values::GenericAtomIdent;
 use style::values::computed::UserSelect;
 use style::values::computed::ui::CursorKind;
@@ -303,6 +304,15 @@ pub struct BaseDocument {
     pub(crate) controls_to_form: HashMap<NodeId, NodeId>,
     /// Nodes that contain sub documents
     pub(crate) sub_document_nodes: HashSet<NodeId>,
+    /// PATCH: inline roots whose line breaks a measurement overwrote after their final
+    /// layout (see `relayout_stale_inline_roots`).
+    pub(crate) stale_inline_roots: Vec<NodeId>,
+    /// PATCH: nodes whose unrounded layout changed and whose layout ancestors are not yet
+    /// flagged, and all nodes carrying layout-dirty flags (cleared after rounding).
+    pub(crate) layout_dirty_pending: Vec<NodeId>,
+    pub(crate) layout_dirty_touched: Vec<NodeId>,
+    /// PATCH: the viewport size the out-of-flow fixup last ran with.
+    pub(crate) abspos_viewport: Option<taffy::Size<f32>>,
     /// Load state (abort controller and in-flight request id) for each
     /// `<iframe>` element whose sub-document is loaded automatically
     pub(crate) iframe_loads: HashMap<NodeId, crate::iframe::IframeLoad>,
@@ -326,6 +336,13 @@ pub struct BaseDocument {
     /// requests for the same URL are queued here instead of starting new fetches.
     /// Value is a list of (node_id, image_type) pairs waiting for the image.
     pub(crate) pending_images: HashMap<String, Vec<(NodeId, ImageType)>>,
+    /// PATCH: elements whose resource finished loading since the last
+    /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
+    /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
+    pub(crate) element_load_events: Vec<(NodeId, bool)>,
+    /// PATCH: set once the parser is done: stylesheets inserted later (by scripts) are
+    /// not render-blocking, as in other browsers.
+    pub(crate) parser_done: bool,
 
     /// Nodes whose `background-image`/`mask-image` layers need flushing to
     /// dedicated storage on the node because their style changed (populated by
@@ -487,6 +504,10 @@ impl BaseDocument {
             subdoc_is_animating: false,
             has_canvas: false,
             sub_document_nodes: HashSet::new(),
+            stale_inline_roots: Vec::new(),
+            layout_dirty_pending: Vec::new(),
+            layout_dirty_touched: Vec::new(),
+            abspos_viewport: None,
             iframe_loads: HashMap::new(),
 
             #[cfg(feature = "custom-widget")]
@@ -498,6 +519,8 @@ impl BaseDocument {
             deferred_construction_nodes: Vec::new(),
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
+            element_load_events: Vec::new(),
+            parser_done: false,
             pending_style_image_nodes: Vec::new(),
             pending_critical_resources: HashSet::new(),
             controls_to_form: HashMap::new(),
@@ -1123,6 +1146,7 @@ impl BaseDocument {
                                     guard: self.guard.clone(),
                                     net_provider: self.net_provider.clone(),
                                     abort_signal: self.abort_signal.clone(),
+                                    media: self.media_list_of(node_id),
                                 },
                             ),
                         );
@@ -1135,8 +1159,217 @@ impl BaseDocument {
     pub fn process_style_element(&mut self, target_id: NodeId) {
         let css = self.nodes[target_id].text_content();
         let css = html_escape::decode_html_entities(&css);
-        let sheet = self.make_stylesheet(&css, Origin::Author);
+        let media = self.media_list_of(target_id);
+        // PATCH: `<style>` in template contents is inert; in a shadow tree it is scoped.
+        let sheet = match self.style_scope(target_id) {
+            StyleScope::Inert => {
+                self.remove_stylesheet_for_node(target_id);
+                return;
+            }
+            StyleScope::Document => self.make_stylesheet_with_media(&css, Origin::Author, media),
+            StyleScope::ShadowHost(host) => {
+                let scoped = crate::shadow_css::scope_shadow_css(&css, &host.to_string());
+                self.make_stylesheet_with_media(&scoped, Origin::Author, media)
+            }
+        };
         self.add_stylesheet_for_node(sheet, target_id);
+    }
+
+    /// PATCH: the media list of a `<style>`/`<link>` element's `media` attribute (empty,
+    /// i.e. all media, if absent). Print stylesheets used to apply on screen and hid e.g.
+    /// the whole header of theguardian.com.
+    pub(crate) fn media_list_of(&self, node_id: NodeId) -> MediaList {
+        use style::parser::ParserContext;
+        use style::stylesheets::CssRuleType;
+        use style_traits::ParsingMode;
+        let Some(media) = self
+            .nodes
+            .get(node_id)
+            .and_then(|n| n.attr(local_name!("media")))
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        else {
+            return MediaList::empty();
+        };
+        let url = self.url.url_extra_data();
+        let mut ctx = ParserContext::new(
+            Origin::Author,
+            &url,
+            Some(CssRuleType::Media),
+            ParsingMode::DEFAULT,
+            QuirksMode::NoQuirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        );
+        let mut input = cssparser::ParserInput::new(media);
+        MediaList::parse(&mut ctx, &mut cssparser::Parser::new(&mut input))
+    }
+
+    /// PATCH: the `media` attribute of a `<style>`/`<link>` changed.
+    pub(crate) fn update_stylesheet_media(&mut self, node_id: NodeId) {
+        let media = self.media_list_of(node_id);
+        let Some(sheet) = self.nodes_to_stylesheet.get(&node_id).cloned() else {
+            return;
+        };
+        {
+            let mut guard = self.guard.write();
+            *sheet.0.media.write_with(&mut guard) = media;
+        }
+        // Re-add the sheet (this removes the old entry) so the stylist re-evaluates it.
+        self.add_stylesheet_for_node(sheet, node_id);
+        self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+        if let Some(root) = self.try_root_element().map(|n| n.id) {
+            self.nodes[root].set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        }
+    }
+
+    /// PATCH: where a `<style>`/`<link>` element's stylesheet applies: nowhere inside
+    /// `<template>` contents, only to the host's subtree inside an emulated shadow tree.
+    pub fn style_scope(&self, node_id: NodeId) -> StyleScope {
+        let mut cur = self.nodes.get(node_id).and_then(|n| n.parent);
+        while let Some(id) = cur {
+            let Some(node) = self.nodes.get(id) else { break };
+            if node.flags.contains(NodeFlags::IS_SHADOW_HOST) {
+                return StyleScope::ShadowHost(id);
+            }
+            if node.data.is_element_with_tag_name(&local_name!("template")) {
+                return StyleScope::Inert;
+            }
+            cur = node.parent;
+        }
+        StyleScope::Document
+    }
+
+    /// PATCH: mark or unmark `host` as the host of an emulated shadow tree. Stylesheets
+    /// inside it are re-scoped and the subtree is restyled.
+    pub fn set_shadow_host(&mut self, host: NodeId, is_host: bool) {
+        let Some(node) = self.nodes.get_mut(host) else { return };
+        if node.flags.contains(NodeFlags::IS_SHADOW_HOST) == is_host {
+            return;
+        }
+        node.flags.set(NodeFlags::IS_SHADOW_HOST, is_host);
+        node.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        let mut styles = Vec::new();
+        let mut stack = vec![host];
+        while let Some(id) = stack.pop() {
+            let node = &self.nodes[id];
+            if node.data.is_element_with_tag_name(&local_name!("style")) {
+                styles.push(id);
+            }
+            stack.extend(node.children.iter().copied());
+        }
+        for id in styles {
+            self.process_style_element(id);
+        }
+    }
+
+    /// PATCH: a text control's value became empty or non-empty: `:placeholder-shown`
+    /// (and selectors on following siblings, e.g. floating labels) must be re-matched.
+    pub fn restyle_for_value_emptiness_change(&mut self, id: NodeId) {
+        let target = self.nodes.get(id).and_then(|n| n.parent).unwrap_or(id);
+        if let Some(node) = self.nodes.get_mut(target) {
+            node.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        }
+    }
+
+    /// PATCH: the options of a `<select>` in tree order (including those in `<optgroup>`s).
+    pub fn select_options(&self, select: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let Some(node) = self.nodes.get(select) else { return out };
+        for &child in node.children.iter() {
+            let c = &self.nodes[child];
+            if c.data.is_element_with_tag_name(&local_name!("option")) {
+                out.push(child);
+            } else if c.data.is_element_with_tag_name(&local_name!("optgroup")) {
+                for &gc in c.children.iter() {
+                    if self.nodes[gc].data.is_element_with_tag_name(&local_name!("option")) {
+                        out.push(gc);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// PATCH: mark the selected options of `select` with the `:checked` state, which the UA
+    /// stylesheet uses to show the selected option inside a drop-down `<select>`.
+    pub fn set_select_state(&mut self, select: NodeId, selected: &[(NodeId, bool)], by_script: bool) {
+        if by_script {
+            if let Some(n) = self.nodes.get_mut(select) {
+                n.flags.insert(NodeFlags::IS_SELECT_SCRIPT_MANAGED);
+            }
+        }
+        let mut changed = false;
+        for &(opt, on) in selected {
+            if let Some(el) = self.nodes.get_mut(opt).and_then(|n| n.element_data_mut()) {
+                if el.element_state.contains(ElementState::CHECKED) != on {
+                    el.element_state.set(ElementState::CHECKED, on);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            if let Some(n) = self.nodes.get_mut(select) {
+                n.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+            }
+            self.shell_provider.request_redraw();
+        }
+    }
+
+    /// PATCH: selectedness from the markup (for selects the script runtime doesn't manage):
+    /// the last option with `selected`, else (drop-down) the first enabled option.
+    pub(crate) fn apply_default_select_state(&mut self, select: NodeId) {
+        let Some(node) = self.nodes.get(select) else { return };
+        if node.flags.contains(NodeFlags::IS_SELECT_SCRIPT_MANAGED) {
+            return;
+        }
+        let Some(el) = node.element_data() else { return };
+        let multiple = el.attr(local_name!("multiple")).is_some();
+        let options = self.select_options(select);
+        let has = |id: NodeId, name: LocalName| {
+            self.nodes[id].element_data().is_some_and(|e| e.attr(name).is_some())
+        };
+        let mut states: Vec<(NodeId, bool)> =
+            options.iter().map(|&o| (o, has(o, local_name!("selected")))).collect();
+        if !multiple {
+            let last = states.iter().rposition(|(_, s)| *s);
+            for (i, e) in states.iter_mut().enumerate() {
+                e.1 = Some(i) == last;
+            }
+            if last.is_none() {
+                if let Some(first) = states
+                    .iter_mut()
+                    .find(|(o, _)| !has(*o, local_name!("disabled")))
+                {
+                    first.1 = true;
+                }
+            }
+        }
+        self.set_select_state(select, &states, false);
+    }
+
+    /// PATCH: the custom element `id` is now defined (`:defined` matches).
+    pub fn set_custom_element_defined(&mut self, id: NodeId) {
+        let Some(node) = self.nodes.get_mut(id) else { return };
+        if node.flags.contains(NodeFlags::IS_CUSTOM_DEFINED) {
+            return;
+        }
+        node.flags.insert(NodeFlags::IS_CUSTOM_DEFINED);
+        node.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+    }
+
+    fn remove_stylesheet_for_node(&mut self, node_id: NodeId) {
+        if let Some(old) = self.nodes_to_stylesheet.remove(&node_id) {
+            self.stylist.remove_stylesheet(old, &self.guard.read());
+            self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+            if let Some(el) = self.nodes[node_id].element_data_mut() {
+                if matches!(el.special_data, SpecialElementData::Stylesheet(_)) {
+                    el.special_data = SpecialElementData::None;
+                }
+            }
+        }
     }
 
     pub fn remove_user_agent_stylesheet(&mut self, contents: &str) {
@@ -1168,11 +1401,21 @@ impl BaseDocument {
     }
 
     pub fn make_stylesheet(&self, css: impl AsRef<str>, origin: Origin) -> DocumentStyleSheet {
+        self.make_stylesheet_with_media(css, origin, MediaList::empty())
+    }
+
+    /// PATCH: a stylesheet that applies to `media` only.
+    pub fn make_stylesheet_with_media(
+        &self,
+        css: impl AsRef<str>,
+        origin: Origin,
+        media: MediaList,
+    ) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
             css.as_ref(),
             self.url.url_extra_data(),
             origin,
-            ServoArc::new(self.guard.wrap(MediaList::empty())),
+            ServoArc::new(self.guard.wrap(media)),
             self.guard.clone(),
             Some(&StylesheetLoader {
                 tx: self.tx.clone(),
@@ -1262,12 +1505,50 @@ impl BaseDocument {
         !self.pending_critical_resources.is_empty()
     }
 
+    /// PATCH: the document has been parsed; stylesheets added from now on don't block
+    /// rendering.
+    pub fn set_parser_done(&mut self) {
+        self.parser_done = true;
+    }
+
+    /// PATCH: take the element resource loads/failures since the last call.
+    pub fn take_element_load_events(&mut self) -> Vec<(NodeId, bool)> {
+        std::mem::take(&mut self.element_load_events)
+    }
+
+    fn push_element_load_event(&mut self, node_id: NodeId, ok: bool) {
+        let fires = self.nodes.get(node_id).is_some_and(|n| {
+            n.data.is_element_with_tag_name(&local_name!("img"))
+                || n.data.is_element_with_tag_name(&local_name!("link"))
+                || n.data.is_element_with_tag_name(&local_name!("iframe"))
+        });
+        if fires {
+            self.element_load_events.push((node_id, ok));
+        }
+    }
+
     pub fn load_resource(&mut self, res: ResourceLoadResponse) {
         self.pending_critical_resources.remove(&res.request_id);
 
         let resource = match res.result {
             Ok(resource) => resource,
             Err(err) => {
+                // PATCH: `error` events.
+                if let Some(url) = res.resolved_url.as_ref() {
+                    let waiting = self.pending_images.get(url).cloned().unwrap_or_default();
+                    for (node_id, image_type) in waiting {
+                        if matches!(image_type, ImageType::Image) {
+                            self.push_element_load_event(node_id, false);
+                        }
+                    }
+                }
+                if let Some(node_id) = res.node_id
+                    && self.nodes.get(node_id).is_some_and(|n| {
+                        !n.data.is_element_with_tag_name(&local_name!("img"))
+                    })
+                {
+                    self.push_element_load_event(node_id, false);
+                }
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
                     #[cfg(feature = "tracing")]
@@ -1290,9 +1571,20 @@ impl BaseDocument {
         };
 
         match resource {
-            Resource::Css(css) => {
+            Resource::Css(css, source) => {
                 let node_id = res.node_id.unwrap();
-                self.add_stylesheet_for_node(css, node_id);
+                // PATCH: linked stylesheets follow the same scoping as `<style>`.
+                match self.style_scope(node_id) {
+                    StyleScope::Document => self.add_stylesheet_for_node(css, node_id),
+                    StyleScope::Inert => {}
+                    StyleScope::ShadowHost(host) => {
+                        let scoped =
+                            crate::shadow_css::scope_shadow_css(&source, &host.to_string());
+                        let sheet = self.make_stylesheet(&scoped, Origin::Author);
+                        self.add_stylesheet_for_node(sheet, node_id);
+                    }
+                }
+                self.push_element_load_event(node_id, true);
             }
             Resource::Image(_kind, width, height, image_data) => {
                 // Create the ImageData and cache it
@@ -1320,6 +1612,7 @@ impl BaseDocument {
                     return;
                 };
                 self.apply_iframe_html(node_id, res.request_id, res.resolved_url, &html);
+                self.push_element_load_event(node_id, true);
             }
             Resource::Font(bytes, overrides) => {
                 let font = Blob::new(Arc::new(bytes));
@@ -1395,6 +1688,7 @@ impl BaseDocument {
                     // Clear layout cache
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
+                    self.push_element_load_event(node_id, true);
                 }
                 ImageType::Background(idx) | ImageType::Mask(idx) => {
                     let layer_image = node.element_data_mut().and_then(|el| {
@@ -2192,14 +2486,85 @@ impl BaseDocument {
         }
 
         let node = self.get_node(node_id)?;
-        let pos = node.absolute_position(0.0, 0.0);
+        let size = node.unrounded_layout().size;
+        let (w, h) = (size.width as f64, size.height as f64);
+
+        // PATCH: map the border box's corners up the layout tree like painting does: CSS
+        // transforms of the node and its ancestors, ancestors' scroll offsets, sticky shifts,
+        // and `position: fixed` boxes stay put when the viewport scrolls.
+        let scale = self.viewport.scale_f64();
+        let mut corners = [
+            kurbo::Point::new(0.0, 0.0),
+            kurbo::Point::new(w, 0.0),
+            kurbo::Point::new(0.0, h),
+            kurbo::Point::new(w, h),
+        ];
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            let n = &self.nodes[id];
+            if id != node_id {
+                let scroll = n.scroll_offset();
+                for p in &mut corners {
+                    p.x -= scroll.x;
+                    p.y -= scroll.y;
+                }
+            }
+            if let Some(t) = *n.transform() {
+                for p in &mut corners {
+                    let q = t * kurbo::Point::new(p.x * scale, p.y * scale);
+                    *p = kurbo::Point::new(q.x / scale, q.y / scale);
+                }
+            }
+            let location = n.final_layout().location;
+            let position = n.primary_styles().map(|s| s.clone_position());
+            let (dx, dy) = match position {
+                Some(style::computed_values::position::T::Fixed)
+                    if !self.has_fixed_or_transformed_ancestor(id) =>
+                {
+                    (self.viewport_scroll.x, self.viewport_scroll.y)
+                }
+                Some(style::computed_values::position::T::Sticky) => {
+                    let (x, y) = n.sticky_offset.get();
+                    (x as f64, y as f64)
+                }
+                _ => (0.0, 0.0),
+            };
+            for p in &mut corners {
+                p.x += location.x as f64 + dx;
+                p.y += location.y as f64 + dy;
+            }
+            cur = n.layout_parent.get();
+        }
+        let x0 = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let y0 = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
 
         Some(BoundingRect {
-            x: pos.x as f64 - self.viewport_scroll.x,
-            y: pos.y as f64 - self.viewport_scroll.y,
-            width: node.unrounded_layout().size.width as f64,
-            height: node.unrounded_layout().size.height as f64,
+            x: x0 - self.viewport_scroll.x,
+            y: y0 - self.viewport_scroll.y,
+            width: x1 - x0,
+            height: y1 - y0,
         })
+    }
+
+    /// Whether a layout ancestor of `node_id` is `position: fixed` or transformed (then a
+    /// fixed box moves with it instead of staying at its viewport position).
+    fn has_fixed_or_transformed_ancestor(&self, node_id: NodeId) -> bool {
+        // Same test as blitz-paint's, which decides whether to keep the box in place.
+        let node = &self.nodes[node_id];
+        let mut cur = node.layout_parent.get().or(node.parent);
+        while let Some(id) = cur {
+            let n = &self.nodes[id];
+            if n.primary_styles().is_some_and(|s| {
+                s.clone_position() == style::computed_values::position::T::Fixed
+                    || !s.get_box().transform.0.is_empty()
+            }) {
+                return true;
+            }
+            cur = n.layout_parent.get().or(n.parent);
+        }
+        false
     }
 
     /// Computes the sizes and positions of the `Node`'s box fragments relative to the
@@ -2307,13 +2672,20 @@ impl BaseDocument {
                             continue;
                         }
                         let x0 = inline_box.x as f64;
-                        let y0 = inline_box.y as f64;
-                        add(
-                            x0,
-                            y0,
-                            x0 + inline_box.width as f64,
-                            y0 + inline_box.height as f64,
-                        );
+                        // PATCH: zero-height spacers (padding/border edges, empty inline
+                        // elements) span the line box, like the element's text would.
+                        let (y0, y1) = if inline_box.height <= 0.0 {
+                            (
+                                line_metrics.block_min_coord as f64,
+                                line_metrics.block_max_coord as f64,
+                            )
+                        } else {
+                            (
+                                inline_box.y as f64,
+                                (inline_box.y + inline_box.height) as f64,
+                            )
+                        };
+                        add(x0, y0, x0 + inline_box.width as f64, y1);
                     }
                 }
             }
@@ -3234,4 +3606,15 @@ mod font_face_override_tests {
              not the font file's internal `name` table entry",
         );
     }
+}
+
+/// PATCH: where the stylesheet of a `<style>`/`<link>` element applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleScope {
+    /// The whole document.
+    Document,
+    /// Nowhere (template contents).
+    Inert,
+    /// Only the subtree of this (emulated) shadow host.
+    ShadowHost(NodeId),
 }

@@ -140,6 +140,7 @@
       if (d.ext !== null) N.setAttr(id, 'is', d.name);
       const w = L.wrapElementAs(id, newTarget.prototype, d.localName, HTML);
       L.ceState.set(w, d);
+      if (typeof N.setDefined === 'function') N.setDefined(id);
       return w;
     }
     const w = stack[stack.length - 1];
@@ -1675,7 +1676,7 @@
   L.templateInfo = function (el) {
     if (nativeTemplates) {
       const id = idOf(el);
-      if (N.firstChild(id) !== 0) state.tree++; // the parsed children are about to move
+      if (N.firstChild(id) !== 0) L.treeChanged(); // the parsed children are about to move
       return N.templateContent(id);
     }
     let f = templateContent.get(el);
@@ -1686,7 +1687,7 @@
       while ((c = N.firstChild(id)) !== 0) { N.appendChild(f, c); moved = true; }
       templateContent.set(el, f);
       templatesExtracted++;
-      if (moved) state.tree++;
+      if (moved) L.treeChanged();
     }
     return f;
   };

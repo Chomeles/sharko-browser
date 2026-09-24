@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 
 use crate::StyleThreading;
 use crate::layout::damage::compute_layout_damage;
-use crate::node::Node;
+use crate::node::{Node, NodeFlags};
 use crate::node::NodeData;
 use markup5ever::{LocalName, LocalNameStaticSet, Namespace, NamespaceStaticSet, local_name};
 use selectors::bloom::BLOOM_HASH_MASK;
@@ -399,6 +399,12 @@ impl selectors::Element for BlitzNode<'_> {
         local_name: &GenericAtomIdent<LocalNameStaticSet>,
         operation: &AttrSelectorOperation<&AtomString>,
     ) -> bool {
+        // PATCH: virtual attribute of emulated shadow hosts (see `shadow_css`).
+        if self.flags.contains(NodeFlags::IS_SHADOW_HOST)
+            && &*local_name.0 == crate::shadow_css::SHADOW_HOST_ATTR
+        {
+            return operation.eval_str(&self.id.to_string());
+        }
         match self.data.attr(local_name.0.clone()) {
             None => false,
             Some(attr_value) => operation.eval_str(attr_value),
@@ -418,7 +424,14 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Checked => self.element_state().contains(ElementState::CHECKED),
             NonTSPseudoClass::Valid => false,
             NonTSPseudoClass::Invalid => false,
-            NonTSPseudoClass::Defined => false,
+            // PATCH: built-in elements are always defined; custom elements once upgraded.
+            NonTSPseudoClass::Defined => {
+                self.flags.contains(NodeFlags::IS_CUSTOM_DEFINED)
+                    || !self
+                        .data
+                        .downcast_element()
+                        .is_some_and(|el| el.name.local.contains('-'))
+            }
             NonTSPseudoClass::Disabled => self.element_state().contains(ElementState::DISABLED),
             NonTSPseudoClass::Enabled => self.element_state().contains(ElementState::ENABLED),
             NonTSPseudoClass::Focus => self.element_state().contains(ElementState::FOCUS),
@@ -430,7 +443,16 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Lang(_) => false,
             NonTSPseudoClass::CustomState(_) => false,
             NonTSPseudoClass::Link => self.element_state().contains(ElementState::UNVISITED),
-            NonTSPseudoClass::PlaceholderShown => false,
+            // PATCH: a text control with a non-empty placeholder and an empty value.
+            NonTSPseudoClass::PlaceholderShown => self.element_data().is_some_and(|el| {
+                el.attr(local_name!("placeholder"))
+                    .is_some_and(|p| !p.is_empty())
+                    && match el.text_input_data() {
+                        Some(input) => input.editor.raw_text().is_empty(),
+                        // Before the editor exists (first style pass): the initial value.
+                        None => el.attr(local_name!("value")).is_none_or(|v| v.is_empty()),
+                    }
+            }),
             NonTSPseudoClass::ReadWrite => false,
             NonTSPseudoClass::ReadOnly => false,
             NonTSPseudoClass::ServoNonZeroBorder => false,
@@ -517,15 +539,14 @@ impl selectors::Element for BlitzNode<'_> {
         search_name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
         case_sensitivity: selectors::attr::CaseSensitivity,
     ) -> bool {
+        // PATCH: compare the class tokens as bytes instead of interning an `Atom` per
+        // token (hashing + the global atom-set lock) on every class selector test.
         let class_attr = self.data.attr(local_name!("class"));
         if let Some(class_attr) = class_attr {
-            // split the class attribute
-            for pheme in class_attr.split_ascii_whitespace() {
-                let atom = Atom::from(pheme);
-                if case_sensitivity.eq_atom(&atom, search_name) {
-                    return true;
-                }
-            }
+            let needle: &str = &search_name.0;
+            return class_attr
+                .split_ascii_whitespace()
+                .any(|pheme| case_sensitivity.eq(pheme.as_bytes(), needle.as_bytes()));
         }
 
         false
@@ -653,6 +674,12 @@ impl<'a> TElement for BlitzNode<'a> {
             for attr in attrs.iter() {
                 callback(&GenericAtomIdent(attr.name.local.clone()));
             }
+        }
+        // PATCH: virtual attribute of emulated shadow hosts (bloom filter).
+        if self.flags.contains(NodeFlags::IS_SHADOW_HOST) {
+            callback(&GenericAtomIdent(LocalName::from(
+                crate::shadow_css::SHADOW_HOST_ATTR,
+            )));
         }
     }
 
@@ -931,7 +958,9 @@ impl<'a> TElement for BlitzNode<'a> {
             let name = &attr.name.local;
             let value = attr.value.as_str();
 
-            if *name == local_name!("align") {
+            // PATCH: `<table align>` positions the table (margins/float, see below and the UA
+            // stylesheet) instead of aligning its text.
+            if *name == local_name!("align") && *tag != local_name!("table") {
                 use style::values::specified::TextAlign;
                 let keyword = match value {
                     "left" => Some(StyloTextAlign::MozLeft),
@@ -1122,6 +1151,30 @@ impl<'a> TElement for BlitzNode<'a> {
                 push_style(PropertyDeclaration::Display(Display::None));
             }
         }
+
+        // PATCH: table, cell and `<font>` attributes (see `legacy_hints`).
+        let css = crate::legacy_hints::legacy_hints_css(self);
+        if !css.is_empty() {
+            static URL: std::sync::OnceLock<style::stylesheets::UrlExtraData> =
+                std::sync::OnceLock::new();
+            let url = URL.get_or_init(|| {
+                style::stylesheets::UrlExtraData::from(
+                    ::url::Url::parse("about:blank").expect("valid URL"),
+                )
+            });
+            let block = style::properties::parse_style_attribute(
+                &css,
+                url,
+                None,
+                style::context::QuirksMode::NoQuirks,
+                style::stylesheets::CssRuleType::Style,
+            );
+            hints.push(ApplicableDeclarationBlock::from_declarations(
+                Arc::new(self.guard().wrap(block)),
+                CascadeLevel::new(CascadeOrigin::PresHints),
+                LayerOrder::root(),
+            ));
+        }
     }
 
     fn local_name(&self) -> &LocalName {
@@ -1258,7 +1311,27 @@ impl<'dom> DomTraversal<BlitzNode<'dom>> for RecalcStyle<'_> {
         if let Some(el) = node.as_element() {
             // let mut data = el.mutate_data().unwrap();
             let mut data = unsafe { el.ensure_data() };
+            // PATCH: an element styled for the first time (e.g. inserted while inside a
+            // `display: none` subtree that is now shown) gets no damage from the style
+            // difference, and damage set at insertion was lost because it had no style
+            // data yet. Without box construction damage its subtree stayed 0×0.
+            let first_style = data.styles.get_primary().is_none();
+            let old_style = data.styles.get_primary().cloned();
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
+            if first_style {
+                data.damage.insert(crate::layout::damage::ALL_DAMAGE);
+            } else if data.damage.is_empty()
+                && !matches!(
+                    (&old_style, data.styles.get_primary()),
+                    (Some(old), Some(new)) if style::servo_arc::Arc::ptr_eq(old, new)
+                )
+            {
+                // PATCH: a new style without visible differences still has to reach the
+                // node's taffy style, which points into the style's calc() values (the
+                // style flush skips undamaged subtrees).
+                data.damage.insert(RestyleDamage::REPAINT);
+            }
+            drop(old_style);
 
             sync_pseudo_element_styles(el, &data, &self.nodes_needing_style_image_flush);
 
@@ -1364,8 +1437,14 @@ fn sync_pseudo_element_styles(
         }
 
         let diff = RestyleDamage::compute_style_difference::<&Node>(&old_style, &pe_style);
-        if !diff.damage.is_empty() {
-            pe_data.damage.insert(diff.damage);
+        // PATCH: a new style object always reaches the layout (see `recalc_style`).
+        let damage = if diff.damage.is_empty() {
+            RestyleDamage::REPAINT
+        } else {
+            diff.damage
+        };
+        if !damage.is_empty() {
+            pe_data.damage.insert(damage);
             pe_node.mark_damaged();
 
             if needs_style_image_flush(pe_node, &pe_style) {

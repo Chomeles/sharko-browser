@@ -98,10 +98,15 @@ fn set_editor_text(doc: &mut BaseDocument, id: NodeId, text: &str, multiline: bo
     } else {
         return;
     }
+    let was_empty = editor_text(doc, id).is_none_or(|t| t.is_empty());
     doc.with_text_input(id, |mut driver| {
         driver.editor.set_text(text);
         driver.move_to_text_end();
     });
+    if was_empty != text.is_empty() {
+        // `:placeholder-shown` (and dependent sibling selectors) changed.
+        doc.restyle_for_value_emptiness_change(id);
+    }
     doc.shell_provider.request_redraw();
 }
 
@@ -303,8 +308,16 @@ fn select_changed(st: &RuntimeState, doc: &mut BaseDocument, select: NodeId) {
     if let Some(n) = doc.get_node_mut(select) {
         n.set_restyle_hint(blitz_dom::RestyleHint::RESTYLE_DESCENDANTS);
     }
+    sync_select_display(st, doc, select);
     st.invalidate_layout();
     doc.shell_provider.request_redraw();
+}
+
+/// Show the selected option(s) of `select` (the `:checked` state the UA stylesheet uses to
+/// render the drop-down's current option).
+pub(crate) fn sync_select_display(st: &RuntimeState, doc: &mut BaseDocument, select: NodeId) {
+    let list = selectedness_list(st, doc, select);
+    doc.set_select_state(select, &list, true);
 }
 
 // ---------------------------------------------------------------------------------

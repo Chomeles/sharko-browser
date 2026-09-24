@@ -5,3 +5,4 @@ node_modules/
 *.png
 !resources/**/*.png
 update-signing.key
+/resources/icudtl.dat

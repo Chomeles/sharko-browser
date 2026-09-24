@@ -432,6 +432,15 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             box_position.y += dy;
             node.sticky_offset
                 .set(((dx / self.scale) as f32, (dy / self.scale) as f32));
+        } else if styles.get_box().position == style::computed_values::position::T::Fixed
+            && !has_fixed_or_transformed_ancestor(self.dom.as_ref(), node)
+        {
+            // PATCH: `position: fixed` stays in place when the viewport scrolls (its layout
+            // position is relative to the initial containing block, see blitz-dom `abspos`).
+            let scroll = self.dom.as_ref().viewport_scroll();
+            box_position.x += scroll.x * self.scale;
+            box_position.y += scroll.y * self.scale;
+            node.sticky_offset.set((scroll.x as f32, scroll.y as f32));
         }
         let box_size = Size::new(size.width as f64, size.height as f64);
         let border_box = Rect::from_origin_size(box_position.to_point(), box_size);
@@ -565,6 +574,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                         cx.draw_table_row_backgrounds(scene);
                         cx.draw_table_borders(scene);
                         cx.draw_border(scene);
+                        cx.draw_select_arrow(scene);
                         cx.stroke_devtools(scene);
 
                         // TODO: allow layers with opacity to be unclipped (overflow: visible)
@@ -967,6 +977,16 @@ impl ElementCx<'_, '_> {
                 };
             }
 
+            // PATCH: the placeholder while the value is empty, in the text color at 54%
+            // opacity (as Firefox; adapts to dark inputs unlike a fixed gray).
+            if input_data.editor.raw_text().is_empty() {
+                if let Some(placeholder) = &input_data.placeholder {
+                    let color = self.style.get_inherited_text().color.as_srgb_color();
+                    let color = color.with_alpha(color.components[3] * 0.54);
+                    crate::text::draw_plain_layout(scene, placeholder, transform, color);
+                }
+            }
+
             // Render text
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
             crate::text::stroke_text(
@@ -979,6 +999,43 @@ impl ElementCx<'_, '_> {
                 &mut draw_text_context,
             );
         }
+    }
+
+    /// PATCH: the drop-down arrow of a `<select>` (unless `appearance: none`, in which case
+    /// pages draw their own), in the padding area on the inline-end side.
+    fn draw_select_arrow(&self, scene: &mut impl PaintScene) {
+        use style::values::specified::box_::Appearance;
+        let Some(el) = self.node.element_data() else { return };
+        if el.name.local != local_name!("select")
+            || el.attr(local_name!("multiple")).is_some()
+            || el
+                .attr(local_name!("size"))
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .is_some_and(|n| n > 1)
+            || self.style.get_box().appearance == Appearance::None
+        {
+            return;
+        }
+        let pb = self.frame.padding_box;
+        let s = self.scale;
+        let (w, h) = (8.0 * s, 4.5 * s);
+        let cx = pb.x1 - 11.0 * s;
+        let cy = (pb.y0 + pb.y1) / 2.0;
+        if cx - w / 2.0 < pb.x0 {
+            return;
+        }
+        let mut path = kurbo::BezPath::new();
+        path.move_to((cx - w / 2.0, cy - h / 2.0));
+        path.line_to((cx, cy + h / 2.0));
+        path.line_to((cx + w / 2.0, cy - h / 2.0));
+        let color = self.style.clone_color().as_srgb_color();
+        scene.stroke(
+            &kurbo::Stroke::new(1.5 * s),
+            self.transform,
+            color,
+            None,
+            &path,
+        );
     }
 
     fn draw_marker(&self, scene: &mut impl PaintScene, pos: Point) {
@@ -1270,4 +1327,22 @@ fn create_css_rect(style: &ComputedValues, layout: &Layout, scale: f64) -> CssBo
     };
 
     CssBox::new(border_box, border, padding, outline_width, border_radii)
+}
+
+/// PATCH: whether a `position: fixed` box is inside another fixed box (already kept in
+/// place) or a transformed box (which is its containing block instead of the viewport).
+fn has_fixed_or_transformed_ancestor(dom: &BaseDocument, node: &Node) -> bool {
+    let mut cur = node.layout_parent.get().or(node.parent);
+    while let Some(id) = cur {
+        let Some(n) = dom.get_node(id) else { break };
+        if let Some(styles) = n.primary_styles() {
+            if styles.get_box().position == style::computed_values::position::T::Fixed
+                || !styles.get_box().transform.0.is_empty()
+            {
+                return true;
+            }
+        }
+        cur = n.layout_parent.get().or(n.parent);
+    }
+    false
 }
