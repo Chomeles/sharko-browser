@@ -4,7 +4,7 @@ members = ["crates/common", "crates/netstack", "crates/script", "crates/engine",
 default-members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "crates/browser", "crates/shell", "crates/core", "crates/launcher"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
 license-file = "LICENSE.md"
