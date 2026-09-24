@@ -20,7 +20,7 @@ use selectors::{
 };
 use style::CaseSensitivityExt;
 use style::animation::AnimationSetKey;
-use style::animation::AnimationState;
+use style::animation::{AnimationState, KeyframesIterationState};
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::bloom::each_relevant_element_hash;
 use style::color::AbsoluteColor;
@@ -57,6 +57,16 @@ use style::{
 use style_dom::ElementState;
 
 use style::values::computed::text::TextAlign as StyloTextAlign;
+
+fn pseudo_name(pseudo: Option<&style::selector_parser::PseudoElement>) -> &'static str {
+    use style::selector_parser::PseudoElement;
+    match pseudo {
+        Some(PseudoElement::Before) => "::before",
+        Some(PseudoElement::After) => "::after",
+        Some(PseudoElement::Marker) => "::marker",
+        _ => "",
+    }
+}
 
 impl crate::document::BaseDocument {
     pub fn resolve_stylist(&mut self, now: f64) {
@@ -103,23 +113,54 @@ impl crate::document::BaseDocument {
 
             self.nodes[node_id].set_restyle_hint(RestyleHint::RESTYLE_SELF);
 
+            // PATCH: record animation/transition events for the embedder to dispatch.
+            let pseudo = pseudo_name(key.pseudo_element.as_ref());
+            let mut event = |kind: &'static str, name: String, elapsed: f64| {
+                self.animation_events.push(crate::document::AnimationEvent {
+                    node: node_id,
+                    kind,
+                    name,
+                    // Durations are stored as f32: drop the float noise (0.2000000029).
+                    elapsed: (elapsed.max(0.0) * 1e6).round() / 1e6,
+                    pseudo,
+                });
+            };
+
             for animation in set.animations.iter_mut() {
                 if animation.state == AnimationState::Pending && animation.started_at <= now {
                     animation.state = AnimationState::Running;
+                    event("animationstart", animation.name.to_string(), 0.0);
                 }
-                animation.iterate_if_necessary(now);
+                // elapsedTime counts whole iterations (Stylo moves `started_at` forward on
+                // each iteration).
+                let iterations = match animation.iteration_state {
+                    KeyframesIterationState::Finite(current, _)
+                    | KeyframesIterationState::Infinite(current) => current,
+                };
+                if animation.iterate_if_necessary(now) {
+                    event("animationiteration", animation.name.to_string(), (iterations + 1.0) * animation.duration);
+                }
 
                 if animation.state == AnimationState::Running && animation.has_ended(now) {
                     animation.state = AnimationState::Finished;
+                    let total = match animation.iteration_state {
+                        KeyframesIterationState::Finite(_, max) => max * animation.duration,
+                        KeyframesIterationState::Infinite(current) => (current + 1.0) * animation.duration,
+                    };
+                    event("animationend", animation.name.to_string(), total);
                 }
             }
 
             for transition in set.transitions.iter_mut() {
                 if transition.state == AnimationState::Pending && transition.start_time <= now {
                     transition.state = AnimationState::Running;
+                    let name = transition.property_animation.property_id().name().into_owned();
+                    event("transitionstart", name, 0.0);
                 }
                 if transition.state == AnimationState::Running && transition.has_ended(now) {
                     transition.state = AnimationState::Finished;
+                    let name = transition.property_animation.property_id().name().into_owned();
+                    event("transitionend", name, transition.property_animation.duration);
                 }
             }
         }
@@ -167,12 +208,22 @@ impl crate::document::BaseDocument {
         self.snapshots.clear();
 
         let mut sets = self.animations.sets.write();
-        for set in sets.values_mut() {
+        for (key, set) in sets.iter_mut() {
             set.clear_canceled_animations();
             for animation in set.animations.iter_mut() {
                 animation.is_new = false;
             }
             for transition in set.transitions.iter_mut() {
+                if transition.is_new {
+                    // PATCH: a transition was created by this style pass.
+                    self.animation_events.push(crate::document::AnimationEvent {
+                        node: NodeId::from_u64(key.node.id() as u64),
+                        kind: "transitionrun",
+                        name: transition.property_animation.property_id().name().into_owned(),
+                        elapsed: 0.0,
+                        pseudo: pseudo_name(key.pseudo_element.as_ref()),
+                    });
+                }
                 transition.is_new = false;
             }
         }

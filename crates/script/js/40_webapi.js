@@ -3422,8 +3422,8 @@
     get storage() { return lazy('storage', () => new StorageManager(INTERNAL)); }
     get geolocation() { return lazy('geolocation', () => new Geolocation(INTERNAL)); }
     get locks() { return lazy('locks', () => new LockManager(INTERNAL)); }
-    get mediaDevices() { return undefined; }
-    get serviceWorker() { return undefined; }
+    // No `serviceWorker` / `mediaDevices` members (like Chrome in an insecure context):
+    // sites test `'serviceWorker' in navigator` and then call methods on it.
     sendBeacon(url, data) {
       const p = N.urlParse(L.toUSV(url), L.baseURL());
       if (p === null) throw new TypeError(`Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported.`);

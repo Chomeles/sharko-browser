@@ -450,6 +450,32 @@ impl ScriptRuntime {
         });
     }
 
+    /// CSS animation/transition events (`animationstart`, `transitionend`, ...): hook
+    /// `onAnimationEvent(id, type, name, elapsedTime, pseudoElement)` for each.
+    pub fn animation_events(&mut self, doc: &mut BaseDocument, events: Vec<blitz_dom::AnimationEvent>) {
+        let ptr = doc as *mut BaseDocument;
+        self.enter(ptr, |scope, st| {
+            for e in &events {
+                let Ok(doc) = st.doc() else { return };
+                if doc.get_node(e.node).is_none_or(|n| !n.is_element()) {
+                    continue;
+                }
+                crate::dom::expose(doc, e.node);
+                let Some(id) = cx::node_id_to_js(e.node) else {
+                    continue;
+                };
+                let args = [
+                    v8::Number::new(scope, id).into(),
+                    v8_str(scope, e.kind).into(),
+                    v8_str(scope, &e.name).into(),
+                    cx::num_value(scope, e.elapsed),
+                    v8_str(scope, e.pseudo).into(),
+                ];
+                call_hook(scope, st, Hook::AnimationEvent, &args);
+            }
+        });
+    }
+
     /// All subresources finished loading: hook `onResourcesLoaded`.
     pub fn resources_loaded(&mut self, doc: &mut BaseDocument) {
         let ptr = doc as *mut BaseDocument;

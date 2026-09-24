@@ -226,6 +226,10 @@ impl Renderer {
             if !page.load_sent {
                 min(Instant::now() + Duration::from_millis(50));
             }
+            // Animation events of the last frame are dispatched right away.
+            if page.doc.has_animation_events() {
+                min(Instant::now());
+            }
         }
         if self.needs_frame() {
             min(self.last_frame + self.frame_interval());
@@ -735,7 +739,11 @@ impl Renderer {
         if let Some(page) = &mut self.page {
             // Timers
             if let Some(rt) = page.rt.as_mut() {
-                if rt.next_timer_deadline().is_some_and(|d| d <= now) {
+                // Compare with a fresh clock: with internal tasks queued the deadline is
+                // "now" as of this call, which is always later than `now` above, and the
+                // queue would never be drained (every timer and `load` stalled while the
+                // loop spun at 100% CPU).
+                if rt.next_timer_deadline().is_some_and(|d| d <= Instant::now()) {
                     rt.run_timers(&mut page.doc);
                     self.shared.redraw.store(true, Ordering::SeqCst);
                 }
@@ -752,6 +760,14 @@ impl Renderer {
                     }
                 }
                 self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+
+            // CSS animation/transition events recorded by the last style pass.
+            let animation_events = page.doc.take_animation_events();
+            if !animation_events.is_empty() {
+                if let Some(rt) = page.rt.as_mut() {
+                    rt.animation_events(&mut page.doc, animation_events);
+                }
             }
 
             let pending = self.shared.pending_resources.load(Ordering::SeqCst);

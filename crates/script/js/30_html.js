@@ -178,15 +178,26 @@
   // N.focus/N.blur may dispatch blur/focusout/focus/focusin themselves (through
   // hooks.onEvent, counted in L.nativeFocusEvents); only fire them here if they did not.
   L.nativeFocusEvents = 0;
-  function focusElement(el) {
+  function focusElement(el, options) {
     const id = idOf(el);
     if (!N.isConnected(id)) return;
     const prev = N.activeElement();
     if (prev === id) return;
     const seen = L.nativeFocusEvents;
     N.focus(id);
+    if (N.activeElement() === id && !(options && options.preventScroll)) scrollFocusedIntoView(el, id);
     if (L.nativeFocusEvents !== seen || N.activeElement() !== id) return;
     L.fireFocusChange(prev, id);
+  }
+  // Like Chrome: a newly focused element that is not fully visible is centered.
+  function scrollFocusedIntoView(el, id) {
+    try {
+      const r = el.getBoundingClientRect();
+      const w = L.window.innerWidth, h = L.window.innerHeight;
+      if (r.width === 0 && r.height === 0) return;
+      if (r.top >= 0 && r.left >= 0 && r.bottom <= h && r.right <= w) return;
+      N.scrollIntoView(id, 'center', 'nearest', 'auto');
+    } catch (_) { /* best effort */ }
   }
   function blurElement(el) {
     const id = idOf(el);
@@ -378,7 +389,7 @@
         clickInProgress.delete(this);
       }
     },
-    focus(options) { focusElement(this); },
+    focus(options) { focusElement(this, options); },
     blur() { blurElement(this); },
     get tabIndex() {
       const v = N.getAttr(idOf(this), 'tabindex');
@@ -598,7 +609,7 @@
     set autofocus(v) { if (v) setAttr(this, idOf(this), 'autofocus', ''); else removeAttr(this, idOf(this), 'autofocus'); },
     get nonce() { return attrOrEmpty(this, 'nonce'); },
     set nonce(v) { setAttr(this, idOf(this), 'nonce', `${v}`); },
-    focus() { focusElement(this); },
+    focus(options) { focusElement(this, options); },
     blur() { blurElement(this); },
   };
   L.mixin(SVGElement.prototype, svgCommon);

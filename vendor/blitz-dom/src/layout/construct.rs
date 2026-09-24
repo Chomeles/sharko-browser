@@ -1195,6 +1195,28 @@ fn write_svg_markup(doc: &BaseDocument, node_id: NodeId, out: &mut String) {
     }
 }
 
+/// PATCH: an SVG paint as CSS that usvg understands: colors are converted to sRGB
+/// (`color(display-p3 …)`, `oklch()`, … made usvg fall back to black).
+#[cfg(feature = "svg")]
+fn svg_paint_css(
+    paint: &style::values::computed::SVGPaint,
+    current_color: &style::color::AbsoluteColor,
+) -> String {
+    use style::values::generics::svg::SVGPaintKind;
+    use style_traits::ToCss as _;
+    match &paint.kind {
+        SVGPaintKind::Color(c) => srgb_css(&c.resolve_to_absolute(current_color)),
+        _ => paint.to_css_string(),
+    }
+}
+
+/// An absolute color as a legacy `rgb()`/`rgba()` string.
+#[cfg(feature = "svg")]
+fn srgb_css(color: &style::color::AbsoluteColor) -> String {
+    use style_traits::ToCss as _;
+    color.into_srgb_legacy().to_css_string()
+}
+
 /// `fill`/`stroke`/`stroke-width` declarations for SVG paint that differs from the
 /// parent's computed values (i.e. was set by a CSS rule on this element).
 #[cfg(feature = "svg")]
@@ -1204,12 +1226,13 @@ fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
     let styles = node.primary_styles()?;
     let parent_styles = node.parent.and_then(|p| doc.nodes[p].primary_styles())?;
     let (own, parent) = (styles.get_inherited_svg(), parent_styles.get_inherited_svg());
+    let current_color = styles.clone_color();
     let mut decls = String::new();
     if own.fill != parent.fill {
-        decls.push_str(&format!("fill:{};", own.fill.to_css_string()));
+        decls.push_str(&format!("fill:{};", svg_paint_css(&own.fill, &current_color)));
     }
     if own.stroke != parent.stroke {
-        decls.push_str(&format!("stroke:{};", own.stroke.to_css_string()));
+        decls.push_str(&format!("stroke:{};", svg_paint_css(&own.stroke, &current_color)));
     }
     if own.stroke_width != parent.stroke_width {
         decls.push_str(&format!("stroke-width:{};", own.stroke_width.to_css_string()));
@@ -1222,7 +1245,6 @@ fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
 #[cfg(feature = "svg")]
 fn add_svg_root_paint(doc: &BaseDocument, svg_id: NodeId, mut svg: String) -> String {
     use style::values::generics::svg::SVGPaintKind;
-    use style_traits::ToCss as _;
     let Some(styles) = doc.nodes[svg_id].primary_styles() else {
         return svg;
     };
@@ -1233,14 +1255,14 @@ fn add_svg_root_paint(doc: &BaseDocument, svg_id: NodeId, mut svg: String) -> St
             .any(|a| a.split('=').next() == Some(name))
     };
     let mut extra = String::new();
-    let color = styles.clone_color().to_css_string();
+    let color = srgb_css(&styles.clone_color());
     if !has_attr("color") {
         extra.push_str(&format!(" color=\"{color}\""));
     }
     let svg_style = styles.get_inherited_svg();
     let paint_css = |paint: &style::values::computed::SVGPaint| -> Option<String> {
         match &paint.kind {
-            SVGPaintKind::Color(c) => Some(c.resolve_to_absolute(&styles.clone_color()).to_css_string()),
+            SVGPaintKind::Color(c) => Some(srgb_css(&c.resolve_to_absolute(&styles.clone_color()))),
             SVGPaintKind::None => Some("none".to_string()),
             _ => None,
         }

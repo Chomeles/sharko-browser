@@ -126,3 +126,11 @@ Patches so far:
 42. `blitz-dom/src/scrolling.rs`: `scroll_into_view` scrolls every scrolling ancestor
     (innermost first) before the viewport and honours `block`/`inline`, so carousels and
     tab strips scroll themselves instead of the whole page jumping.
+43. `blitz-dom/src/layout/construct.rs`, `node/svg.rs`: SVG paint from CSS reaches usvg
+    as sRGB `rgb()`/`rgba()`, and `color(display-p3|srgb|srgb-linear …)` in SVG markup
+    and images is rewritten as `rgb()` (usvg painted wide-gamut colors black).
+44. `blitz-dom/src/stylo.rs`, `document.rs`: CSS animation and transition events
+    (`animationstart`/`iteration`/`end`, `transitionrun`/`start`/`end`) are recorded
+    while ticking Stylo's animations (`take_animation_events`) for the embedder to
+    dispatch; `each_custom_state` and `implicit_scope_for_sheet_in_shadow_root` no
+    longer `todo!()`-panic (reachable from `:has()` invalidation).

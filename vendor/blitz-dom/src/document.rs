@@ -191,6 +191,21 @@ pub enum DocumentEvent {
     },
 }
 
+/// PATCH: a CSS animation or transition event (`animationstart`, `animationiteration`,
+/// `animationend`, `transitionrun`, `transitionstart`, `transitionend`) for the embedder to
+/// dispatch to the page.
+#[derive(Debug, Clone)]
+pub struct AnimationEvent {
+    pub node: NodeId,
+    pub kind: &'static str,
+    /// The animation name, or the transitioned property.
+    pub name: String,
+    /// `elapsedTime` in seconds.
+    pub elapsed: f64,
+    /// `::before`, `::after`, `::marker` or empty.
+    pub pseudo: &'static str,
+}
+
 pub struct BaseDocument {
     /// ID of the document
     id: usize,
@@ -342,6 +357,9 @@ pub struct BaseDocument {
     /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
     /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
     pub(crate) element_load_events: Vec<(NodeId, bool)>,
+    /// PATCH: CSS animation/transition events since the last
+    /// [`BaseDocument::take_animation_events`].
+    pub(crate) animation_events: Vec<AnimationEvent>,
     /// PATCH: set once the parser is done: stylesheets inserted later (by scripts) are
     /// not render-blocking, as in other browsers.
     pub(crate) parser_done: bool,
@@ -526,6 +544,7 @@ impl BaseDocument {
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
             element_load_events: Vec::new(),
+            animation_events: Vec::new(),
             parser_done: false,
             pending_style_image_nodes: Vec::new(),
             pending_critical_resources: HashSet::new(),
@@ -1529,6 +1548,14 @@ impl BaseDocument {
     }
 
     /// PATCH: take the element resource loads/failures since the last call.
+    pub fn has_animation_events(&self) -> bool {
+        !self.animation_events.is_empty()
+    }
+
+    pub fn take_animation_events(&mut self) -> Vec<AnimationEvent> {
+        std::mem::take(&mut self.animation_events)
+    }
+
     pub fn take_element_load_events(&mut self) -> Vec<(NodeId, bool)> {
         std::mem::take(&mut self.element_load_events)
     }

@@ -871,6 +871,16 @@
       }
     };
   }
+  // CSS animation/transition events recorded by the style engine.
+  function onAnimationEvent(id, type, name, elapsedTime, pseudoElement) {
+    if (!N.isConnected(id)) return;
+    const el = L.wrap(id);
+    if (type.startsWith('animation')) {
+      L.fire(el, type, { bubbles: true, animationName: name, elapsedTime, pseudoElement }, L.AnimationEvent);
+    } else {
+      L.fire(el, type, { bubbles: true, propertyName: name, elapsedTime, pseudoElement }, L.TransitionEvent);
+    }
+  }
   N.setHooks({
     onDocumentParsed: guard(onDocumentParsed),
     onEvent: guardFlags(onEvent),
@@ -889,6 +899,7 @@
     onError: guard(onError),
     onWebSocket: guard(L.onWebSocket),
     onFetchProgress: guard(L.onFetchProgress),
+    onAnimationEvent: guard(onAnimationEvent),
   });
 
   // =======================================================================================
