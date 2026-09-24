@@ -5,6 +5,15 @@
 Ein eigener Web-Browser in Rust – aus den schnellsten Open-Source-Komponenten zusammengesetzt,
 mit Multi-Prozess-Architektur wie Chrome. Status: **früher Prototyp**. [English](README.md)
 
+## Getestet gegen Chromium
+
+Jede Änderung wird geprüft, indem dieselben echten Seiten (Wikipedia, Hacker News, MDN,
+BBC, tagesschau.de, Guardian, python.org, …) in Sharko und Chromium geladen und
+Screenshots, Seitenhöhe, Elementanzahl und Ladezeiten verglichen werden. Stand: Die
+Darstellung stimmt auf den getesteten Seiten weitgehend überein (Seitenhöhen meist
+innerhalb weniger Prozent); bei 10 von 19 Seiten ist das `load`-Ereignis früher als in
+Chromium. Details und Zahlen: [README.md](README.md#-tested-side-by-side-with-chromium).
+
 ## Geplant – das ist erst der Anfang
 
 - **Session pro Tab:** mehrere Konten auf derselben Seite gleichzeitig (z. B. mehrere M365-Tenants)
@@ -59,6 +68,7 @@ Voraussetzungen: Rust, Python 3, auf Windows die Visual Studio C++ Build Tools.
 ```
 cargo build
 cargo run -p browser-launcher
+cargo xtask icu      # ICU-Daten für Intl nach resources/ kopieren (Release-Builds)
 ```
 
 ## Tastenkürzel
