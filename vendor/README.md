@@ -52,3 +52,8 @@ Patches so far:
 18. `taffy/src/compute/block.rs`: an item's own floats no longer force clearance on it;
     `taffy/src/compute/float.rs`: floats fit with 1/64 px tolerance (percentage columns
     that add up to 100%).
+19. Form controls: `placeholder` text (`blitz-dom` layout, `blitz-paint` in 54% of the text
+    color) and `:placeholder-shown`; text inputs use the page's font; drop-down
+    `<select>` shows its selected option (`:checked` state, UA stylesheet rules in
+    `assets/default.css`) with an arrow unless `appearance: none`.
+20. `blitz-paint/src/text.rs`: `text-overflow: ellipsis`.

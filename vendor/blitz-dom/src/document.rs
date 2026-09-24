@@ -1191,6 +1191,91 @@ impl BaseDocument {
         }
     }
 
+    /// PATCH: a text control's value became empty or non-empty: `:placeholder-shown`
+    /// (and selectors on following siblings, e.g. floating labels) must be re-matched.
+    pub fn restyle_for_value_emptiness_change(&mut self, id: NodeId) {
+        let target = self.nodes.get(id).and_then(|n| n.parent).unwrap_or(id);
+        if let Some(node) = self.nodes.get_mut(target) {
+            node.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        }
+    }
+
+    /// PATCH: the options of a `<select>` in tree order (including those in `<optgroup>`s).
+    pub fn select_options(&self, select: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let Some(node) = self.nodes.get(select) else { return out };
+        for &child in node.children.iter() {
+            let c = &self.nodes[child];
+            if c.data.is_element_with_tag_name(&local_name!("option")) {
+                out.push(child);
+            } else if c.data.is_element_with_tag_name(&local_name!("optgroup")) {
+                for &gc in c.children.iter() {
+                    if self.nodes[gc].data.is_element_with_tag_name(&local_name!("option")) {
+                        out.push(gc);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// PATCH: mark the selected options of `select` with the `:checked` state, which the UA
+    /// stylesheet uses to show the selected option inside a drop-down `<select>`.
+    pub fn set_select_state(&mut self, select: NodeId, selected: &[(NodeId, bool)], by_script: bool) {
+        if by_script {
+            if let Some(n) = self.nodes.get_mut(select) {
+                n.flags.insert(NodeFlags::IS_SELECT_SCRIPT_MANAGED);
+            }
+        }
+        let mut changed = false;
+        for &(opt, on) in selected {
+            if let Some(el) = self.nodes.get_mut(opt).and_then(|n| n.element_data_mut()) {
+                if el.element_state.contains(ElementState::CHECKED) != on {
+                    el.element_state.set(ElementState::CHECKED, on);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            if let Some(n) = self.nodes.get_mut(select) {
+                n.set_restyle_hint(crate::RestyleHint::restyle_subtree());
+            }
+            self.shell_provider.request_redraw();
+        }
+    }
+
+    /// PATCH: selectedness from the markup (for selects the script runtime doesn't manage):
+    /// the last option with `selected`, else (drop-down) the first enabled option.
+    pub(crate) fn apply_default_select_state(&mut self, select: NodeId) {
+        let Some(node) = self.nodes.get(select) else { return };
+        if node.flags.contains(NodeFlags::IS_SELECT_SCRIPT_MANAGED) {
+            return;
+        }
+        let Some(el) = node.element_data() else { return };
+        let multiple = el.attr(local_name!("multiple")).is_some();
+        let options = self.select_options(select);
+        let has = |id: NodeId, name: LocalName| {
+            self.nodes[id].element_data().is_some_and(|e| e.attr(name).is_some())
+        };
+        let mut states: Vec<(NodeId, bool)> =
+            options.iter().map(|&o| (o, has(o, local_name!("selected")))).collect();
+        if !multiple {
+            let last = states.iter().rposition(|(_, s)| *s);
+            for (i, e) in states.iter_mut().enumerate() {
+                e.1 = Some(i) == last;
+            }
+            if last.is_none() {
+                if let Some(first) = states
+                    .iter_mut()
+                    .find(|(o, _)| !has(*o, local_name!("disabled")))
+                {
+                    first.1 = true;
+                }
+            }
+        }
+        self.set_select_state(select, &states, false);
+    }
+
     /// PATCH: the custom element `id` is now defined (`:defined` matches).
     pub fn set_custom_element_defined(&mut self, id: NodeId) {
         let Some(node) = self.nodes.get_mut(id) else { return };

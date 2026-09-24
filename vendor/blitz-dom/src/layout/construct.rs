@@ -889,13 +889,52 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
     editor.set_scale(doc.viewport.scale_f64() as f32);
     editor.set_width(None);
 
+    // PATCH: the page's font (family, weight, style, letter spacing), not just its size.
+    let text_styles = [
+        StyleProperty::FontFamily(parley_style.font_family.clone()),
+        StyleProperty::FontSize(parley_style.font_size),
+        StyleProperty::FontWeight(parley_style.font_weight),
+        StyleProperty::FontStyle(parley_style.font_style),
+        StyleProperty::FontWidth(parley_style.font_width),
+        StyleProperty::LetterSpacing(parley_style.letter_spacing),
+        StyleProperty::LineHeight(parley_style.line_height),
+        StyleProperty::Brush(parley_style.brush.clone()),
+    ];
     let styles = editor.edit_styles();
     styles.retain(|_| false);
-    styles.insert(StyleProperty::FontSize(parley_style.font_size));
-    styles.insert(StyleProperty::LineHeight(parley_style.line_height));
-    styles.insert(StyleProperty::Brush(parley_style.brush));
+    for property in text_styles.iter().cloned() {
+        styles.insert(property);
+    }
 
-    editor.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
+    let placeholder = element
+        .attr(local_name!("placeholder"))
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            // Line breaks in the attribute are removed for single-line inputs.
+            if is_multiline {
+                p.to_string()
+            } else {
+                p.replace(['\n', '\r'], "")
+            }
+        });
+    let scale = doc.viewport.scale_f64() as f32;
+    let SpecialElementData::TextInput(text_input_data) = &mut element.special_data else {
+        unreachable!();
+    };
+    let editor = &mut text_input_data.editor;
+    let mut font_ctx = doc.font_ctx.lock().unwrap();
+    editor.refresh_layout(&mut font_ctx, &mut doc.layout_ctx);
+
+    // PATCH: `placeholder` text (painted while the value is empty).
+    text_input_data.placeholder = placeholder.map(|text| {
+        let mut builder = doc.layout_ctx.ranged_builder(&mut font_ctx, &text, scale, true);
+        for property in text_styles {
+            builder.push_default(property);
+        }
+        let mut layout = builder.build(&text);
+        layout.break_all_lines(None);
+        Box::new(layout)
+    });
 }
 
 fn create_checkbox_input(doc: &mut BaseDocument, input_element_id: NodeId) {

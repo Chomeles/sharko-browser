@@ -443,7 +443,16 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Lang(_) => false,
             NonTSPseudoClass::CustomState(_) => false,
             NonTSPseudoClass::Link => self.element_state().contains(ElementState::UNVISITED),
-            NonTSPseudoClass::PlaceholderShown => false,
+            // PATCH: a text control with a non-empty placeholder and an empty value.
+            NonTSPseudoClass::PlaceholderShown => self.element_data().is_some_and(|el| {
+                el.attr(local_name!("placeholder"))
+                    .is_some_and(|p| !p.is_empty())
+                    && match el.text_input_data() {
+                        Some(input) => input.editor.raw_text().is_empty(),
+                        // Before the editor exists (first style pass): the initial value.
+                        None => el.attr(local_name!("value")).is_none_or(|v| v.is_empty()),
+                    }
+            }),
             NonTSPseudoClass::ReadWrite => false,
             NonTSPseudoClass::ReadOnly => false,
             NonTSPseudoClass::ServoNonZeroBorder => false,

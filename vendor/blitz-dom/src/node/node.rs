@@ -68,6 +68,9 @@ bitflags! {
         /// PATCH: a custom element (name with `-`) that has been upgraded or created
         /// from its definition, so it matches `:defined`.
         const IS_CUSTOM_DEFINED = 0b10_0000_0000;
+        /// PATCH: a `<select>` whose displayed option is managed by the script runtime
+        /// (which knows the selectedness set through the DOM API).
+        const IS_SELECT_SCRIPT_MANAGED = 0b100_0000_0000;
     }
 }
 

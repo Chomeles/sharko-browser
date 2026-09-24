@@ -65,6 +65,8 @@ pub struct TextInputData {
     /// vertical offset. It is kept up to date so that the caret remains visible within the
     /// input's content box.
     pub scroll_offset: f32,
+    /// PATCH: layout of the `placeholder` attribute, shown while the value is empty.
+    pub placeholder: Option<Box<parley::Layout<TextBrush>>>,
 }
 
 // FIXME: Implement Clone for PlainEditor
@@ -80,6 +82,7 @@ impl TextInputData {
         Self {
             editor,
             is_multiline,
+            placeholder: None,
             scroll_offset: 0.0,
         }
     }

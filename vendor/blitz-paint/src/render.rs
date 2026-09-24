@@ -565,6 +565,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                         cx.draw_table_row_backgrounds(scene);
                         cx.draw_table_borders(scene);
                         cx.draw_border(scene);
+                        cx.draw_select_arrow(scene);
                         cx.stroke_devtools(scene);
 
                         // TODO: allow layers with opacity to be unclipped (overflow: visible)
@@ -967,6 +968,16 @@ impl ElementCx<'_, '_> {
                 };
             }
 
+            // PATCH: the placeholder while the value is empty, in the text color at 54%
+            // opacity (as Firefox; adapts to dark inputs unlike a fixed gray).
+            if input_data.editor.raw_text().is_empty() {
+                if let Some(placeholder) = &input_data.placeholder {
+                    let color = self.style.get_inherited_text().color.as_srgb_color();
+                    let color = color.with_alpha(color.components[3] * 0.54);
+                    crate::text::draw_plain_layout(scene, placeholder, transform, color);
+                }
+            }
+
             // Render text
             let mut draw_text_context = self.context.draw_text_context.borrow_mut();
             crate::text::stroke_text(
@@ -979,6 +990,43 @@ impl ElementCx<'_, '_> {
                 &mut draw_text_context,
             );
         }
+    }
+
+    /// PATCH: the drop-down arrow of a `<select>` (unless `appearance: none`, in which case
+    /// pages draw their own), in the padding area on the inline-end side.
+    fn draw_select_arrow(&self, scene: &mut impl PaintScene) {
+        use style::values::specified::box_::Appearance;
+        let Some(el) = self.node.element_data() else { return };
+        if el.name.local != local_name!("select")
+            || el.attr(local_name!("multiple")).is_some()
+            || el
+                .attr(local_name!("size"))
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .is_some_and(|n| n > 1)
+            || self.style.get_box().appearance == Appearance::None
+        {
+            return;
+        }
+        let pb = self.frame.padding_box;
+        let s = self.scale;
+        let (w, h) = (8.0 * s, 4.5 * s);
+        let cx = pb.x1 - 11.0 * s;
+        let cy = (pb.y0 + pb.y1) / 2.0;
+        if cx - w / 2.0 < pb.x0 {
+            return;
+        }
+        let mut path = kurbo::BezPath::new();
+        path.move_to((cx - w / 2.0, cy - h / 2.0));
+        path.line_to((cx, cy + h / 2.0));
+        path.line_to((cx + w / 2.0, cy - h / 2.0));
+        let color = self.style.clone_color().as_srgb_color();
+        scene.stroke(
+            &kurbo::Stroke::new(1.5 * s),
+            self.transform,
+            color,
+            None,
+            &path,
+        );
     }
 
     fn draw_marker(&self, scene: &mut impl PaintScene, pos: Point) {

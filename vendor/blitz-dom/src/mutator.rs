@@ -54,6 +54,8 @@ pub struct DocumentMutator<'doc> {
     title_node: Option<NodeId>,
     style_nodes: HashSet<NodeId>,
     form_nodes: HashSet<NodeId>,
+    /// PATCH: `<select>`s whose options changed (default selectedness, see `sync_select`).
+    select_nodes: HashSet<NodeId>,
 
     /// Whether an element/attribute that affect animation status has been seen
     recompute_is_animating: bool,
@@ -83,6 +85,7 @@ impl DocumentMutator<'_> {
             title_node: None,
             style_nodes: HashSet::new(),
             form_nodes: HashSet::new(),
+            select_nodes: HashSet::new(),
             recompute_is_animating: false,
             mutations_occurred: false,
             #[cfg(feature = "autofocus")]
@@ -853,6 +856,12 @@ impl<'doc> DocumentMutator<'doc> {
             self.doc.reset_form_owner(id);
         }
 
+        for id in self.select_nodes.drain() {
+            if self.doc.nodes.contains_key(id) {
+                self.doc.apply_default_select_state(id);
+            }
+        }
+
         #[cfg(feature = "autofocus")]
         if let Some(node_id) = self.node_to_autofocus.take() {
             if self.doc.get_node(node_id).is_some() {
@@ -922,6 +931,21 @@ impl<'doc> DocumentMutator<'doc> {
                     self.eager_op_queue
                         .push(SpecialOp::ProcessButtonInput(node_id));
                     self.form_nodes.insert(node_id);
+                    if tag == "select" {
+                        self.select_nodes.insert(node_id);
+                    }
+                }
+                // PATCH: options added to a select change its displayed option.
+                "option" | "optgroup" => {
+                    let mut parent = doc.nodes[node_id].parent;
+                    for _ in 0..2 {
+                        let Some(pid) = parent else { break };
+                        if doc.nodes[pid].data.is_element_with_tag_name(&local_name!("select")) {
+                            self.select_nodes.insert(pid);
+                            break;
+                        }
+                        parent = doc.nodes[pid].parent;
+                    }
                 }
                 _ => {}
             }

@@ -615,6 +615,13 @@ pub(crate) fn forget_node(st: &RuntimeState, doc: &mut BaseDocument, id: NodeId)
 pub(crate) fn children_changed(st: &RuntimeState, doc: &mut BaseDocument, parent: NodeId) {
     if is_html_id(doc, parent, &local_name!("textarea")) {
         crate::forms::sync_textarea_default(st, doc, parent);
+    } else if is_html_id(doc, parent, &local_name!("select")) {
+        crate::forms::sync_select_display(st, doc, parent);
+    } else if is_html_id(doc, parent, &local_name!("optgroup"))
+        && let Some(select) = doc.get_node(parent).and_then(|n| n.parent)
+        && is_html_id(doc, select, &local_name!("select"))
+    {
+        crate::forms::sync_select_display(st, doc, select);
     }
 }
 
@@ -723,15 +730,17 @@ pub(crate) fn clone_node(
 
 /// Qualified name of an attribute (`prefix:local` or `local`).
 pub(crate) fn attr_qname(attr: &Attribute) -> Cow<'_, str> {
+    // html5ever gives `xmlns` on foreign elements an empty (not absent) prefix.
     match &attr.name.prefix {
-        Some(p) => Cow::Owned(format!("{}:{}", &**p, &*attr.name.local)),
-        None => Cow::Borrowed(&*attr.name.local),
+        Some(p) if !p.is_empty() => Cow::Owned(format!("{}:{}", &**p, &*attr.name.local)),
+        _ => Cow::Borrowed(&*attr.name.local),
     }
 }
 
 /// Find an attribute by qualified name.
 pub(crate) fn find_attr<'a>(attrs: &'a [Attribute], qname: &str) -> Option<&'a Attribute> {
     attrs.iter().find(|a| match &a.name.prefix {
+        Some(p) if p.is_empty() => &*a.name.local == qname,
         None => &*a.name.local == qname,
         Some(p) => {
             qname.len() == p.len() + 1 + a.name.local.len()
@@ -852,8 +861,8 @@ pub(crate) fn raw_remove_attr(doc: &mut BaseDocument, id: NodeId, name: &QualNam
 pub(crate) fn element_qname(node: &Node) -> Option<Cow<'_, str>> {
     let el = node.element_data()?;
     Some(match &el.name.prefix {
-        Some(p) => Cow::Owned(format!("{}:{}", &**p, &*el.name.local)),
-        None => Cow::Borrowed(&*el.name.local),
+        Some(p) if !p.is_empty() => Cow::Owned(format!("{}:{}", &**p, &*el.name.local)),
+        _ => Cow::Borrowed(&*el.name.local),
     })
 }
 

@@ -64,6 +64,7 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
         };
 
         if let Some(input_data) = element_data.text_input_data_mut() {
+            let was_empty = input_data.editor.raw_text().is_empty();
             let generated_event = match event {
                 KeyboardOrTextInputEvent::KeyPress(blitz_key_event) => input_data
                     .apply_keypress_event(
@@ -80,6 +81,12 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
                         &command,
                     ),
             };
+
+            // PATCH: `:placeholder-shown` changes when the value becomes (non-)empty.
+            let is_empty = input_data.editor.raw_text().is_empty();
+            if was_empty != is_empty {
+                doc.restyle_for_value_emptiness_change(node_id);
+            }
 
             if let Some(generated_event) = generated_event {
                 doc.apply_generated_text_input_event(node_id, generated_event, dispatch_event);

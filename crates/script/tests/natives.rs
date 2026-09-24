@@ -1579,3 +1579,16 @@ fn selectors_has_and_nth_child_of() {
     );
     assert_eq!(e.eval("try { N.querySelector(N.documentId(), 'div:has(') } catch (e) { 'threw' }"), "\"threw\"");
 }
+
+#[test]
+fn foreign_xmlns_attribute_has_no_empty_prefix() {
+    let mut e = Env::new(r##"<!DOCTYPE html><html><body><svg id="s" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><use xlink:href="#a"/></svg></body></html>"##);
+    let doc = &mut e.doc;
+    e.rt.document_parsed(doc);
+    e.eval("globalThis.N = __native; 1");
+    // html5ever stores `xmlns` with an empty prefix; the DOM name is plain `xmlns`
+    // (Alpine.js treats attributes starting with ':' as bindings).
+    assert_eq!(e.eval("N.attrNames(N.getElementById('s'))"), "[\"id\",\"xmlns\",\"xmlns:xlink\"]");
+    assert_eq!(e.eval("N.getAttr(N.getElementById('s'), 'xmlns')"), "\"http://www.w3.org/2000/svg\"");
+    assert!(!e.eval("N.outerHTML(N.getElementById('s'))").contains(" :xmlns"));
+}
