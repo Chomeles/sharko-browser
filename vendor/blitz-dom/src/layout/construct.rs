@@ -286,12 +286,22 @@ fn push_non_whitespace_children_and_pseudos(layout_children: &mut ThinVec<NodeId
     }
 }
 
+/// PATCH: the line height of an inline formatting context's root (its strut).
+#[derive(Clone, Copy)]
+struct RootLineHeight {
+    px: f32,
+    /// `line-height: normal` (then `px` is an approximation).
+    normal: bool,
+}
+
 /// Convert a relative line height to an absolute one
 fn resolve_line_height(line_height: parley::LineHeight, font_size: f32) -> f32 {
     match line_height {
         parley::LineHeight::FontSizeRelative(relative) => relative * font_size,
         parley::LineHeight::Absolute(absolute) => absolute,
-        parley::LineHeight::MetricsRelative(relative) => relative * font_size, //unreachable!(),
+        // PATCH: `normal` (the font's rounded metrics, computed by parley per run); where a
+        // number is needed up front, typical fonts' value (Arial: 1.15) stands in for it.
+        parley::LineHeight::MetricsRelative(relative) => relative * font_size * 1.15,
     }
 }
 
@@ -1329,7 +1339,10 @@ pub(crate) fn build_inline_layout_into(
         .map(|s| stylo_to_parley::style(inline_context_root_node_id, s))
         .unwrap_or_default();
 
-    let root_line_height = resolve_line_height(parley_style.line_height, parley_style.font_size);
+    let root_line_height = RootLineHeight {
+        px: resolve_line_height(parley_style.line_height, parley_style.font_size),
+        normal: matches!(parley_style.line_height, parley::LineHeight::MetricsRelative(_)),
+    };
 
     // Create a parley tree builder
     let mut builder = layout_ctx.tree_builder(font_ctx, scale, true, &parley_style);
@@ -1419,7 +1432,7 @@ pub(crate) fn build_inline_layout_into(
         node_id: NodeId,
         collapse_mode: WhiteSpaceCollapse,
         parent_text_transform: TextTransform,
-        root_line_height: f32,
+        root_line_height: RootLineHeight,
         scale: f32,
     ) {
         let node = &nodes[node_id];
@@ -1520,10 +1533,18 @@ pub(crate) fn build_inline_layout_into(
 
                             // Floor the line-height of the span by the line-height of the inline context
                             // See https://www.w3.org/TR/CSS21/visudet.html#line-height
-                            style.line_height = parley::LineHeight::Absolute(
-                                resolve_line_height(style.line_height, font_size)
-                                    .max(root_line_height),
-                            );
+                            // PATCH: with both at `normal`, parley's per-run font metrics
+                            // give the exact heights (no approximation).
+                            let both_normal = matches!(
+                                style.line_height,
+                                parley::LineHeight::MetricsRelative(_)
+                            ) && root_line_height.normal;
+                            if !both_normal {
+                                style.line_height = parley::LineHeight::Absolute(
+                                    resolve_line_height(style.line_height, font_size)
+                                        .max(root_line_height.px),
+                                );
+                            }
 
                             // dbg!(node_id);
                             // dbg!(&style);

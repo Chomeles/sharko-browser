@@ -102,3 +102,15 @@ Patches so far:
 35. `blitz-dom/src/layout/verify.rs`: `BLITZ_VERIFY_INCREMENTAL=1` re-runs the style
     flush, out-of-flow fixup and rounding over the whole tree after each layout and
     reports nodes where the incremental result differs.
+36. `blitz-dom/src/legacy_hints.rs`, `stylo.rs`: legacy table/font attributes as
+    presentational hints: `cellspacing`, `cellpadding`, `border` and `align=center` on
+    `<table>`, `valign`/`nowrap` on cells and rows, `<font color face size>`; `<table
+    align>` no longer centers the table's text.
+37. `blitz-dom/src/layout/table.rs`: a row's `height` is its minimum height (also for
+    rows without cells, e.g. spacer rows).
+38. `parley/src/layout/data.rs`, `blitz-dom/src/stylo_to_parley.rs`, `layout/construct.rs`:
+    `line-height: normal` uses the font's ascent, descent and line gap, each rounded to
+    whole pixels like Chromium (it was 1.2em, so text was ~5% taller than in browsers).
+39. `blitz-dom/assets/default.css`, `layout/mod.rs`: form controls use the 13.33px control
+    font and Chromium's box metrics; text inputs are sized by their `size` attribute
+    (20 characters by default) instead of 300px.

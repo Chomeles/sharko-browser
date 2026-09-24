@@ -63,6 +63,8 @@ struct Page {
     load_sent: bool,
     dcl_sent: bool,
     last_ready_check: Instant,
+    /// Pending subresources at the last ready check (a change triggers the next check).
+    last_ready_pending: usize,
     last_scroll: (f64, f64),
     last_title: String,
     parse_ms: f64,
@@ -626,6 +628,7 @@ impl Renderer {
             load_sent: false,
             dcl_sent: false,
             last_ready_check: Instant::now(),
+            last_ready_pending: usize::MAX,
             last_scroll: (0.0, 0.0),
             last_title: String::new(),
             parse_ms,
@@ -728,8 +731,14 @@ impl Renderer {
             let pending = self.shared.pending_resources.load(Ordering::SeqCst);
 
             // Load state
-            if !page.load_sent && page.last_ready_check.elapsed() >= Duration::from_millis(40) {
+            // Checked periodically, and right away when the number of pending subresources
+            // changed (the last one finishing usually completes the load).
+            if !page.load_sent
+                && (page.last_ready_check.elapsed() >= Duration::from_millis(40)
+                    || pending != page.last_ready_pending)
+            {
                 page.last_ready_check = Instant::now();
+                page.last_ready_pending = pending;
                 // Subresources finished? Tell JS (idempotent; it fires `load` once both
                 // DOMContentLoaded happened and nothing is pending). Checked periodically
                 // rather than on transitions: a fetch can start and finish between ticks.

@@ -958,7 +958,9 @@ impl<'a> TElement for BlitzNode<'a> {
             let name = &attr.name.local;
             let value = attr.value.as_str();
 
-            if *name == local_name!("align") {
+            // PATCH: `<table align>` positions the table (margins/float, see below and the UA
+            // stylesheet) instead of aligning its text.
+            if *name == local_name!("align") && *tag != local_name!("table") {
                 use style::values::specified::TextAlign;
                 let keyword = match value {
                     "left" => Some(StyloTextAlign::MozLeft),
@@ -1148,6 +1150,30 @@ impl<'a> TElement for BlitzNode<'a> {
                 use style::values::specified::Display;
                 push_style(PropertyDeclaration::Display(Display::None));
             }
+        }
+
+        // PATCH: table, cell and `<font>` attributes (see `legacy_hints`).
+        let css = crate::legacy_hints::legacy_hints_css(self);
+        if !css.is_empty() {
+            static URL: std::sync::OnceLock<style::stylesheets::UrlExtraData> =
+                std::sync::OnceLock::new();
+            let url = URL.get_or_init(|| {
+                style::stylesheets::UrlExtraData::from(
+                    ::url::Url::parse("about:blank").expect("valid URL"),
+                )
+            });
+            let block = style::properties::parse_style_attribute(
+                &css,
+                url,
+                None,
+                style::context::QuirksMode::NoQuirks,
+                style::stylesheets::CssRuleType::Style,
+            );
+            hints.push(ApplicableDeclarationBlock::from_declarations(
+                Arc::new(self.guard().wrap(block)),
+                CascadeLevel::new(CascadeOrigin::PresHints),
+                LayerOrder::root(),
+            ));
         }
     }
 

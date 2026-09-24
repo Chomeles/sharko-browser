@@ -112,7 +112,17 @@ pub(crate) fn build_table_context(
     column_sizes.resize((col as usize).max(column_sizes.len()), style_helpers::auto());
 
     style.grid_template_columns = column_sizes.into_iter().map(|dim| dim.into()).collect();
-    style.grid_template_rows = vec![style_helpers::auto(); row as usize];
+    // PATCH: a row's `height` is its minimum height (also for rows without cells, such as
+    // the `<tr style="height:5px">` spacer rows of old-school table layouts).
+    style.grid_template_rows = (0..row as usize)
+        .map(|i| match rows.get(i).map(|r| r.height) {
+            Some(h) if h > 0.0 => style_helpers::minmax(
+                taffy::MinTrackSizingFunction::length(h),
+                taffy::MaxTrackSizingFunction::auto(),
+            ),
+            _ => style_helpers::auto(),
+        })
+        .collect();
 
     style.gap = match border_collapse {
         BorderCollapse::Separate => {
@@ -238,10 +248,17 @@ pub(crate) fn collect_table_cells(
             *row += 1;
             *col = 0;
 
-            rows.push(TableRow {
-                node_id,
-                height: 0.0,
-            });
+            // PATCH: the row's specified length height (a minimum, see above).
+            let height = node
+                .primary_styles()
+                .and_then(|s| match s.clone_height() {
+                    style::values::generics::length::GenericSize::LengthPercentage(lp) => {
+                        lp.0.to_length().map(|l| l.px())
+                    }
+                    _ => None,
+                })
+                .unwrap_or(0.0);
+            rows.push(TableRow { node_id, height });
 
             let children = std::mem::take(&mut doc.nodes[node_id].children);
             for child_id in children.iter().copied() {

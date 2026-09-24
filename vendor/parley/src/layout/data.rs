@@ -436,8 +436,12 @@ impl<B: Brush> LayoutData<B> {
             let line_height = match style.line_height {
                 LineHeight::Absolute(value) => value,
                 LineHeight::FontSizeRelative(value) => value * font_size,
+                // PATCH: like Chromium/WebKit, ascent, descent and line gap are each rounded
+                // to whole pixels (`line-height: normal` of 13.33px Arial is 15px, not 15.3px;
+                // pages are designed against these heights).
                 LineHeight::MetricsRelative(value) => {
-                    (metrics.ascent - metrics.descent + metrics.leading) * value
+                    (metrics.ascent.round() + (-metrics.descent).round() + metrics.leading.round())
+                        * value
                 }
             };
 

@@ -96,7 +96,8 @@ impl BaseDocument {
 
             let font_size = style.clone_font_size().used_size().px();
             let line_height = match style.clone_line_height() {
-                LineHeight::Normal => font_size * 1.2,
+                // PATCH: typical fonts' rounded metrics (Arial: 1.15), as in parley.
+                LineHeight::Normal => (font_size * 1.15).round(),
                 LineHeight::Number(num) => font_size * num.0,
                 LineHeight::Length(value) => value.0.px(),
             };
@@ -157,9 +158,8 @@ impl BaseDocument {
                         node.style(),
                         resolve_calc_value,
                         |_known_size, _available_space| taffy::Size {
-                            width: cols
-                                .map(|cols| cols * font_size.unwrap_or(16.0) * 0.6)
-                                .unwrap_or(300.0),
+                            // PATCH: 20 columns by default, like other browsers.
+                            width: cols.unwrap_or(20.0) * font_size.unwrap_or(13.333) * 0.6,
                             height: resolved_line_height.unwrap_or(16.0) * rows,
                         },
                     );
@@ -195,16 +195,19 @@ impl BaseDocument {
                             );
                         }
                         None | Some("text" | "password" | "email" | "tel" | "url" | "search") => {
+                            let chars = element_data
+                                .attr(local_name!("size"))
+                                .and_then(|v| v.trim().parse::<f32>().ok())
+                                .filter(|n| *n > 0.0)
+                                .unwrap_or(20.0);
                             return compute_leaf_layout(
                                 inputs,
                                 node.style(),
                                 resolve_calc_value,
+                                // PATCH: the intrinsic width follows the `size` attribute
+                                // (20 characters by default; Chromium: 177px at 13.33px Arial).
                                 |_known_size, _available_space| taffy::Size {
-                                    width: match inputs.available_space.width {
-                                        AvailableSpace::Definite(limit) => limit.min(300.0),
-                                        AvailableSpace::MinContent => 0.0,
-                                        AvailableSpace::MaxContent => 300.0,
-                                    },
+                                    width: chars * font_size.unwrap_or(13.333) * 0.66375,
                                     height: resolved_line_height.unwrap_or(16.0),
                                 },
                             );
