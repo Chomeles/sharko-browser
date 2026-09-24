@@ -888,6 +888,7 @@
     onRejectionHandled: guard(onRejectionHandled),
     onError: guard(onError),
     onWebSocket: guard(L.onWebSocket),
+    onFetchProgress: guard(L.onFetchProgress),
   });
 
   // =======================================================================================

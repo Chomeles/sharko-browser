@@ -106,11 +106,15 @@ impl NetworkCore {
     }
 
     /// Fetches any supported URL.
-    pub(crate) async fn fetch(self: &Arc<Self>, req: NetRequest) -> Result<Response, NetError> {
+    pub(crate) async fn fetch(
+        self: &Arc<Self>,
+        req: NetRequest,
+        progress: Option<crate::fetch::Progress>,
+    ) -> Result<Response, NetError> {
         let url = Url::parse(req.url.trim())
             .map_err(|e| NetError::invalid_url(format!("`{}`: {e}", req.url)))?;
         match url.scheme() {
-            "http" | "https" => self.http_fetch(req, url).await,
+            "http" | "https" => self.http_fetch(req, url, progress).await,
             "data" => schemes::data(&url),
             "file" => schemes::file(url, req.method.eq_ignore_ascii_case("HEAD")).await,
             "about" => schemes::about(&url),
@@ -120,10 +124,15 @@ impl NetworkCore {
 
     /// [`fetch`](Self::fetch) that turns a panic (a bug) into an error response, so that
     /// every request is answered exactly once no matter what.
-    pub(crate) async fn fetch_guarded(self: &Arc<Self>, req: NetRequest) -> Result<Response, NetError> {
+    /// `progress` receives transfer progress (XHR `progress` events).
+    pub(crate) async fn fetch_guarded_with(
+        self: &Arc<Self>,
+        req: NetRequest,
+        progress: Option<crate::fetch::Progress>,
+    ) -> Result<Response, NetError> {
         use futures_util::FutureExt;
         let url = req.url.clone();
-        match std::panic::AssertUnwindSafe(self.fetch(req)).catch_unwind().await {
+        match std::panic::AssertUnwindSafe(self.fetch(req, progress)).catch_unwind().await {
             Ok(result) => result,
             Err(_) => {
                 log::error!("internal error (panic) while fetching {url}");

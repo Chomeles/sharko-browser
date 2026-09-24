@@ -296,10 +296,16 @@ fn handle_message(shared: &Arc<Shared>, client: &Arc<Client>, msg: WireToNetwork
             let task_client = Arc::clone(client);
             // Registered under the lock before the task can complete and unregister.
             let mut inflight = client.inflight.lock();
+            let progress = req.progress.then(|| {
+                let out = client.out.clone();
+                crate::fetch::Progress(Arc::new(move |loaded, total, upload| {
+                    let _ = out.send(WireFromNetworkOut::Progress { id, loaded, total, upload });
+                }))
+            });
             let task = shared.runtime.spawn(async move {
                 let started = Instant::now();
                 let url = req.url.clone();
-                let result = core.fetch_guarded(req).await;
+                let result = core.fetch_guarded_with(req, progress).await;
                 let response = wire_response(id, &url, result, started);
                 let wanted = {
                     let mut inflight = task_client.inflight.lock();

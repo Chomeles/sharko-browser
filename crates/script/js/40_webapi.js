@@ -1758,23 +1758,32 @@
   const pendingFetches = new Map(); // reqId -> fn(status, statusText, finalUrl, headersFlat, body, error)
   // `credentials` ('omit' | 'same-origin' | 'include'), `cache` and `redirect` ('follow' |
   // 'error' | 'manual') are optional trailing arguments of N.fetch (see NATIVE_API.md Additions).
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect) {
+  const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress) {
     const reqId = nextReqId++;
     pendingFetches.set(reqId, done);
+    if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
-      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow');
+      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function');
     } catch (e) {
       pendingFetches.delete(reqId);
+      fetchProgress.delete(reqId);
       const err = e;
       L.microtask(() => done(0, '', url, [], null, err && err.message ? err.message : 'fetch failed'));
     }
     return reqId;
   };
   L.cancelNativeFetch = function (reqId) {
+    fetchProgress.delete(reqId);
     if (pendingFetches.delete(reqId)) N.abortFetch(reqId);
+  };
+  L.onFetchProgress = function (reqId, loaded, total, upload) {
+    const fn = fetchProgress.get(reqId);
+    if (fn !== undefined) fn(Number(loaded), Number(total), !!upload);
   };
   L.onFetch = function (reqId, status, statusText, finalUrl, flat, body, error) {
     const done = pendingFetches.get(reqId);
+    fetchProgress.delete(reqId);
     if (done === undefined) return;
     pendingFetches.delete(reqId);
     done(status, statusText, finalUrl, flat, body, error);
@@ -2016,7 +2025,13 @@
       } else {
         s.reqId = L.startNativeFetch(s.method, s.url, flat, bytes === null ? null : copyToArrayBuffer(bytes), mode,
           (status, statusText, finalUrl, rflat, rbody, error) => this.#complete(gen, uploadListeners, bytes, status, statusText, finalUrl, rflat, rbody, error),
-          s.withCredentials ? 'include' : 'same-origin');
+          s.withCredentials ? 'include' : 'same-origin', undefined, undefined,
+          (loaded, total, upload) => {
+            if (gen !== s.gen || !s.send) return;
+            const init = { loaded, total, lengthComputable: total > 0 };
+            if (upload) { if (uploadListeners) L.fire(s.upload, 'progress', init, L.ProgressEvent); }
+            else L.fire(this, 'progress', init, L.ProgressEvent);
+          });
       }
       if (s.timeout > 0) {
         s.timer = L.internalTimeout(() => {

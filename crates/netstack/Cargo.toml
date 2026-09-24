@@ -27,7 +27,7 @@ blitz-traits.workspace = true
 url.workspace = true
 serde.workspace = true
 tokio.workspace = true
-reqwest = { version = "0.13.5", default-features = false, features = ["http2", "gzip", "deflate", "brotli", "zstd", "system-proxy"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["http2", "gzip", "deflate", "brotli", "zstd", "system-proxy", "stream"] }
 rustls = { version = "0.23.45", default-features = false, features = ["std", "tls12", "logging"] }
 hyper-util = { version = "0.1.20", default-features = false, features = ["client-proxy", "client-proxy-system"] }
 http = "1.3"

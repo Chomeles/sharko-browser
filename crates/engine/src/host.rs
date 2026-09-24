@@ -222,13 +222,19 @@ impl script::ScriptHost for RendererHost {
         let js_id = req.id;
         let tx = self.shared.loop_tx.clone();
         let generation = self.generation;
-        let net_id = self.net.fetch(
-            req,
-            Box::new(move |mut resp: NetResponse| {
-                resp.id = js_id;
-                let _ = tx.send(LoopMsg::ScriptFetch { generation, resp });
-            }),
-        );
+        let on_done = Box::new(move |mut resp: NetResponse| {
+            resp.id = js_id;
+            let _ = tx.send(LoopMsg::ScriptFetch { generation, resp });
+        });
+        let net_id = if req.progress {
+            let tx = self.shared.loop_tx.clone();
+            let on_progress: netstack::ProgressCallback = Arc::new(move |loaded, total, upload| {
+                let _ = tx.send(LoopMsg::ScriptFetchProgress { generation, id: js_id, loaded, total, upload });
+            });
+            self.net.fetch_with_progress(req, on_progress, on_done)
+        } else {
+            self.net.fetch(req, on_done)
+        };
         self.inflight.borrow_mut().insert(js_id, net_id);
     }
 

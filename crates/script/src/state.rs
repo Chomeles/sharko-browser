@@ -59,10 +59,11 @@ pub(crate) enum Hook {
     PopState,
     ElementEvent,
     WebSocket,
+    FetchProgress,
 }
 
 impl Hook {
-    pub(crate) const ALL: [Hook; 15] = [
+    pub(crate) const ALL: [Hook; 16] = [
         Hook::DocumentParsed,
         Hook::Event,
         Hook::Timer,
@@ -78,6 +79,7 @@ impl Hook {
         Hook::PopState,
         Hook::ElementEvent,
         Hook::WebSocket,
+        Hook::FetchProgress,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -97,6 +99,7 @@ impl Hook {
             Hook::PopState => "onPopState",
             Hook::ElementEvent => "onElementEvent",
             Hook::WebSocket => "onWebSocket",
+            Hook::FetchProgress => "onFetchProgress",
         }
     }
 }
@@ -104,7 +107,7 @@ impl Hook {
 #[derive(Default)]
 pub(crate) struct Hooks {
     pub(crate) obj: Option<v8::Global<v8::Object>>,
-    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 15],
+    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 16],
 }
 
 impl Hooks {

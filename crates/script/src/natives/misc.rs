@@ -245,6 +245,8 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
     let credentials = cx.opt_string(6)?.unwrap_or_else(|| "same-origin".into());
     let cache = cx.opt_string(7)?.unwrap_or_default();
     let redirect = cx.opt_string(8)?.unwrap_or_default();
+    // Addition: report upload/download progress (XHR with progress listeners).
+    let progress = cx.len() > 9 && cx.arg(9).is_true();
     let destination = match mode.as_str() {
         "navigate" => Destination::Document,
         _ => Destination::Fetch,
@@ -270,6 +272,7 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
         // "manual" and "error": the layer sees the 3xx response.
         follow_redirects: redirect.is_empty() || redirect == "follow",
         cache_mode,
+        progress,
     };
     cx.st.pending_fetches.borrow_mut().insert(id);
     cx.st.host.fetch(req);
@@ -309,6 +312,7 @@ pub(crate) fn n_fetch_sync(cx: &mut Cx) -> NResult {
         credentials,
         follow_redirects: true,
         cache_mode: CacheMode::Default,
+        progress: false,
     };
     let resp = cx.st.host.fetch_sync(req);
     let scope = &mut *cx.scope;

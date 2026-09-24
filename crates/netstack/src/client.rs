@@ -116,8 +116,12 @@ struct IpcBackend {
     shared: Arc<IpcShared>,
 }
 
+/// Progress callback of [`NetClient::fetch_with_progress`]: `(loaded, total, upload)`.
+pub type ProgressCallback = Arc<dyn Fn(u64, u64, bool) + Send + Sync>;
+
 struct IpcShared {
     pending: Mutex<HashMap<u64, FetchCallback>>,
+    progress: Mutex<HashMap<u64, ProgressCallback>>,
     sockets: Mutex<HashMap<u64, WsCallback>>,
     cookie_waiters: Mutex<HashMap<u64, Sender<String>>>,
     connected: AtomicBool,
@@ -129,6 +133,7 @@ impl IpcShared {
         match msg {
             Some(WireFromNetworkIn::Response(response)) => {
                 let response = NetResponse::from(response);
+                self.progress.lock().remove(&response.id);
                 if let Some(callback) = self.pending.lock().remove(&response.id) {
                     self.callbacks.run(move || callback(response));
                 }
@@ -136,6 +141,13 @@ impl IpcShared {
             Some(WireFromNetworkIn::Cookies { id, cookies }) => {
                 if let Some(waiter) = self.cookie_waiters.lock().remove(&id) {
                     let _ = waiter.send(cookies);
+                }
+            }
+            Some(WireFromNetworkIn::Progress { id, loaded, total, upload }) => {
+                // Cheap by contract: called inline so reports stay in order.
+                let callback = self.progress.lock().get(&id).cloned();
+                if let Some(callback) = callback {
+                    callback(loaded, total, upload);
                 }
             }
             Some(WireFromNetworkIn::Ws { id, event }) => {
@@ -151,6 +163,7 @@ impl IpcShared {
             None => {
                 self.connected.store(false, Ordering::Release);
                 self.cookie_waiters.lock().clear();
+                self.progress.lock().clear();
                 for (_, mut callback) in self.sockets.lock().drain() {
                     callback(WsEvent::Error("network service disconnected".into()));
                     callback(WsEvent::Closed { code: 1006, reason: String::new(), clean: false });
@@ -204,6 +217,7 @@ impl NetClient {
         let callbacks = CallbackPool::new();
         let shared = Arc::new(IpcShared {
             pending: Mutex::new(HashMap::new()),
+            progress: Mutex::new(HashMap::new()),
             sockets: Mutex::new(HashMap::new()),
             cookie_waiters: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(true),
@@ -224,6 +238,7 @@ impl NetClient {
         let callbacks = CallbackPool::new();
         let shared = Arc::new(IpcShared {
             pending: Mutex::new(HashMap::new()),
+            progress: Mutex::new(HashMap::new()),
             sockets: Mutex::new(HashMap::new()),
             cookie_waiters: Mutex::new(HashMap::new()),
             connected: AtomicBool::new(true),
@@ -298,9 +313,35 @@ impl NetClient {
     ///
     /// `on_done` is called exactly once on an internal thread — with an error response
     /// (status 0, `error` set) on failure — unless the request is aborted first.
-    pub fn fetch(&self, mut req: NetRequest, on_done: Box<dyn FnOnce(NetResponse) + Send>) -> u64 {
+    pub fn fetch(&self, req: NetRequest, on_done: Box<dyn FnOnce(NetResponse) + Send>) -> u64 {
+        self.fetch_inner(req, None, on_done)
+    }
+
+    /// Like [`fetch`](Self::fetch), but `on_progress(loaded, total, upload)` is called
+    /// while the request body is sent and the response body arrives (at most every 50 ms
+    /// per direction, never after `on_done`). It must return quickly: it may run on the
+    /// thread that delivers all network messages.
+    pub fn fetch_with_progress(
+        &self,
+        mut req: NetRequest,
+        on_progress: ProgressCallback,
+        on_done: Box<dyn FnOnce(NetResponse) + Send>,
+    ) -> u64 {
+        req.progress = true;
+        self.fetch_inner(req, Some(on_progress), on_done)
+    }
+
+    fn fetch_inner(
+        &self,
+        mut req: NetRequest,
+        on_progress: Option<ProgressCallback>,
+        on_done: Box<dyn FnOnce(NetResponse) + Send>,
+    ) -> u64 {
         let id = self.next_id();
         req.id = id;
+        if on_progress.is_none() {
+            req.progress = false;
+        }
         match &self.inner.backend {
             Backend::Ipc(ipc) => {
                 if !ipc.shared.connected.load(Ordering::Acquire) {
@@ -309,6 +350,9 @@ impl NetClient {
                     return id;
                 }
                 ipc.shared.pending.lock().insert(id, on_done);
+                if let Some(on_progress) = on_progress {
+                    ipc.shared.progress.lock().insert(id, on_progress);
+                }
                 let sent = ipc.sender.send(&WireToNetwork::Fetch(WireRequest::from(req)));
                 if let Err(e) = &sent {
                     log::warn!("cannot send request to the network service: {e}");
@@ -330,10 +374,19 @@ impl NetClient {
                 // Hold the lock while spawning so that the task cannot finish (and try to
                 // unregister itself) before it is registered.
                 let mut guard = local.inflight.lock();
+                let progress = on_progress.map(|callback| {
+                    // Silent once the request is finished or aborted.
+                    let inflight = Arc::clone(&local.inflight);
+                    crate::fetch::Progress(Arc::new(move |loaded, total, upload| {
+                        if inflight.lock().contains_key(&id) {
+                            callback(loaded, total, upload);
+                        }
+                    }))
+                });
                 let task = runtime.spawn(async move {
                     let started = Instant::now();
                     let url = req.url.clone();
-                    let result = core.fetch_guarded(req).await;
+                    let result = core.fetch_guarded_with(req, progress).await;
                     let response = net_response(id, &url, result, started);
                     // Not registered anymore = aborted: drop the callback silently.
                     if inflight.lock().remove(&id).is_some() {
@@ -355,6 +408,7 @@ impl NetClient {
     pub fn abort(&self, id: u64) {
         match &self.inner.backend {
             Backend::Ipc(ipc) => {
+                ipc.shared.progress.lock().remove(&id);
                 if ipc.shared.pending.lock().remove(&id).is_some() {
                     let _ = ipc.sender.send(&WireToNetwork::Abort(id));
                 }

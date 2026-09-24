@@ -67,6 +67,8 @@ pub struct NetRequest {
     /// Follow redirects automatically (true for everything except `redirect: "manual"`).
     pub follow_redirects: bool,
     pub cache_mode: CacheMode,
+    /// Report `FromNetwork::Progress` while the body is uploaded / downloaded (XHR).
+    pub progress: bool,
 }
 
 impl NetRequest {
@@ -82,6 +84,7 @@ impl NetRequest {
             credentials: true,
             follow_redirects: true,
             cache_mode: CacheMode::Default,
+            progress: false,
         }
     }
 }
@@ -145,6 +148,10 @@ pub enum FromNetwork {
     Response(NetResponse),
     Cookies { id: u64, cookies: String },
     Ws { id: u64, event: WsEvent },
+    /// Transfer progress of a request with `progress` set: bytes of the request body sent
+    /// (`upload`) or of the response body received so far. `total` is 0 when unknown.
+    /// At most every 50 ms per direction, and never after the `Response`.
+    Progress { id: u64, loaded: u64, total: u64, upload: bool },
 }
 
 /// A WebSocket message.

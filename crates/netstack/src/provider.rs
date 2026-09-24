@@ -178,6 +178,7 @@ fn to_net_request(request: Request, destination: Destination) -> NetRequest {
         credentials: true,
         follow_redirects: true,
         cache_mode: CacheMode::Default,
+        progress: false,
     }
 }
 

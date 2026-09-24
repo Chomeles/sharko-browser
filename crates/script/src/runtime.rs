@@ -432,6 +432,24 @@ impl ScriptRuntime {
         });
     }
 
+    /// Transfer progress of a request started through [`ScriptHost::fetch`] with
+    /// `progress` set: hook `onFetchProgress(id, loaded, total, upload)`.
+    pub fn deliver_fetch_progress(&mut self, doc: &mut BaseDocument, id: u64, loaded: u64, total: u64, upload: bool) {
+        if !self.state.pending_fetches.borrow().contains(&id) {
+            return;
+        }
+        let ptr = doc as *mut BaseDocument;
+        self.enter(ptr, |scope, st| {
+            let args = [
+                cx::num_value(scope, id as f64),
+                cx::num_value(scope, loaded as f64),
+                cx::num_value(scope, total as f64),
+                v8::Boolean::new(scope, upload).into(),
+            ];
+            call_hook(scope, st, Hook::FetchProgress, &args);
+        });
+    }
+
     /// All subresources finished loading: hook `onResourcesLoaded`.
     pub fn resources_loaded(&mut self, doc: &mut BaseDocument) {
         let ptr = doc as *mut BaseDocument;

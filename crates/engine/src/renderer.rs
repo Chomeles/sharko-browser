@@ -40,6 +40,8 @@ pub enum LoopMsg {
     Document { generation: u64, resp: NetResponse },
     /// Response to a script-initiated fetch.
     ScriptFetch { generation: u64, resp: NetResponse },
+    /// Upload/download progress of a script-initiated fetch.
+    ScriptFetchProgress { generation: u64, id: u64, loaded: u64, total: u64, upload: bool },
     /// Event of a page's WebSocket (`id` is the script's socket id).
     ScriptWs { generation: u64, id: u64, event: common::protocol::WsEvent },
     /// Something happened on another thread (subresource loaded, redraw requested).
@@ -264,6 +266,15 @@ impl Renderer {
                         page.host.inflight.borrow_mut().remove(&resp.id);
                         if let Some(rt) = page.rt.as_mut() {
                             rt.deliver_fetch(&mut page.doc, resp);
+                        }
+                    }
+                }
+            }
+            LoopMsg::ScriptFetchProgress { generation, id, loaded, total, upload } => {
+                if let Some(page) = &mut self.page {
+                    if page.generation == generation {
+                        if let Some(rt) = page.rt.as_mut() {
+                            rt.deliver_fetch_progress(&mut page.doc, id, loaded, total, upload);
                         }
                     }
                 }

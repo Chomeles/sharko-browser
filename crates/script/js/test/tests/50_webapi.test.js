@@ -475,3 +475,20 @@ test('Worker: own realm, messages both ways, importScripts, timers, errors, term
   assert.strictEqual(err("new Worker('https://other.org/w.js')"), 'SecurityError');
   assert.strictEqual(err("new Worker('http://[')"), 'SyntaxError');
 });
+
+test('XHR: upload and download progress reported by the network', async () => {
+  const e = await env();
+  e.run(`window.pl = []; window.x = new XMLHttpRequest(); x.open('POST', '/api/echo');
+    x.onprogress = (ev) => pl.push('d' + ev.loaded + '/' + ev.total + ':' + ev.lengthComputable);
+    x.upload.onprogress = (ev) => pl.push('u' + ev.loaded + '/' + ev.total);
+    x.send('abcdef');`);
+  const req = e.mock.events.find((ev) => ev.kind === 'fetch');
+  e.hook('onFetchProgress', req.reqId, 3, 6, true);
+  e.hook('onFetchProgress', req.reqId, 50, 0, false);
+  await e.flush();
+  const pl = Array.from(e.run('pl'));
+  assert.deepStrictEqual(pl.slice(0, 2), ['u3/6', 'd50/0:false']);
+  assert.ok(pl.length > 2, 'final progress at completion');
+  e.hook('onFetchProgress', req.reqId, 99, 99, false);
+  assert.strictEqual(e.run('pl.length'), pl.length, 'no progress after completion');
+});

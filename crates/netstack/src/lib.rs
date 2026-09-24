@@ -77,7 +77,7 @@ mod util;
 mod websocket;
 mod wire;
 
-pub use client::{NetClient, WsCallback};
+pub use client::{NetClient, ProgressCallback, WsCallback};
 pub use config::NetConfig;
 pub use provider::{BlitzNetProvider, encode_form_body};
 pub use service::{NetworkService, run_service, run_service_with_config};

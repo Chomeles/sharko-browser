@@ -381,3 +381,45 @@ fn ephemeral_config_touches_no_disk() {
     assert_eq!(body_str(&get(&client, &server.url("/max-age"))), "hit 1");
     assert!(get(&client, &server.url("/max-age")).from_cache);
 }
+
+#[test]
+fn progress_reports_upload_and_download() {
+    let server = TestServer::start();
+    let (client, _dir) = client();
+    let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let seen = std::sync::Arc::clone(&reports);
+    let (tx, rx) = mpsc::channel();
+    client.fetch_with_progress(
+        NetRequest::get(0, server.url("/big"), Destination::Fetch),
+        std::sync::Arc::new(move |loaded, total, upload| seen.lock().unwrap().push((loaded, total, upload))),
+        Box::new(move |r| {
+            let _ = tx.send(r);
+        }),
+    );
+    let r = rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(r.body.len(), 10 * 1024 * 1024);
+    let down = reports.lock().unwrap().clone();
+    assert!(!down.is_empty() && down.iter().all(|&(_, _, upload)| !upload), "{down:?}");
+    assert!(down.windows(2).all(|w| w[0].0 <= w[1].0), "monotonic: {down:?}");
+    assert!(down.iter().all(|&(loaded, _, _)| loaded <= 10 * 1024 * 1024));
+
+    reports.lock().unwrap().clear();
+    let seen = std::sync::Arc::clone(&reports);
+    let (tx, rx) = mpsc::channel();
+    let mut post = NetRequest::get(0, server.url("/echo-method"), Destination::Fetch);
+    post.method = "POST".into();
+    post.body = Some(vec![b'x'; 3 * 1024 * 1024]);
+    client.fetch_with_progress(
+        post,
+        std::sync::Arc::new(move |loaded, total, upload| seen.lock().unwrap().push((loaded, total, upload))),
+        Box::new(move |r| {
+            let _ = tx.send(r);
+        }),
+    );
+    let r = rx.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(r.status, 200, "{:?}", r.error);
+    assert_eq!(r.body.len(), "POST ".len() + 3 * 1024 * 1024, "the streamed body arrives intact");
+    let up: Vec<_> = reports.lock().unwrap().iter().filter(|r| r.2).cloned().collect();
+    assert_eq!(up.last(), Some(&(3 * 1024 * 1024, 3 * 1024 * 1024, true)), "{up:?}");
+}
