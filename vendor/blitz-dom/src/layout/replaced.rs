@@ -230,7 +230,22 @@ pub fn compute_replaced_layout(
     // axis are retained as they transfer through the aspect ratio (transferred size suggestion).
     let mut style_size = style_size;
     if sizing_mode == SizingMode::ContentSize {
+        // PATCH: a percentage width makes a replaced element "compressible": its
+        // min-content contribution resolves the percentage against zero
+        // (css-sizing-3 §5.2.2), e.g. `<img style="width:100%">` in a flex item must not
+        // keep the item at the image's natural width.
+        let width_is_percentage = {
+            let w = style.size().width;
+            let a = w.maybe_resolve(Some(0.0), &resolve_calc_value);
+            let b = w.maybe_resolve(Some(1000.0), &resolve_calc_value);
+            matches!((a, b), (Some(a), Some(b)) if a != b)
+        };
+        let compressible =
+            available_space.width == AvailableSpace::MinContent && width_is_percentage;
         match requested_axis {
+            RequestedAxis::Horizontal if compressible => {
+                min_size.width = None;
+            }
             RequestedAxis::Horizontal => {
                 style_size.width = None;
                 min_size.width = None;

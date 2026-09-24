@@ -52,3 +52,4 @@ blitz-dom = { path = "vendor/blitz-dom" }
 blitz-paint = { path = "vendor/blitz-paint" }
 anyrender_vello = { path = "vendor/anyrender_vello" }
 parley = { path = "vendor/parley" }
+taffy = { path = "vendor/taffy" }

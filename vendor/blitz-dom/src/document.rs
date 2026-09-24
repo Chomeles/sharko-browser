@@ -2391,13 +2391,20 @@ impl BaseDocument {
                             continue;
                         }
                         let x0 = inline_box.x as f64;
-                        let y0 = inline_box.y as f64;
-                        add(
-                            x0,
-                            y0,
-                            x0 + inline_box.width as f64,
-                            y0 + inline_box.height as f64,
-                        );
+                        // PATCH: zero-height spacers (padding/border edges, empty inline
+                        // elements) span the line box, like the element's text would.
+                        let (y0, y1) = if inline_box.height <= 0.0 {
+                            (
+                                line_metrics.block_min_coord as f64,
+                                line_metrics.block_max_coord as f64,
+                            )
+                        } else {
+                            (
+                                inline_box.y as f64,
+                                (inline_box.y + inline_box.height) as f64,
+                            )
+                        };
+                        add(x0, y0, x0 + inline_box.width as f64, y1);
                     }
                 }
             }

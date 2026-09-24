@@ -7,6 +7,7 @@ a `// PATCH:` comment so it can be upstreamed or re-applied on upgrades.
 * `blitz-paint` 0.3.0-beta.2 — painter (DioxusLabs/blitz).
 * `anyrender_vello` 0.14.0 — Vello GPU backend (DioxusLabs/anyrender).
 * `parley` 0.11.1 — text layout (linebender/parley).
+* `taffy` 0.14.0 — box layout: block/flex/grid (DioxusLabs/taffy).
 
 Patches so far:
 1. `blitz-dom/src/layout/table.rs`: anonymous table objects (non-table children of a
@@ -29,3 +30,14 @@ Patches so far:
    `:host`, `::slotted()`), `<style>`/`<link>` in `<template>` contents are inert.
 10. `blitz-dom/src/stylo.rs`: `:defined` (built-ins always, custom elements once
     upgraded); class selectors compare bytes instead of interning an atom per token.
+11. `blitz-dom/src/layout/construct.rs`: inline `<svg>`: referenced elements outside the
+    `<svg>` (`<use href="#icon">` sprites, `url(#gradient)`) are copied into a `<defs>`;
+    own serializer that keeps `currentColor` and passes CSS-set `fill`/`stroke` (and the
+    root's `color`) to usvg.
+12. `taffy/src/compute/block.rs`, `blitz-dom/src/layout/replaced.rs`: compressible replaced
+    elements: a percentage `width`/`max-width` resolves against zero for the min-content
+    contribution (`<img width=872 style="max-width:100%">` in a flex item can shrink).
+13. `blitz-dom/src/layout/damage.rs`: `top`/`left`/… are ignored for `position: static`
+    and for `sticky` (applied at paint time) instead of acting as relative offsets.
+14. `blitz-dom/src/layout/construct.rs`, `document.rs`: empty inline elements get a
+    zero-width box, so they have a position (`getClientRects()`, IntersectionObserver).

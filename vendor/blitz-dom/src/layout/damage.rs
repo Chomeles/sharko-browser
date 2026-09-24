@@ -558,7 +558,23 @@ impl BaseDocument {
                     return;
                 };
 
-                (stylo_taffy::to_taffy_style(style), style.clone_display())
+                let mut taffy_style = stylo_taffy::to_taffy_style(style);
+                // PATCH: stylo_taffy maps `static` and `sticky` to taffy's `Relative`, which
+                // applies `top`/`left`/… as a relative offset. Static boxes ignore insets, and
+                // sticky offsets are applied at paint time (blitz-paint `sticky_shift`).
+                use style::computed_values::position::T as PositionProperty;
+                if matches!(
+                    style.clone_position(),
+                    PositionProperty::Static | PositionProperty::Sticky
+                ) {
+                    taffy_style.inset = taffy::Rect {
+                        left: taffy::LengthPercentageAuto::auto(),
+                        right: taffy::LengthPercentageAuto::auto(),
+                        top: taffy::LengthPercentageAuto::auto(),
+                        bottom: taffy::LengthPercentageAuto::auto(),
+                    };
+                }
+                (taffy_style, style.clone_display())
             };
             taffy_style.item_is_replaced = node
                 .data
