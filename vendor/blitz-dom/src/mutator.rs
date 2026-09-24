@@ -1163,13 +1163,16 @@ impl<'doc> DocumentMutator<'doc> {
                     tracing::info!("Loading image {src_string} from cache");
                     let node = &mut self.doc.nodes[target_id];
                     let el = node.element_data_mut().unwrap();
-                    // PATCH: `load` event (once: a detached image loaded before insertion
-                    // already has its image data).
-                    let already_loaded = matches!(el.special_data, SpecialElementData::Image(_));
+                    // PATCH: `load` event, once per source (a detached image loaded before
+                    // insertion already fired it for this URL).
+                    let already_loaded = matches!(el.special_data, SpecialElementData::Image(_))
+                        && self.doc.image_loaded_src.get(&target_id).map(String::as_str)
+                            == Some(src_string);
                     el.special_data = SpecialElementData::Image(Box::new(cached_image.clone()));
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
                     if !already_loaded {
+                        self.doc.image_loaded_src.insert(target_id, src_string.to_string());
                         self.doc.element_load_events.push((target_id, true));
                     }
                     return;

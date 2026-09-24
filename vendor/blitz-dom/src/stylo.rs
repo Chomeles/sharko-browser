@@ -449,7 +449,14 @@ impl selectors::Element for BlitzNode<'_> {
                     .is_some_and(|p| !p.is_empty())
                     && match el.text_input_data() {
                         Some(input) => input.editor.raw_text().is_empty(),
-                        // Before the editor exists (first style pass): the initial value.
+                        // Before the editor exists (first style pass): the initial value
+                        // (a textarea's is its child text).
+                        None if el.name.local == local_name!("textarea") => {
+                            self.dom_children().all(|c| match &c.data {
+                                NodeData::Text(t) => t.content.is_empty(),
+                                _ => true,
+                            })
+                        }
                         None => el.attr(local_name!("value")).is_none_or(|v| v.is_empty()),
                     }
             }),
