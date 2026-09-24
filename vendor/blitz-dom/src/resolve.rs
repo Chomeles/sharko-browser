@@ -378,6 +378,14 @@ impl BaseDocument {
         // println!("\n\nRESOLVE LAYOUT\n===========\n");
 
         taffy::compute_root_layout(self, root_element_id, available_space);
+        // PATCH: absolutely positioned/fixed boxes against their real containing block.
+        crate::layout::abspos::fixup_out_of_flow_boxes(
+            self,
+            taffy::Size {
+                width: size.width.to_f32_px(),
+                height: size.height.to_f32_px(),
+            },
+        );
         taffy::round_layout(self, root_element_id);
 
         // println!("\n\n");

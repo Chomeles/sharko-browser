@@ -327,6 +327,10 @@ pub struct BaseDocument {
     /// requests for the same URL are queued here instead of starting new fetches.
     /// Value is a list of (node_id, image_type) pairs waiting for the image.
     pub(crate) pending_images: HashMap<String, Vec<(NodeId, ImageType)>>,
+    /// PATCH: elements whose resource finished loading since the last
+    /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
+    /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
+    pub(crate) element_load_events: Vec<(NodeId, bool)>,
 
     /// Nodes whose `background-image`/`mask-image` layers need flushing to
     /// dedicated storage on the node because their style changed (populated by
@@ -499,6 +503,7 @@ impl BaseDocument {
             deferred_construction_nodes: Vec::new(),
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
+            element_load_events: Vec::new(),
             pending_style_image_nodes: Vec::new(),
             pending_critical_resources: HashSet::new(),
             controls_to_form: HashMap::new(),
@@ -1124,6 +1129,7 @@ impl BaseDocument {
                                     guard: self.guard.clone(),
                                     net_provider: self.net_provider.clone(),
                                     abort_signal: self.abort_signal.clone(),
+                                    media: self.media_list_of(node_id),
                                 },
                             ),
                         );
@@ -1136,19 +1142,70 @@ impl BaseDocument {
     pub fn process_style_element(&mut self, target_id: NodeId) {
         let css = self.nodes[target_id].text_content();
         let css = html_escape::decode_html_entities(&css);
+        let media = self.media_list_of(target_id);
         // PATCH: `<style>` in template contents is inert; in a shadow tree it is scoped.
         let sheet = match self.style_scope(target_id) {
             StyleScope::Inert => {
                 self.remove_stylesheet_for_node(target_id);
                 return;
             }
-            StyleScope::Document => self.make_stylesheet(&css, Origin::Author),
+            StyleScope::Document => self.make_stylesheet_with_media(&css, Origin::Author, media),
             StyleScope::ShadowHost(host) => {
                 let scoped = crate::shadow_css::scope_shadow_css(&css, &host.to_string());
-                self.make_stylesheet(&scoped, Origin::Author)
+                self.make_stylesheet_with_media(&scoped, Origin::Author, media)
             }
         };
         self.add_stylesheet_for_node(sheet, target_id);
+    }
+
+    /// PATCH: the media list of a `<style>`/`<link>` element's `media` attribute (empty,
+    /// i.e. all media, if absent). Print stylesheets used to apply on screen and hid e.g.
+    /// the whole header of theguardian.com.
+    pub(crate) fn media_list_of(&self, node_id: NodeId) -> MediaList {
+        use style::parser::ParserContext;
+        use style::stylesheets::CssRuleType;
+        use style_traits::ParsingMode;
+        let Some(media) = self
+            .nodes
+            .get(node_id)
+            .and_then(|n| n.attr(local_name!("media")))
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+        else {
+            return MediaList::empty();
+        };
+        let url = self.url.url_extra_data();
+        let mut ctx = ParserContext::new(
+            Origin::Author,
+            &url,
+            Some(CssRuleType::Media),
+            ParsingMode::DEFAULT,
+            QuirksMode::NoQuirks,
+            Default::default(),
+            None,
+            None,
+            Default::default(),
+        );
+        let mut input = cssparser::ParserInput::new(media);
+        MediaList::parse(&mut ctx, &mut cssparser::Parser::new(&mut input))
+    }
+
+    /// PATCH: the `media` attribute of a `<style>`/`<link>` changed.
+    pub(crate) fn update_stylesheet_media(&mut self, node_id: NodeId) {
+        let media = self.media_list_of(node_id);
+        let Some(sheet) = self.nodes_to_stylesheet.get(&node_id).cloned() else {
+            return;
+        };
+        {
+            let mut guard = self.guard.write();
+            *sheet.0.media.write_with(&mut guard) = media;
+        }
+        // Re-add the sheet (this removes the old entry) so the stylist re-evaluates it.
+        self.add_stylesheet_for_node(sheet, node_id);
+        self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+        if let Some(root) = self.try_root_element().map(|n| n.id) {
+            self.nodes[root].set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        }
     }
 
     /// PATCH: where a `<style>`/`<link>` element's stylesheet applies: nowhere inside
@@ -1327,11 +1384,21 @@ impl BaseDocument {
     }
 
     pub fn make_stylesheet(&self, css: impl AsRef<str>, origin: Origin) -> DocumentStyleSheet {
+        self.make_stylesheet_with_media(css, origin, MediaList::empty())
+    }
+
+    /// PATCH: a stylesheet that applies to `media` only.
+    pub fn make_stylesheet_with_media(
+        &self,
+        css: impl AsRef<str>,
+        origin: Origin,
+        media: MediaList,
+    ) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
             css.as_ref(),
             self.url.url_extra_data(),
             origin,
-            ServoArc::new(self.guard.wrap(MediaList::empty())),
+            ServoArc::new(self.guard.wrap(media)),
             self.guard.clone(),
             Some(&StylesheetLoader {
                 tx: self.tx.clone(),
@@ -1421,12 +1488,44 @@ impl BaseDocument {
         !self.pending_critical_resources.is_empty()
     }
 
+    /// PATCH: take the element resource loads/failures since the last call.
+    pub fn take_element_load_events(&mut self) -> Vec<(NodeId, bool)> {
+        std::mem::take(&mut self.element_load_events)
+    }
+
+    fn push_element_load_event(&mut self, node_id: NodeId, ok: bool) {
+        let fires = self.nodes.get(node_id).is_some_and(|n| {
+            n.data.is_element_with_tag_name(&local_name!("img"))
+                || n.data.is_element_with_tag_name(&local_name!("link"))
+                || n.data.is_element_with_tag_name(&local_name!("iframe"))
+        });
+        if fires {
+            self.element_load_events.push((node_id, ok));
+        }
+    }
+
     pub fn load_resource(&mut self, res: ResourceLoadResponse) {
         self.pending_critical_resources.remove(&res.request_id);
 
         let resource = match res.result {
             Ok(resource) => resource,
             Err(err) => {
+                // PATCH: `error` events.
+                if let Some(url) = res.resolved_url.as_ref() {
+                    let waiting = self.pending_images.get(url).cloned().unwrap_or_default();
+                    for (node_id, image_type) in waiting {
+                        if matches!(image_type, ImageType::Image) {
+                            self.push_element_load_event(node_id, false);
+                        }
+                    }
+                }
+                if let Some(node_id) = res.node_id
+                    && self.nodes.get(node_id).is_some_and(|n| {
+                        !n.data.is_element_with_tag_name(&local_name!("img"))
+                    })
+                {
+                    self.push_element_load_event(node_id, false);
+                }
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
                     #[cfg(feature = "tracing")]
@@ -1462,6 +1561,7 @@ impl BaseDocument {
                         self.add_stylesheet_for_node(sheet, node_id);
                     }
                 }
+                self.push_element_load_event(node_id, true);
             }
             Resource::Image(_kind, width, height, image_data) => {
                 // Create the ImageData and cache it
@@ -1489,6 +1589,7 @@ impl BaseDocument {
                     return;
                 };
                 self.apply_iframe_html(node_id, res.request_id, res.resolved_url, &html);
+                self.push_element_load_event(node_id, true);
             }
             Resource::Font(bytes, overrides) => {
                 let font = Blob::new(Arc::new(bytes));
@@ -1564,6 +1665,7 @@ impl BaseDocument {
                     // Clear layout cache
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
+                    self.push_element_load_event(node_id, true);
                 }
                 ImageType::Background(idx) | ImageType::Mask(idx) => {
                     let layer_image = node.element_data_mut().and_then(|el| {

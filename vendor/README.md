@@ -57,3 +57,13 @@ Patches so far:
     `<select>` shows its selected option (`:checked` state, UA stylesheet rules in
     `assets/default.css`) with an arrow unless `appearance: none`.
 20. `blitz-paint/src/text.rs`: `text-overflow: ellipsis`.
+21. `blitz-dom/src/document.rs`, `net.rs`, `mutator.rs`: the `media` attribute of
+    `<link>`/`<style>` (print stylesheets no longer apply on screen or block rendering;
+    changing it, as in `media="print" onload="this.media='all'"`, re-evaluates the sheet).
+22. `blitz-dom/src/document.rs`, `mutator.rs`: `load`/`error` events for `<img>`,
+    `<link rel=stylesheet>` and `<iframe>` (`take_element_load_events`); detached images
+    (`new Image()`) load.
+23. `blitz-dom/src/layout/abspos.rs`: absolutely positioned and fixed boxes are laid out
+    against their containing block (nearest positioned/transformed ancestor, or the
+    viewport) instead of their parent; `blitz-paint`: fixed boxes stay in place when the
+    viewport scrolls.

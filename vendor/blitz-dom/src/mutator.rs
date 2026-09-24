@@ -336,6 +336,15 @@ impl DocumentMutator<'_> {
             return;
         }
 
+        // PATCH: `<link media>`/`<style media>` changes (e.g. the async-CSS pattern
+        // `media="print" onload="this.media='all'"`).
+        if *attr == local_name!("media")
+            && matches!(element.name.local.as_ref(), "link" | "style")
+        {
+            self.doc.update_stylesheet_media(node_id);
+            return;
+        }
+
         if *attr == local_name!("disabled") && element.can_be_disabled() {
             node.disable();
             return;
@@ -344,6 +353,11 @@ impl DocumentMutator<'_> {
         // If node if not in the document, then don't apply any special behaviours
         // and simply set the attribute value
         if !node.flags.is_in_document() {
+            // PATCH: images load (and fire `load`) without being in the document
+            // (`new Image().src = …`, preloading).
+            if (tag, attr) == tag_and_attr!("img", "src") {
+                self.load_image(node_id);
+            }
             return;
         }
 
@@ -1089,10 +1103,22 @@ impl<'doc> DocumentMutator<'doc> {
                 guard: self.doc.guard.clone(),
                 net_provider: self.doc.net_provider.clone(),
                 abort_signal: self.doc.abort_signal.clone(),
+                media: self.doc.media_list_of(target_id),
             },
         );
 
-        if is_in_head && !self.doc.net_provider.is_noop() {
+        // PATCH: stylesheets for other media (`media="print"`) don't block rendering.
+        let matches_media = {
+            use style::media_queries::MediaList;
+            let media: MediaList = self.doc.media_list_of(target_id);
+            media.media_queries.is_empty()
+                || media.evaluate(
+                    self.doc.stylist.device(),
+                    style::context::QuirksMode::NoQuirks,
+                    &mut style::stylesheets::CustomMediaEvaluator::none(),
+                )
+        };
+        if is_in_head && matches_media && !self.doc.net_provider.is_noop() {
             self.doc
                 .pending_critical_resources
                 .insert(handler.request_id());
@@ -1135,10 +1161,16 @@ impl<'doc> DocumentMutator<'doc> {
                     #[cfg(feature = "tracing")]
                     tracing::info!("Loading image {src_string} from cache");
                     let node = &mut self.doc.nodes[target_id];
-                    node.element_data_mut().unwrap().special_data =
-                        SpecialElementData::Image(Box::new(cached_image.clone()));
+                    let el = node.element_data_mut().unwrap();
+                    // PATCH: `load` event (once: a detached image loaded before insertion
+                    // already has its image data).
+                    let already_loaded = matches!(el.special_data, SpecialElementData::Image(_));
+                    el.special_data = SpecialElementData::Image(Box::new(cached_image.clone()));
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
+                    if !already_loaded {
+                        self.doc.element_load_events.push((target_id, true));
+                    }
                     return;
                 }
 

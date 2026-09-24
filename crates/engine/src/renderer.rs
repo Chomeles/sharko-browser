@@ -710,6 +710,19 @@ impl Renderer {
                 }
             }
 
+            // `load`/`error` events of <img>, <link rel=stylesheet> and <iframe>: apply the
+            // finished subresources now (not only at the next frame) and tell the page.
+            page.doc.handle_messages();
+            let events = page.doc.take_element_load_events();
+            if !events.is_empty() {
+                if let Some(rt) = page.rt.as_mut() {
+                    for (node, ok) in events {
+                        rt.element_event(&mut page.doc, node, if ok { "load" } else { "error" });
+                    }
+                }
+                self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+
             let pending = self.shared.pending_resources.load(Ordering::SeqCst);
 
             // Load state

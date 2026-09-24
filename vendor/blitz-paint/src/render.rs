@@ -432,6 +432,15 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             box_position.y += dy;
             node.sticky_offset
                 .set(((dx / self.scale) as f32, (dy / self.scale) as f32));
+        } else if styles.get_box().position == style::computed_values::position::T::Fixed
+            && !has_fixed_or_transformed_ancestor(self.dom.as_ref(), node)
+        {
+            // PATCH: `position: fixed` stays in place when the viewport scrolls (its layout
+            // position is relative to the initial containing block, see blitz-dom `abspos`).
+            let scroll = self.dom.as_ref().viewport_scroll();
+            box_position.x += scroll.x * self.scale;
+            box_position.y += scroll.y * self.scale;
+            node.sticky_offset.set((scroll.x as f32, scroll.y as f32));
         }
         let box_size = Size::new(size.width as f64, size.height as f64);
         let border_box = Rect::from_origin_size(box_position.to_point(), box_size);
@@ -1318,4 +1327,22 @@ fn create_css_rect(style: &ComputedValues, layout: &Layout, scale: f64) -> CssBo
     };
 
     CssBox::new(border_box, border, padding, outline_width, border_radii)
+}
+
+/// PATCH: whether a `position: fixed` box is inside another fixed box (already kept in
+/// place) or a transformed box (which is its containing block instead of the viewport).
+fn has_fixed_or_transformed_ancestor(dom: &BaseDocument, node: &Node) -> bool {
+    let mut cur = node.layout_parent.get().or(node.parent);
+    while let Some(id) = cur {
+        let Some(n) = dom.get_node(id) else { break };
+        if let Some(styles) = n.primary_styles() {
+            if styles.get_box().position == style::computed_values::position::T::Fixed
+                || !styles.get_box().transform.0.is_empty()
+            {
+                return true;
+            }
+        }
+        cur = n.layout_parent.get().or(n.parent);
+    }
+    false
 }

@@ -2671,6 +2671,11 @@
     get scripts() { return docCollection(this, 'scripts', () => queryCollection(idOf(this), 'script', true)); },
     get anchors() { return docCollection(this, 'anchors', () => queryCollection(idOf(this), 'a[name]', true)); },
     get applets() { return docCollection(this, 'applets', () => L.makeHTMLCollection({ kind: 0, ids: [] }, false)); },
+    // document.all is an "undetectable" collection in browsers: falsy and == undefined, but
+    // not === undefined (V8's MarkAsUndetectable isn't available here). null behaves the
+    // same in these checks; YouTube's templates treat `undefined === document.all` as a
+    // sign of a broken environment and hide their icons.
+    get all() { return null; },
     get scrollingElement() {
       return this.compatMode === 'BackCompat' ? this.body : this.documentElement;
     },

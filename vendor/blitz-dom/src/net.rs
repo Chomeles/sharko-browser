@@ -137,6 +137,8 @@ pub struct StylesheetHandler {
     pub guard: SharedRwLock,
     pub net_provider: Arc<dyn NetProvider>,
     pub abort_signal: Option<AbortSignal>,
+    /// PATCH: the `<link media>` the sheet applies to.
+    pub media: MediaList,
 }
 
 impl NetHandler for ResourceHandler<StylesheetHandler> {
@@ -152,7 +154,7 @@ impl NetHandler for ResourceHandler<StylesheetHandler> {
             css,
             self.data.source_url.clone().into(),
             Origin::Author,
-            ServoArc::new(self.data.guard.wrap(MediaList::empty())),
+            ServoArc::new(self.data.guard.wrap(self.data.media.clone())),
             self.data.guard.clone(),
             Some(&StylesheetLoader {
                 tx: self.tx.clone(),
