@@ -867,6 +867,107 @@ pub(crate) fn n_structured_clone(cx: &mut Cx) -> NResult {
     }
 }
 
+/// Addition: `N.workerCreate()` -> the global object of a new JS realm (a separate V8
+/// context with only the ECMAScript builtins) for a dedicated worker. The JS layer installs
+/// the worker API on it. The context lives as long as its global object is referenced.
+pub(crate) fn n_worker_create(cx: &mut Cx) -> NResult {
+    let page = cx.scope.get_current_context();
+    let token = page.get_security_token(cx.scope);
+    let context = v8::Context::new(cx.scope, Default::default());
+    // Same token: the page and the worker realm may touch each other's objects.
+    context.set_security_token(token);
+    let global = context.global(cx.scope);
+    cx.ret_value(global.into());
+    Ok(())
+}
+
+fn realm_of<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    global: v8::Local<'s, v8::Value>,
+) -> Result<v8::Local<'s, v8::Context>, JsErr> {
+    let obj: v8::Local<v8::Object> = global
+        .try_into()
+        .map_err(|_| JsErr::type_err("not a realm's global object"))?;
+    obj.get_creation_context(scope)
+        .ok_or_else(|| JsErr::type_err("not a realm's global object"))
+}
+
+/// Addition: `N.workerEval(global, source, url)`: run a classic script in the realm of
+/// `global` (from `N.workerCreate`). Returns `null`, or `[message, url, line, column,
+/// error]` for an uncaught exception.
+pub(crate) fn n_worker_eval(cx: &mut Cx) -> NResult {
+    let target = realm_of(cx.scope, cx.arg(0))?;
+    let source = cx.string(1)?;
+    let url = cx.string(2)?;
+    let failure = {
+        let scope = &mut v8::ContextScope::new(cx.scope, target);
+        match run_classic(scope, &source, &url) {
+            Ok(_) => None,
+            Err(caught) => {
+                let (Some(exception), message) = (caught.exception, caught.message) else {
+                    // Terminated by the watchdog: keep unwinding.
+                    return Err(JsErr::Thrown);
+                };
+                let text = match message {
+                    Some(m) => m.get(scope).to_rust_string_lossy(scope),
+                    None => exception.to_rust_string_lossy(scope),
+                };
+                let line = message.and_then(|m| m.get_line_number(scope)).unwrap_or(0);
+                let column = message.map(|m| m.get_start_column()).unwrap_or(0);
+                Some((text, line, column, exception))
+            }
+        }
+    };
+    match failure {
+        None => cx.ret_null(),
+        Some((text, line, column, exception)) => {
+            let items = [
+                v8_str(cx.scope, &text).into(),
+                v8_str(cx.scope, &url).into(),
+                v8::Integer::new(cx.scope, line as i32).into(),
+                v8::Integer::new(cx.scope, column as i32 + 1).into(),
+                exception,
+            ];
+            let arr = v8::Array::new_with_elements(cx.scope, &items);
+            cx.ret_value(arr.into());
+        }
+    }
+    Ok(())
+}
+
+/// Addition: `N.cloneInto(global, value)`: structured clone of `value` whose result
+/// belongs to the realm of `global` (worker messages must be objects of the receiving
+/// realm, so `instanceof Array` etc. work there).
+pub(crate) fn n_clone_into(cx: &mut Cx) -> NResult {
+    use v8::{ValueDeserializerHelper, ValueSerializerHelper};
+    let target = realm_of(cx.scope, cx.arg(0))?;
+    let value = cx.arg(1);
+    let context = cx.scope.get_current_context();
+    let bytes = {
+        let ser = v8::ValueSerializer::new(cx.scope, Box::new(CloneDelegate));
+        ser.write_header();
+        if ser.write_value(context, value) != Some(true) {
+            return Err(JsErr::Thrown);
+        }
+        ser.release()
+    };
+    let cloned = {
+        let scope = &mut v8::ContextScope::new(cx.scope, target);
+        let de = v8::ValueDeserializer::new(scope, Box::new(CloneDelegate), &bytes);
+        if de.read_header(target) != Some(true) {
+            return Err(JsErr::dom("DataCloneError", "failed to deserialize"));
+        }
+        de.read_value(target)
+    };
+    match cloned {
+        Some(v) => {
+            cx.ret_value(v);
+            Ok(())
+        }
+        None => Err(JsErr::Thrown),
+    }
+}
+
 pub(crate) fn n_pending_resource_count(cx: &mut Cx) -> NResult {
     let mut n = cx.st.host.pending_resource_count();
     if let Ok(doc) = cx.st.doc()

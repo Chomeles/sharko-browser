@@ -722,6 +722,11 @@ class MockNative {
         const delay = spec && typeof spec === 'object' && spec.delay !== undefined ? spec.delay : 0;
         M.schedule(M.clock + delay, 'fetch', { reqId, spec, url: req.url });
       },
+      workerCreate: () => vm.createContext({}),
+      workerEval: (g, src, url) => {
+        try { vm.runInContext(src, g, { filename: url }); return null; } catch (err) { return M.arr([String(err && err.message), url, 1, 1, err]); }
+      },
+      cloneInto: (g, v) => require('v8').deserialize(require('v8').serialize(v)),
       wsOpen: (id, url, protocols, origin) => { M.ws.push(['open', id, url, Array.from(protocols), origin]); return true; },
       wsSend: (id, data) => { M.ws.push(['send', id, typeof data === 'string' ? data : Array.from(new Uint8Array(data))]); },
       wsClose: (id, code, reason) => { M.ws.push(['close', id, code, reason]); },

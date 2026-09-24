@@ -426,3 +426,52 @@ test('WebSocket: handshake, messages, bufferedAmount, close and failures', async
   e.hook('onWebSocket', 2, 'close', 1006, '', false);
   assert.deepStrictEqual(Array.from(e.run('log2')), ['error', 'close:1006:false']);
 });
+
+test('Worker: own realm, messages both ways, importScripts, timers, errors, terminate', async () => {
+  const routes = Object.assign({}, ROUTES, {
+    'https://example.com/w.js': { body: `
+      importScripts('lib.js');
+      var count = 0;
+      onmessage = (ev) => {
+        count++;
+        if (ev.data === 'boom') throw new Error('kaboom');
+        postMessage({ sum: libAdd(ev.data.a, ev.data.b), count, isArray: Array.isArray(ev.data.list),
+          window: typeof window, document: typeof document, scope: self instanceof WorkerGlobalScope,
+          name: self.name, path: location.pathname, same: self === globalThis });
+      };
+      setTimeout(() => postMessage('tick'), 5);
+      const stop = setInterval(() => postMessage('never'), 100000);
+      clearInterval(stop);` },
+    'https://example.com/lib.js': { body: 'function libAdd(a, b) { return a + b; }' },
+    'https://example.com/bad.js': { body: 'throw new Error("top-level")' },
+  });
+  const e = await env({ routes });
+  e.run(`window.got = []; window.w = new Worker('/w.js', { name: 'n1' });
+    w.onmessage = (ev) => got.push(JSON.stringify(ev.data));
+    w.onerror = (ev) => { got.push('error:' + ev.message); ev.preventDefault(); };
+    w.postMessage({ a: 2, b: 3, list: [1] });`);
+  await e.flush();
+  const got = Array.from(e.run('got'));
+  assert.ok(got.includes('"tick"'), got.join(' | '));
+  assert.ok(!got.includes('"never"'));
+  const reply = JSON.parse(got.find((x) => x.startsWith('{')));
+  assert.deepStrictEqual(reply, { sum: 5, count: 1, isArray: true, window: 'undefined', document: 'undefined',
+    scope: true, name: 'n1', path: '/w.js', same: true });
+  assert.strictEqual(e.run('typeof count + typeof libAdd'), 'undefinedundefined', 'worker globals do not leak into the page');
+
+  e.run("got.length = 0; w.postMessage('boom')");
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), ['error:Uncaught Error: kaboom']);
+
+  e.run("got.length = 0; w.terminate(); w.postMessage({ a: 1, b: 1, list: [] })");
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), []);
+
+  e.run(`window.bad = new Worker('bad.js'); bad.onerror = (ev) => { got.push('bad:' + ev.message + '@' + ev.filename); ev.preventDefault(); };`);
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), ['bad:top-level@https://example.com/bad.js']);
+
+  const err = (code) => e.run(`try { ${code}; 'no error' } catch (x) { x.name }`);
+  assert.strictEqual(err("new Worker('https://other.org/w.js')"), 'SecurityError');
+  assert.strictEqual(err("new Worker('http://[')"), 'SyntaxError');
+});

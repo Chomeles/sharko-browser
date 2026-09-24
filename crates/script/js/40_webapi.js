@@ -2343,6 +2343,210 @@
   L.expose('WebSocket', WebSocket);
   L.WebSocket = WebSocket;
 
+  // =======================================================================================
+  // Worker (dedicated). Each worker gets its own JS realm (N.workerCreate) with the worker
+  // API installed on its global; its code runs on the page's thread (no parallelism yet),
+  // in tasks like the page's.
+  // =======================================================================================
+  const WORKER_SHARED = ['Request', 'Response', 'Headers', 'XMLHttpRequest', 'XMLHttpRequestUpload',
+    'XMLHttpRequestEventTarget', 'WebSocket', 'CloseEvent', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder',
+    'Blob', 'File', 'FileReader', 'FormData', 'AbortController', 'AbortSignal', 'Event', 'EventTarget', 'CustomEvent',
+    'MessageEvent', 'ErrorEvent', 'ProgressEvent', 'PromiseRejectionEvent', 'MessageChannel', 'MessagePort',
+    'BroadcastChannel', 'DOMException', 'crypto', 'Crypto', 'CryptoKey', 'SubtleCrypto', 'performance', 'console',
+    'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'ReadableStream', 'ReadableStreamDefaultReader',
+    'ReadableStreamDefaultController', 'WritableStream', 'TransformStream', 'TextEncoderStream', 'TextDecoderStream',
+    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBKeyRange', 'caches', 'isSecureContext', 'origin',
+    'requestAnimationFrame', 'cancelAnimationFrame', 'ImageData', 'createImageBitmap', 'OffscreenCanvas'];
+  const WORKER_BRAND = Symbol('WorkerGlobalScope');
+  class WorkerScopeTarget extends EventTarget { }
+  L.defineEventHandlers(WorkerScopeTarget.prototype, ['onmessage', 'onmessageerror', 'onerror']);
+  function syncLoadScript(url) {
+    const clean = stripFragment(url);
+    const blob = blobURLs.get(clean);
+    if (blob !== undefined) return utf8Decode(L.blobBytes(blob));
+    if (/^data:/i.test(url)) {
+      const d = parseDataURL(url);
+      if (d === null) throw new DOMException(`Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '${url}' failed to load.`, 'NetworkError');
+      return utf8Decode(d.bytes);
+    }
+    let r = null;
+    try { r = typeof N.fetchSync === 'function' ? N.fetchSync('GET', url, [], null, 'same-origin') : null; } catch (_) { r = null; }
+    if (r === null || !(r[0] >= 200 && r[0] < 300) || r[4] === null) {
+      throw new DOMException(`Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '${url}' failed to load.`, 'NetworkError');
+    }
+    return utf8Decode(new Uint8Array(r[4]));
+  }
+  class Worker extends EventTarget {
+    #global = null; #scope = null; #url = ''; #name = ''; #ready = false; #queue = [];
+    #terminated = false; #closing = false; #timers = new Map();
+    constructor(url, options) {
+      super();
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'Worker': 1 argument required, but only 0 present.");
+      if (typeof N.workerCreate !== 'function') throw new DOMException("Failed to construct 'Worker': Workers are not supported.", 'NotSupportedError');
+      const p = N.urlParse(`${url}`, L.location ? L.location.href : null);
+      if (p === null) throw new DOMException(`Failed to construct 'Worker': The URL '${url}' is invalid.`, 'SyntaxError');
+      const href = p[0];
+      const pageOrigin = L.location ? L.location.origin : 'null';
+      if (p[1] !== 'blob:' && p[1] !== 'data:' && p[10] !== pageOrigin) {
+        throw new DOMException(`Failed to construct 'Worker': Script at '${href}' cannot be accessed from origin '${pageOrigin}'.`, 'SecurityError');
+      }
+      const opts = options === undefined || options === null ? {} : options;
+      this.#url = href;
+      this.#name = opts.name === undefined ? '' : `${opts.name}`;
+      const module = opts.type === 'module';
+      fetch(href).then((res) => {
+        if (!res.ok) throw new Error(`Failed to load worker script '${href}' (${res.status}).`);
+        return res.text();
+      }).then((src) => this.#start(src, module), (e) => {
+        if (this.#terminated) return;
+        L.console.error(e && e.message ? e.message : `Failed to load worker script '${href}'.`);
+        L.fire(this, 'error', { cancelable: true }, L.ErrorEvent);
+      });
+    }
+    #start(src, module) {
+      if (this.#terminated) return;
+      if (module && /^\s*(import|export)\b/m.test(src)) {
+        L.console.error(`Module workers are not supported yet ('${this.#url}').`);
+        L.fire(this, 'error', { cancelable: true }, L.ErrorEvent);
+        return;
+      }
+      const g = N.workerCreate();
+      this.#global = g;
+      this.#scope = new WorkerScopeTarget();
+      this.#install(g);
+      this.#run(() => N.workerEval(g, src, this.#url));
+      this.#ready = true;
+      const queued = this.#queue;
+      this.#queue = [];
+      for (const data of queued) this.#deliver(N.cloneInto(g, data));
+    }
+    // Runs worker code: an uncaught exception goes to the worker's error handlers, not the page's.
+    #run(fn) {
+      const prev = L.report;
+      L.report = (e) => this.#uncaught(e, null);
+      try {
+        const err = fn();
+        if (Array.isArray(err)) this.#uncaught(err[4], err);
+      } catch (e) {
+        this.#uncaught(e, null);
+      } finally {
+        L.report = prev;
+      }
+    }
+    #uncaught(error, info) {
+      let text;
+      try { text = error !== null && typeof error === 'object' && 'message' in error ? `${error.name || 'Error'}: ${error.message}` : String(error); } catch (_) { text = 'exception'; }
+      const message = info ? info[0] : `Uncaught ${text}`;
+      const init = { message, filename: info ? info[1] : this.#url, lineno: info ? info[2] : 0, colno: info ? info[3] : 0, error, cancelable: true };
+      const prev = L.report;
+      L.report = L.reportException;
+      try {
+        if (this.#scope !== null && !L.fire(this.#scope, 'error', init, L.ErrorEvent)) return;
+        const initOuter = Object.assign({}, init, { error: null });
+        if (L.fire(this, 'error', initOuter, L.ErrorEvent)) L.console.error(message);
+      } finally {
+        L.report = prev;
+      }
+    }
+    #deliver(data) {
+      L.postTask(() => {
+        if (this.#terminated || this.#closing) return;
+        this.#run(() => { L.fire(this.#scope, 'message', { data }, L.MessageEvent); });
+      });
+    }
+    #install(g) {
+      const worker = this, scope = this.#scope, base = this.#url;
+      const define = (k, v) => Object.defineProperty(g, k, { value: v, writable: true, configurable: true, enumerable: false });
+      const win = L.window;
+      for (const k of WORKER_SHARED) {
+        if (k in g) continue;
+        let v;
+        try { v = win[k]; } catch (_) { v = undefined; }
+        if (v !== undefined) define(k, v);
+      }
+      const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.location ? L.location.href : null)); return q === null ? `${u}` : q[0]; };
+      define('self', g);
+      define('name', this.#name);
+      define('navigator', win.navigator);
+      define('location', Object.freeze(Object.assign(Object.create(null), (() => {
+        const q = N.urlParse(base, null) || [base, '', '', '', '', '', '', '', '', '', 'null'];
+        return { href: q[0], protocol: q[1], host: q[4], hostname: q[5], port: q[6], pathname: q[7], search: q[8], hash: q[9], origin: q[10], toString() { return q[0]; } };
+      })())));
+      define('fetch', (input, init) => fetch(typeof input === 'string' || input instanceof URL ? resolve(input) : input, init));
+      const track = (repeat) => (handler, timeout, ...args) => {
+        let id = 0;
+        const fn = typeof handler === 'function' ? handler : null;
+        const code = fn === null ? `${handler}` : '';
+        id = (repeat ? setInterval : setTimeout)(() => {
+          if (!repeat) worker.#timers.delete(id);
+          if (worker.#terminated || worker.#closing) return;
+          worker.#run(() => (fn !== null ? Reflect.apply(fn, g, args) : N.workerEval(g, code, base)));
+        }, timeout);
+        worker.#timers.set(id, repeat);
+        return id;
+      };
+      const untrack = (id) => {
+        const n = Number(id);
+        if (!worker.#timers.has(n)) return;
+        worker.#timers.delete(n);
+        clearTimeout(n);
+      };
+      define('setTimeout', track(false));
+      define('setInterval', track(true));
+      define('clearTimeout', untrack);
+      define('clearInterval', untrack);
+      define('postMessage', (message) => {
+        if (worker.#terminated || worker.#closing) return;
+        const data = cloneValue(message);
+        L.postTask(() => { if (!worker.#terminated) L.fire(worker, 'message', { data }, L.MessageEvent); });
+      });
+      define('close', () => { worker.#closing = true; worker.#stopTimers(); });
+      define('importScripts', function importScripts(...urls) {
+        for (const u of urls) {
+          const abs = resolve(u);
+          const err = N.workerEval(g, syncLoadScript(abs), abs);
+          if (Array.isArray(err)) throw err[4];
+        }
+      });
+      define('addEventListener', function addEventListener(type, fn, opts) { scope.addEventListener(type, fn, opts); });
+      define('removeEventListener', function removeEventListener(type, fn, opts) { scope.removeEventListener(type, fn, opts); });
+      define('dispatchEvent', function dispatchEvent(ev) { return scope.dispatchEvent(ev); });
+      for (const h of ['onmessage', 'onmessageerror', 'onerror']) {
+        Object.defineProperty(g, h, { get() { return scope[h]; }, set(v) { scope[h] = v; }, configurable: true, enumerable: true });
+      }
+      define(WORKER_BRAND, true);
+      const brand = (name) => {
+        const C = { [name]: function () { throw new TypeError('Illegal constructor'); } }[name];
+        Object.defineProperty(C, Symbol.hasInstance, { value: (x) => x !== null && typeof x === 'object' && x[WORKER_BRAND] === true });
+        define(name, C);
+      };
+      brand('WorkerGlobalScope');
+      brand('DedicatedWorkerGlobalScope');
+      Object.defineProperty(g, Symbol.toStringTag, { value: 'DedicatedWorkerGlobalScope', configurable: true });
+    }
+    #stopTimers() {
+      for (const id of this.#timers.keys()) clearTimeout(id);
+      this.#timers.clear();
+    }
+    postMessage(message, transfer) {
+      if (this.#terminated) return;
+      if (!this.#ready) { this.#queue.push(cloneValue(message)); return; }
+      if (this.#closing) return;
+      this.#deliver(N.cloneInto(this.#global, message));
+    }
+    terminate() {
+      if (this.#terminated) return;
+      this.#terminated = true;
+      this.#stopTimers();
+      this.#queue = [];
+      this.#global = null;
+      this.#scope = null;
+    }
+  }
+  L.defineEventHandlers(Worker.prototype, ['onmessage', 'onmessageerror', 'onerror']);
+  L.expose('Worker', Worker);
+  L.Worker = Worker;
+
   L.part1 = { setTimeout, setInterval, clearTimeout, clearInterval, queueMicrotask, requestAnimationFrame,
     cancelAnimationFrame, requestIdleCallback, cancelIdleCallback, structuredClone, btoa, atob, fetch, randomUUIDRef: null };
   Object.assign(L, { MessagePort, MessageChannel, BroadcastChannel, URLSearchParams, TextEncoder, TextDecoder, Blob, File, FileList,

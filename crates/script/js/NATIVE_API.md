@@ -251,6 +251,7 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `N.setDefined(id)` | (Rust addition) the custom element `id` was upgraded or created from its definition: CSS `:defined` matches it (built-in elements always match). |
 | `N.setIndeterminate(id, bool)` | (Rust addition) mirrors `input.indeterminate` for `:indeterminate` matching. |
 | `N.urlSet(href, field, value)` | (Rust addition) urlParse-style components after applying a WHATWG URL setter; used by `URL`/`Location`/`<a>` setters. (JS approximation) |
+| `N.workerCreate()` / `N.workerEval(global, source, url)` / `N.cloneInto(global, value)` | (Rust addition) dedicated workers: a new JS realm (V8 context with only the ECMAScript builtins, same security token) whose global JS fills with the worker API; `workerEval` runs a classic script there and returns `null` or `[message, url, line, column, error]`; `cloneInto` structured-clones `value` into that realm. Worker code runs on the page's thread. (`Worker` throws `NotSupportedError`) |
 | `N.wsOpen(id, url, protocols, origin)` / `N.wsSend(id, stringOrArrayBuffer)` / `N.wsClose(id, code, reason)` | (Rust addition) the `WebSocket` connection, opened in the network process. `url` is an absolute `ws:`/`wss:` URL, `code` is `-1` for none. `wsOpen` returns `false` when the host has no WebSocket support (JS then fires `error` and `close`). Events come back through `onWebSocket`. |
 
 ### Hooks (registered through `N.setHooks`, called by Rust)
