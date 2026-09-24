@@ -304,6 +304,15 @@ pub struct BaseDocument {
     pub(crate) controls_to_form: HashMap<NodeId, NodeId>,
     /// Nodes that contain sub documents
     pub(crate) sub_document_nodes: HashSet<NodeId>,
+    /// PATCH: inline roots whose line breaks a measurement overwrote after their final
+    /// layout (see `relayout_stale_inline_roots`).
+    pub(crate) stale_inline_roots: Vec<NodeId>,
+    /// PATCH: nodes whose unrounded layout changed and whose layout ancestors are not yet
+    /// flagged, and all nodes carrying layout-dirty flags (cleared after rounding).
+    pub(crate) layout_dirty_pending: Vec<NodeId>,
+    pub(crate) layout_dirty_touched: Vec<NodeId>,
+    /// PATCH: the viewport size the out-of-flow fixup last ran with.
+    pub(crate) abspos_viewport: Option<taffy::Size<f32>>,
     /// Load state (abort controller and in-flight request id) for each
     /// `<iframe>` element whose sub-document is loaded automatically
     pub(crate) iframe_loads: HashMap<NodeId, crate::iframe::IframeLoad>,
@@ -495,6 +504,10 @@ impl BaseDocument {
             subdoc_is_animating: false,
             has_canvas: false,
             sub_document_nodes: HashSet::new(),
+            stale_inline_roots: Vec::new(),
+            layout_dirty_pending: Vec::new(),
+            layout_dirty_touched: Vec::new(),
+            abspos_viewport: None,
             iframe_loads: HashMap::new(),
 
             #[cfg(feature = "custom-widget")]

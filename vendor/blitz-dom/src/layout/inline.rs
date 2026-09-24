@@ -151,11 +151,11 @@ impl BaseDocument {
     /// PATCH: after the layout pass, redo the final layout of inline roots whose lines a
     /// measurement re-broke at another width while their (cached) final layout was kept.
     pub(crate) fn relayout_stale_inline_roots(&mut self) {
-        let stale: Vec<(NodeId, LayoutInput)> = self
-            .nodes
-            .iter()
-            .filter_map(|(id, node)| {
-                let layout = node.element_data()?.inline_layout_data.as_ref()?;
+        let candidates = std::mem::take(&mut self.stale_inline_roots);
+        let stale: Vec<(NodeId, LayoutInput)> = candidates
+            .into_iter()
+            .filter_map(|id| {
+                let layout = self.nodes.get(id)?.element_data()?.inline_layout_data.as_ref()?;
                 if !layout.lines_stale {
                     return None;
                 }
@@ -645,6 +645,7 @@ impl BaseDocument {
                         layout.size = output.size;
                         layout.location.x = pos.x + margin.left + container_pb.left;
                         layout.location.y = pos.y + margin.top + container_pb.top;
+                        self.mark_layout_dirty(node_id);
 
                         // dbg!(&layout.size);
                         // dbg!(&layout.location);
@@ -677,6 +678,9 @@ impl BaseDocument {
                     .last_perform
                     .is_some_and(|(w, _)| (w - width).abs() > 0.01)
                 {
+                    if !inline_layout.lines_stale {
+                        self.stale_inline_roots.push(node_id);
+                    }
                     inline_layout.lines_stale = true;
                 }
             }
@@ -842,6 +846,7 @@ impl BaseDocument {
                         let layout = self.nodes[NodeId::from_u64(ibox.id)].unrounded_layout_mut();
                         layout.padding = padding; //.map(|p| p / scale);
                         layout.border = border; //.map(|p| p / scale);
+                        self.mark_layout_dirty(NodeId::from_u64(ibox.id));
                     } else {
                         // Re-measure the box to get its border-box size (this hits the layout
                         // cache). The size cannot be recovered from `ibox` dimensions as the
@@ -895,6 +900,7 @@ impl BaseDocument {
                             + inset_offset.y;
                         layout.padding = padding; //.map(|p| p / scale);
                         layout.border = border; //.map(|p| p / scale);
+                        self.mark_layout_dirty(NodeId::from_u64(ibox.id));
                     }
                 }
             }

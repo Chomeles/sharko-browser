@@ -89,7 +89,7 @@ pub(crate) fn n_first_child(cx: &mut Cx) -> NResult {
         .get_node(id)
         .and_then(|n| dom::dom_children(n).first().copied());
     if let Some(c) = c {
-        cx.st.sibling_hint.set((c, 0));
+        cx.st.sibling_hint(id).set((c, 0));
     }
     cx.ret_node(doc, c);
     Ok(())
@@ -101,7 +101,7 @@ pub(crate) fn n_last_child(cx: &mut Cx) -> NResult {
     let kids = dom::dom_children(doc.get_node(id).unwrap());
     let c = kids.last().copied();
     if let Some(c) = c {
-        cx.st.sibling_hint.set((c, kids.len() - 1));
+        cx.st.sibling_hint(id).set((c, kids.len() - 1));
     }
     cx.ret_node(doc, c);
     Ok(())
@@ -112,7 +112,7 @@ pub(crate) fn n_last_child(cx: &mut Cx) -> NResult {
 fn sibling_index(st: &RuntimeState, doc: &BaseDocument, child: NodeId) -> Option<(NodeId, usize)> {
     let parent = doc.get_node(child)?.parent?;
     let kids = dom::dom_children(doc.get_node(parent)?);
-    let (hint_id, hint_idx) = st.sibling_hint.get();
+    let (hint_id, hint_idx) = st.sibling_hint(parent).get();
     if hint_id == child && kids.get(hint_idx) == Some(&child) {
         return Some((parent, hint_idx));
     }
@@ -124,7 +124,7 @@ pub(crate) fn n_next_sibling(cx: &mut Cx) -> NResult {
     let id = cx.node(doc, 0)?;
     let next = sibling_index(cx.st, doc, id).and_then(|(p, i)| {
         let c = dom::dom_children(doc.get_node(p)?).get(i + 1).copied()?;
-        cx.st.sibling_hint.set((c, i + 1));
+        cx.st.sibling_hint(p).set((c, i + 1));
         Some(c)
     });
     cx.ret_node(doc, next);
@@ -139,7 +139,7 @@ pub(crate) fn n_prev_sibling(cx: &mut Cx) -> NResult {
             return None;
         }
         let c = dom::dom_children(doc.get_node(p)?).get(i - 1).copied()?;
-        cx.st.sibling_hint.set((c, i - 1));
+        cx.st.sibling_hint(p).set((c, i - 1));
         Some(c)
     });
     cx.ret_node(doc, prev);
@@ -725,6 +725,105 @@ fn query(
     }
 }
 
+/// A selector simple enough to match without the selector engine.
+enum SimpleSelector<'a> {
+    Class(&'a str),
+    Tag(&'a str),
+}
+
+fn is_plain_ident(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && !b[0].is_ascii_digit()
+        && !(b[0] == b'-' && b.get(1).is_some_and(|c| c.is_ascii_digit()))
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_')
+}
+
+/// `.class` and `tag` selectors (no escapes, combinators or pseudo-classes).
+fn simple_selector(sel: &str) -> Option<SimpleSelector<'_>> {
+    let sel = sel.trim();
+    match sel.strip_prefix('.') {
+        Some(class) => is_plain_ident(class).then_some(SimpleSelector::Class(class)),
+        None => (is_plain_ident(sel) && sel.as_bytes()[0] != b'-').then_some(SimpleSelector::Tag(sel)),
+    }
+}
+
+/// Whether the whitespace-separated token list `list` contains `token`.
+fn has_token(list: &str, token: &str) -> bool {
+    let hay = list.as_bytes();
+    let is_ws = |c: u8| matches!(c, b' ' | b'\t' | b'\n' | b'\r' | b'\x0c');
+    let mut from = 0;
+    while let Some(pos) = list[from..].find(token) {
+        let start = from + pos;
+        let end = start + token.len();
+        if (start == 0 || is_ws(hay[start - 1])) && (end == hay.len() || is_ws(hay[end])) {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
+/// PATCH: `query` for a [`SimpleSelector`]: the same traversal with a direct test per
+/// element (the selector engine's per-element setup dominated `querySelectorAll('.x')`).
+fn query_simple(
+    doc: &BaseDocument,
+    scope: NodeId,
+    sel: &SimpleSelector,
+    first_only: bool,
+    out: &mut Vec<NodeId>,
+) {
+    let Some(root) = doc.get_node(scope) else {
+        return;
+    };
+    let lower_tag = match sel {
+        SimpleSelector::Tag(t) => t.to_ascii_lowercase(),
+        SimpleSelector::Class(_) => String::new(),
+    };
+    let matches = |node: &blitz_dom::Node| -> bool {
+        let Some(el) = node.element_data() else {
+            return false;
+        };
+        match sel {
+            SimpleSelector::Class(class) => el
+                .attr(blitz_dom::local_name!("class"))
+                .is_some_and(|list| has_token(list, class)),
+            SimpleSelector::Tag(tag) => {
+                if el.name.ns == blitz_dom::ns!(html) {
+                    &*el.name.local == lower_tag.as_str()
+                } else {
+                    &*el.name.local == *tag
+                }
+            }
+        }
+    };
+    let mut stack: smallvec::SmallVec<[(&blitz_dom::Node, usize); 32]> = smallvec::SmallVec::new();
+    stack.push((root, 0));
+    while let Some(top) = stack.last_mut() {
+        let (parent, idx) = *top;
+        let Some(&child_id) = dom::dom_children(parent).get(idx) else {
+            stack.pop();
+            continue;
+        };
+        top.1 += 1;
+        let Some(child) = doc.get_node(child_id) else {
+            continue;
+        };
+        if !child.is_element() {
+            continue;
+        }
+        if matches(child) {
+            out.push(child_id);
+            if first_only {
+                return;
+            }
+        }
+        if !dom::dom_children(child).is_empty() {
+            stack.push((child, 0));
+        }
+    }
+}
+
 /// `#ident` selectors (no escapes) can use the document's id map.
 fn simple_id_selector(sel: &str) -> Option<&str> {
     let id = sel.trim().strip_prefix('#')?;
@@ -760,7 +859,10 @@ pub(crate) fn n_query_selector(cx: &mut Cx) -> NResult {
         }
     }
     let mut out = Vec::with_capacity(1);
-    query(cx.st, doc, scope, &list, true, &mut out);
+    match simple_selector(&sel) {
+        Some(simple) => query_simple(doc, scope, &simple, true, &mut out),
+        None => query(cx.st, doc, scope, &list, true, &mut out),
+    }
     cx.ret_node(doc, out.first().copied());
     Ok(())
 }
@@ -775,7 +877,10 @@ pub(crate) fn n_query_selector_all(cx: &mut Cx) -> NResult {
         kind(cx, doc, scope),
         Kind::Document | Kind::Element | Kind::Fragment
     ) {
-        query(cx.st, doc, scope, &list, false, &mut out);
+        match simple_selector(&sel) {
+            Some(simple) => query_simple(doc, scope, &simple, false, &mut out),
+            None => query(cx.st, doc, scope, &list, false, &mut out),
+        }
     }
     cx.ret_nodes(doc, &out);
     Ok(())

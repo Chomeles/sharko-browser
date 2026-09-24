@@ -222,37 +222,9 @@ pub fn round_layout(tree: &mut impl RoundTree, node_id: NodeId) {
     /// Recursive function to apply rounding to all descendents
     fn round_layout_inner(tree: &mut impl RoundTree, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) {
         let unrounded_layout = tree.get_unrounded_layout(node_id);
-        let mut layout = unrounded_layout;
-
+        let layout = round_single_layout(&unrounded_layout, cumulative_x, cumulative_y);
         let cumulative_x = cumulative_x + unrounded_layout.location.x;
         let cumulative_y = cumulative_y + unrounded_layout.location.y;
-
-        layout.location.x = round(unrounded_layout.location.x);
-        layout.location.y = round(unrounded_layout.location.y);
-        layout.size.width = round(cumulative_x + unrounded_layout.size.width) - round(cumulative_x);
-        layout.size.height = round(cumulative_y + unrounded_layout.size.height) - round(cumulative_y);
-        layout.scrollbar_size.width = round(unrounded_layout.scrollbar_size.width);
-        layout.scrollbar_size.height = round(unrounded_layout.scrollbar_size.height);
-        layout.border.left = round(cumulative_x + unrounded_layout.border.left) - round(cumulative_x);
-        layout.border.right = round(cumulative_x + unrounded_layout.size.width)
-            - round(cumulative_x + unrounded_layout.size.width - unrounded_layout.border.right);
-        layout.border.top = round(cumulative_y + unrounded_layout.border.top) - round(cumulative_y);
-        layout.border.bottom = round(cumulative_y + unrounded_layout.size.height)
-            - round(cumulative_y + unrounded_layout.size.height - unrounded_layout.border.bottom);
-        layout.padding.left = round(cumulative_x + unrounded_layout.padding.left) - round(cumulative_x);
-        layout.padding.right = round(cumulative_x + unrounded_layout.size.width)
-            - round(cumulative_x + unrounded_layout.size.width - unrounded_layout.padding.right);
-        layout.padding.top = round(cumulative_y + unrounded_layout.padding.top) - round(cumulative_y);
-        layout.padding.bottom = round(cumulative_y + unrounded_layout.size.height)
-            - round(cumulative_y + unrounded_layout.size.height - unrounded_layout.padding.bottom);
-
-        #[cfg(feature = "content_size")]
-        round_scrollable_overflow_rect(
-            &mut layout,
-            unrounded_layout.scrollable_overflow_rect,
-            cumulative_x,
-            cumulative_y,
-        );
 
         tree.set_final_layout(node_id, &layout);
 
@@ -262,22 +234,60 @@ pub fn round_layout(tree: &mut impl RoundTree, node_id: NodeId) {
             round_layout_inner(tree, child, cumulative_x, cumulative_y);
         }
     }
+}
+
+/// PATCH: the rounded (final) layout of a single node whose parent's absolute position is
+/// (`cumulative_x`, `cumulative_y`), as computed by [`round_layout`]. Lets a tree round
+/// incrementally (only subtrees whose layout or position changed).
+pub fn round_single_layout(unrounded_layout: &Layout, cumulative_x: f32, cumulative_y: f32) -> Layout {
+    let unrounded_layout = *unrounded_layout;
+    let mut layout = unrounded_layout;
+
+    let cumulative_x = cumulative_x + unrounded_layout.location.x;
+    let cumulative_y = cumulative_y + unrounded_layout.location.y;
+
+    layout.location.x = round(unrounded_layout.location.x);
+    layout.location.y = round(unrounded_layout.location.y);
+    layout.size.width = round(cumulative_x + unrounded_layout.size.width) - round(cumulative_x);
+    layout.size.height = round(cumulative_y + unrounded_layout.size.height) - round(cumulative_y);
+    layout.scrollbar_size.width = round(unrounded_layout.scrollbar_size.width);
+    layout.scrollbar_size.height = round(unrounded_layout.scrollbar_size.height);
+    layout.border.left = round(cumulative_x + unrounded_layout.border.left) - round(cumulative_x);
+    layout.border.right = round(cumulative_x + unrounded_layout.size.width)
+        - round(cumulative_x + unrounded_layout.size.width - unrounded_layout.border.right);
+    layout.border.top = round(cumulative_y + unrounded_layout.border.top) - round(cumulative_y);
+    layout.border.bottom = round(cumulative_y + unrounded_layout.size.height)
+        - round(cumulative_y + unrounded_layout.size.height - unrounded_layout.border.bottom);
+    layout.padding.left = round(cumulative_x + unrounded_layout.padding.left) - round(cumulative_x);
+    layout.padding.right = round(cumulative_x + unrounded_layout.size.width)
+        - round(cumulative_x + unrounded_layout.size.width - unrounded_layout.padding.right);
+    layout.padding.top = round(cumulative_y + unrounded_layout.padding.top) - round(cumulative_y);
+    layout.padding.bottom = round(cumulative_y + unrounded_layout.size.height)
+        - round(cumulative_y + unrounded_layout.size.height - unrounded_layout.padding.bottom);
 
     #[cfg(feature = "content_size")]
-    #[inline(always)]
-    /// Round the scrollable overflow rect.
-    /// This is split into a separate function to make it easier to feature flag.
-    fn round_scrollable_overflow_rect(
-        layout: &mut Layout,
-        unrounded_rect: crate::geometry::Rect<f32>,
-        cumulative_x: f32,
-        cumulative_y: f32,
-    ) {
-        layout.scrollable_overflow_rect.left = round(cumulative_x + unrounded_rect.left) - round(cumulative_x);
-        layout.scrollable_overflow_rect.right = round(cumulative_x + unrounded_rect.right) - round(cumulative_x);
-        layout.scrollable_overflow_rect.top = round(cumulative_y + unrounded_rect.top) - round(cumulative_y);
-        layout.scrollable_overflow_rect.bottom = round(cumulative_y + unrounded_rect.bottom) - round(cumulative_y);
-    }
+    round_scrollable_overflow_rect_single(
+        &mut layout,
+        unrounded_layout.scrollable_overflow_rect,
+        cumulative_x,
+        cumulative_y,
+    );
+
+    layout
+}
+
+#[cfg(feature = "content_size")]
+#[inline(always)]
+fn round_scrollable_overflow_rect_single(
+    layout: &mut Layout,
+    unrounded_rect: crate::geometry::Rect<f32>,
+    cumulative_x: f32,
+    cumulative_y: f32,
+) {
+    layout.scrollable_overflow_rect.left = round(cumulative_x + unrounded_rect.left) - round(cumulative_x);
+    layout.scrollable_overflow_rect.right = round(cumulative_x + unrounded_rect.right) - round(cumulative_x);
+    layout.scrollable_overflow_rect.top = round(cumulative_y + unrounded_rect.top) - round(cumulative_y);
+    layout.scrollable_overflow_rect.bottom = round(cumulative_y + unrounded_rect.bottom) - round(cumulative_y);
 }
 
 /// Creates a layout for this node and its children, recursively.

@@ -4,7 +4,7 @@
 //! However, in Blitz, we do a style pass then a layout pass.
 //! This is slower, yes, but happens fast enough that it's not a huge issue.
 
-use crate::node::{ImageData, NodeData, SpecialElementData};
+use crate::node::{ImageData, NodeData, NodeFlags, SpecialElementData};
 use crate::{document::BaseDocument, dom_node_id, node::Node, taffy_node_id};
 use markup5ever::{LocalName, local_name};
 use std::cell::Ref;
@@ -25,6 +25,7 @@ pub(crate) mod inline;
 pub(crate) mod list;
 pub(crate) mod replaced;
 pub(crate) mod table;
+pub(crate) mod verify;
 
 use self::replaced::{
     IntrinsicSizes, ReplacedContext, compute_replaced_layout, is_replaced_element,
@@ -416,7 +417,11 @@ impl LayoutPartialTree for BaseDocument {
     }
 
     fn set_unrounded_layout(&mut self, node_id: NodeId, layout: &Layout) {
-        *self.node_from_id_mut(node_id).unrounded_layout_mut() = *layout;
+        let node = self.node_from_id_mut(node_id);
+        if *node.unrounded_layout() != *layout {
+            *node.unrounded_layout_mut() = *layout;
+            self.mark_layout_dirty(dom_node_id(node_id));
+        }
     }
 
     fn resolve_calc_value(&self, calc_ptr: *const (), parent_size: f32) -> f32 {
@@ -642,5 +647,83 @@ impl Iterator for RefCellChildIter<'_> {
             self.idx += 1;
             taffy_node_id(*id)
         })
+    }
+}
+
+impl BaseDocument {
+    /// PATCH: record that the unrounded layout of `node_id` changed (see
+    /// `round_layout_incremental`).
+    pub(crate) fn mark_layout_dirty(&mut self, node_id: blitz_traits::node_id::NodeId) {
+        let node = &mut self.nodes[node_id];
+        if !node.flags.contains(NodeFlags::LAYOUT_SELF_CHANGED) {
+            node.flags.insert(NodeFlags::LAYOUT_SELF_CHANGED);
+            self.layout_dirty_pending.push(node_id);
+        }
+    }
+
+    /// PATCH: flag the layout ancestors of the nodes whose layout changed. Done on the
+    /// final layout tree (not while laying out, when boxes may still move between
+    /// parents); all flags are cleared again after rounding, so a flagged ancestor means
+    /// its own ancestors are flagged too.
+    pub(crate) fn propagate_layout_dirty(&mut self) {
+        let pending = std::mem::take(&mut self.layout_dirty_pending);
+        for id in pending {
+            self.layout_dirty_touched.push(id);
+            let mut cur = Some(id);
+            while let Some(c) = cur {
+                let Some(node) = self.nodes.get_mut(c) else {
+                    break;
+                };
+                if node.flags.contains(NodeFlags::LAYOUT_DIRTY) {
+                    break;
+                }
+                node.flags.insert(NodeFlags::LAYOUT_DIRTY);
+                self.layout_dirty_touched.push(c);
+                cur = node.layout_parent.get();
+            }
+        }
+    }
+
+    /// PATCH: taffy's `round_layout`, skipping subtrees whose unrounded layouts and
+    /// absolute position are unchanged since they were last rounded (their final layouts
+    /// would come out the same). Makes a relayout after a small change (a script writing
+    /// a style and reading `offsetWidth`) independent of the document size.
+    pub(crate) fn round_layout_incremental(&mut self, root: blitz_traits::node_id::NodeId) {
+        fn inner(
+            doc: &mut BaseDocument,
+            id: blitz_traits::node_id::NodeId,
+            cumulative_x: f32,
+            cumulative_y: f32,
+        ) {
+            let Some(node) = doc.nodes.get_mut(id) else {
+                return;
+            };
+            if !node.flags.contains(NodeFlags::LAYOUT_DIRTY)
+                && node.round_origin.get() == (cumulative_x, cumulative_y)
+            {
+                return;
+            }
+            node.flags
+                .remove(NodeFlags::LAYOUT_DIRTY | NodeFlags::LAYOUT_SELF_CHANGED);
+            node.round_origin.set((cumulative_x, cumulative_y));
+            let unrounded = *node.unrounded_layout();
+            *node.final_layout_mut() =
+                taffy::round_single_layout(&unrounded, cumulative_x, cumulative_y);
+            let x = cumulative_x + unrounded.location.x;
+            let y = cumulative_y + unrounded.location.y;
+            let count = node.layout_children.borrow().as_ref().map_or(0, |c| c.len());
+            for index in 0..count {
+                let child = doc.nodes[id].layout_children.borrow().as_ref().unwrap()[index];
+                inner(doc, child, x, y);
+            }
+        }
+        self.propagate_layout_dirty();
+        inner(self, root, 0.0, 0.0);
+        for id in std::mem::take(&mut self.layout_dirty_touched) {
+            if let Some(node) = self.nodes.get_mut(id) {
+                node.flags
+                    .remove(NodeFlags::LAYOUT_DIRTY | NodeFlags::LAYOUT_SELF_CHANGED);
+            }
+        }
     }
 }

@@ -89,3 +89,16 @@ Patches so far:
 32. `blitz-dom/src/document.rs`: `getBoundingClientRect()` applies CSS transforms, ancestor
     scroll offsets and sticky shifts, and `position: fixed` boxes keep their viewport
     position when the page scrolls.
+33. Incremental layout passes (a script that writes a style and reads `offsetWidth` no
+    longer pays for the whole document, 20x faster in the layout-thrash benchmark):
+    `taffy/src/compute/mod.rs` exposes `round_single_layout`, and `blitz-dom` rounds only
+    subtrees whose layout changed (`round_layout_incremental`, layout-dirty flags set by
+    `set_unrounded_layout`); `layout/damage.rs` flushes styles to taffy only in damaged
+    subtrees; `resolve.rs` rebuilds layout children only there; `layout/abspos.rs` fixes
+    out-of-flow boxes only in changed subtrees; stale inline roots are tracked in a list.
+34. `blitz-dom/src/stylo.rs`: a new style object always carries (repaint) damage, also
+    when it looks the same, so that the node's taffy style (which points into the
+    style's `calc()` values) is refreshed.
+35. `blitz-dom/src/layout/verify.rs`: `BLITZ_VERIFY_INCREMENTAL=1` re-runs the style
+    flush, out-of-flow fixup and rounding over the whole tree after each layout and
+    reports nodes where the incremental result differs.

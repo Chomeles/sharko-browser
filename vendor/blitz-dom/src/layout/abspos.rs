@@ -12,7 +12,7 @@
 //! parent. Axes whose insets are both `auto` keep taffy's static position.
 
 use crate::BaseDocument;
-use crate::node::NodeData;
+use crate::node::{NodeData, NodeFlags};
 use blitz_traits::node_id::NodeId;
 use style::computed_values::position::T as Position;
 use taffy::{
@@ -43,16 +43,28 @@ pub(crate) fn fixup_out_of_flow_boxes(doc: &mut BaseDocument, viewport: Size<f32
     let Some(root) = doc.try_root_element().map(|n| n.id) else {
         return;
     };
+    // Only subtrees whose layout changed in this pass need fixing (the layout-dirty flags
+    // are cleared by the rounding pass that follows). Below a box that itself moved or
+    // was resized, every out-of-flow descendant may have to follow it; a new viewport
+    // size moves fixed boxes anywhere.
+    doc.propagate_layout_dirty();
+    let viewport_changed = doc.abspos_viewport != Some(viewport);
+    doc.abspos_viewport = Some(viewport);
     // Pre-order: containing blocks and parents are final before their descendants.
-    let mut stack = vec![root];
-    while let Some(id) = stack.pop() {
+    let mut stack = vec![(root, viewport_changed)];
+    while let Some((id, force)) = stack.pop() {
         if !is_boxed_element(doc, id) {
             continue;
         }
+        let flags = doc.nodes[id].flags;
+        if !force && !flags.contains(NodeFlags::LAYOUT_DIRTY) {
+            continue;
+        }
         fix_node(doc, id, viewport);
-        let children = doc.nodes[id].layout_children.borrow().clone();
-        if let Some(children) = children {
-            stack.extend(children.iter().rev().copied());
+        let force = force || flags.contains(NodeFlags::LAYOUT_SELF_CHANGED);
+        let children = doc.nodes[id].layout_children.borrow();
+        if let Some(children) = children.as_ref() {
+            stack.extend(children.iter().rev().map(|&c| (c, force)));
         }
     }
 }

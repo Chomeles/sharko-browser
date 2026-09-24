@@ -1290,10 +1290,22 @@ impl<'dom> DomTraversal<BlitzNode<'dom>> for RecalcStyle<'_> {
             // difference, and damage set at insertion was lost because it had no style
             // data yet. Without box construction damage its subtree stayed 0×0.
             let first_style = data.styles.get_primary().is_none();
+            let old_style = data.styles.get_primary().cloned();
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
             if first_style {
                 data.damage.insert(crate::layout::damage::ALL_DAMAGE);
+            } else if data.damage.is_empty()
+                && !matches!(
+                    (&old_style, data.styles.get_primary()),
+                    (Some(old), Some(new)) if style::servo_arc::Arc::ptr_eq(old, new)
+                )
+            {
+                // PATCH: a new style without visible differences still has to reach the
+                // node's taffy style, which points into the style's calc() values (the
+                // style flush skips undamaged subtrees).
+                data.damage.insert(RestyleDamage::REPAINT);
             }
+            drop(old_style);
 
             sync_pseudo_element_styles(el, &data, &self.nodes_needing_style_image_flush);
 
@@ -1399,8 +1411,14 @@ fn sync_pseudo_element_styles(
         }
 
         let diff = RestyleDamage::compute_style_difference::<&Node>(&old_style, &pe_style);
-        if !diff.damage.is_empty() {
-            pe_data.damage.insert(diff.damage);
+        // PATCH: a new style object always reaches the layout (see `recalc_style`).
+        let damage = if diff.damage.is_empty() {
+            RestyleDamage::REPAINT
+        } else {
+            diff.damage
+        };
+        if !damage.is_empty() {
+            pe_data.damage.insert(damage);
             pe_node.mark_damaged();
 
             if needs_style_image_flush(pe_node, &pe_style) {
