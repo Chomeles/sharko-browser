@@ -1,17 +1,39 @@
-// A GUI app on Windows: no console window when started from Explorer. Headless mode
-// re-attaches to the console of the terminal it was started from (see `attach_console`).
-#![cfg_attr(windows, windows_subsystem = "windows")]
-
-//! Entry point. One executable, several process roles (like Chromium):
+//! The browser as one shared library (`browser_core.dll` / `libbrowser_core.so`), loaded
+//! by the tiny launcher executable — the same split as `chrome.exe` + `chrome.dll`.
+//!
+//! Every process runs the same launcher + library and picks its role from `--type`:
 //!
 //! * no `--type`            → browser process (window UI, or `--headless`)
 //! * `--type=renderer`      → one per tab: DOM, CSS, layout, JavaScript, paint
 //! * `--type=network`       → HTTP/1.1/2/3, TLS, cache, cookies
+//!
+//! Other commands: `--install`, `--uninstall`, `--version`.
+
+mod installer;
 
 use browser::headless::{HeadlessOptions, run_headless};
 use browser::{BrowserOptions, default_profile_dir};
 use std::path::PathBuf;
 use std::time::Duration;
+
+/// Version of this build (`CARGO_PKG_VERSION`).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// C entry point called by the launcher. Arguments are read from the process command
+/// line. Returns the process exit code.
+#[unsafe(no_mangle)]
+pub extern "C" fn browser_core_main() -> i32 {
+    match std::panic::catch_unwind(run) {
+        Ok(code) => code,
+        Err(_) => 101,
+    }
+}
+
+/// Library ABI version the launcher checks before calling [`browser_core_main`].
+#[unsafe(no_mangle)]
+pub extern "C" fn browser_core_abi() -> u32 {
+    1
+}
 
 const USAGE: &str = "\
 Usage:
@@ -30,6 +52,11 @@ Headless options:
   --timeout=MS              max wait for the load event (default 30000)
   --settle=MS               extra wait after load (default 300)
   --console                 print the page's console messages
+
+Installation:
+  --install                 install for the current user (+ Start menu shortcut)
+  --uninstall               remove the installation (keeps the profile)
+  --version                 print the version
 
 Common options:
   --single-process          run network + renderer as threads (debugging)
@@ -51,9 +78,13 @@ fn attach_console() {
 #[cfg(not(windows))]
 fn attach_console() {}
 
-fn main() {
+/// Run the browser with the process command line; returns the exit code.
+pub fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a == "--headless" || a == "--help" || a.starts_with("--type=")) {
+    if args.iter().any(|a| {
+        a == "--headless" || a == "--help" || a == "--version" || a.starts_with("--type=")
+            || a == "--install" || a == "--uninstall"
+    }) {
         attach_console();
     }
     let get = |name: &str| -> Option<String> {
@@ -72,26 +103,36 @@ fn main() {
 
     match get("type").as_deref() {
         Some("renderer") => {
-            let ep = get("ipc").expect("--ipc missing");
+            let Some(ep) = get("ipc") else { return 2 };
             engine::renderer_main(&ep, verbose);
-            return;
+            return 0;
         }
         Some("network") => {
-            let ep = get("ipc").expect("--ipc missing");
+            let Some(ep) = get("ipc") else { return 2 };
             let profile = get("profile").map(PathBuf::from).unwrap_or_else(default_profile_dir);
             browser::network_main(&ep, profile);
-            return;
+            return 0;
         }
         Some(other) => {
             eprintln!("unknown process type {other}");
-            std::process::exit(2);
+            return 2;
         }
         None => {}
     }
 
     if has("help") || has("h") {
         print!("{USAGE}");
-        return;
+        return 0;
+    }
+    if has("version") {
+        println!("{VERSION}");
+        return 0;
+    }
+    if has("install") {
+        return installer::install();
+    }
+    if has("uninstall") {
+        return installer::uninstall();
     }
 
     let url = args
@@ -148,7 +189,7 @@ fn main() {
                 Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
             })
             .collect();
-        std::process::exit(run_headless(bopts, o));
+        return run_headless(bopts, o);
     }
 
     let urls: Vec<String> = args
@@ -160,9 +201,12 @@ fn main() {
         // SAFETY: single-threaded at this point.
         unsafe { std::env::set_var("BROWSER_RENDERER", "cpu") };
     }
-    if let Err(e) = shell::run(bopts, urls) {
-        eprintln!("browser: {e}");
-        std::process::exit(1);
+    match shell::run(bopts, urls) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("browser: {e}");
+            1
+        }
     }
 }
 

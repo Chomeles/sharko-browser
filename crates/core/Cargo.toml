@@ -1,0 +1,22 @@
+[package]
+name = "browser-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "All browser code as one shared library, loaded by the launcher"
+
+[lib]
+name = "browser_core"
+# cdylib: browser_core.dll / libbrowser_core.so / libbrowser_core.dylib for the launcher.
+# rlib: lets tests and tools link it statically.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+browser = { path = "../browser" }
+shell = { path = "../shell" }
+engine = { path = "../engine" }
+common = { path = "../common" }
+env_logger = { version = "0.11", default-features = false, features = ["auto-color"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }

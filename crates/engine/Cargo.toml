@@ -7,7 +7,7 @@ description = "Renderer process: document loading, layout, JS, painting"
 [dependencies]
 common = { path = "../common" }
 netstack = { path = "../netstack" }
-script = { path = "../script" }
+script = { path = "../script", default-features = false }
 blitz-dom.workspace = true
 blitz-html.workspace = true
 blitz-paint.workspace = true

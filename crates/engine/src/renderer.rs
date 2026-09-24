@@ -513,11 +513,19 @@ impl Renderer {
                 "<!DOCTYPE html><html><body><pre style=\"word-wrap:break-word;white-space:pre-wrap;font-family:monospace\">{}</pre></body></html>",
                 decode::escape_html(&decode::decode_body(&resp.body, ct.as_deref()))
             ),
-            DocKind::Other => format!(
-                "<!DOCTYPE html><html><body style=\"font-family:sans-serif;padding:40px\"><h2>Diese Datei kann nicht angezeigt werden</h2><p>{}</p><p>Typ: {}</p></body></html>",
-                decode::escape_html(&url),
-                decode::escape_html(ct.as_deref().unwrap_or("unbekannt"))
-            ),
+            DocKind::Other => {
+                let t = common::i18n::localize(&common::resources::text("pages/unsupported.html"));
+                common::resources::fill(
+                    &t,
+                    &[
+                        ("url", &decode::escape_html(&url)),
+                        (
+                            "type",
+                            &decode::escape_html(ct.as_deref().unwrap_or(common::i18n::t("file.unknown"))),
+                        ),
+                    ],
+                )
+            }
         };
         self.load_html(&url, &html, referrer);
     }
@@ -873,14 +881,13 @@ fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {
 }
 
 fn error_page(url: &str, err: &str) -> String {
-    format!(
-        r#"<!DOCTYPE html><html><head><title>Fehler</title><style>
-body{{font-family:system-ui,sans-serif;background:#f6f7f9;color:#1f2328;display:flex;justify-content:center;padding-top:15vh;margin:0}}
-.box{{max-width:560px;padding:0 24px}} h1{{font-size:24px;font-weight:600}} code{{background:#eaeef2;padding:2px 6px;border-radius:4px;word-break:break-all}}
-p{{color:#57606a;line-height:1.5}}</style></head>
-<body><div class="box"><h1>Diese Seite ist nicht erreichbar</h1><p><code>{}</code></p><p>{}</p></div></body></html>"#,
-        decode::escape_html(url),
-        decode::escape_html(err)
+    let t = common::i18n::localize(&common::resources::text("pages/error.html"));
+    common::resources::fill(
+        &t,
+        &[
+            ("url", &common::resources::escape_html(url)),
+            ("error", &common::resources::escape_html(err)),
+        ],
     )
 }
 

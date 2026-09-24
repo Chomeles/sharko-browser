@@ -215,18 +215,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "app"
-version = "0.1.0"
-dependencies = [
- "browser",
- "common",
- "engine",
- "env_logger",
- "shell",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "app_units"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -601,6 +589,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "browser-core"
+version = "0.1.0"
+dependencies = [
+ "browser",
+ "common",
+ "engine",
+ "env_logger",
+ "shell",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "browser-launcher"
+version = "0.1.0"
+dependencies = [
+ "libloading",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -821,6 +829,8 @@ dependencies = [
  "postcard",
  "serde",
  "serde_bytes",
+ "serde_json",
+ "sys-locale",
 ]
 
 [[package]]
@@ -4879,6 +4889,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6457,6 +6476,10 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
 
 [[package]]
 name = "xxhash-rust"

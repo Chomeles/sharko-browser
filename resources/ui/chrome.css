@@ -1,0 +1,41 @@
+:root { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, "Noto Sans", "DejaVu Sans", sans-serif; font-size: 13px; }
+html, body { margin: 0; padding: 0; background: #dee1e6; overflow: hidden; cursor: default; }
+#strip { display: flex; align-items: flex-end; height: 38px; padding: 0 8px 0 8px; }
+.tab { position: relative; display: flex; align-items: center; flex: 0 1 230px; min-width: 48px;
+       height: 32px; padding: 0 6px 0 12px; margin-right: 1px; border-radius: 9px 9px 0 0;
+       color: #45474a; overflow: hidden; }
+.tab:hover { background: #eceef1; }
+.tab.active { background: #ffffff; color: #1f1f1f; }
+.tab .fav { width: 14px; height: 14px; margin-right: 8px; flex: none; border-radius: 3px; background: #c4c7cc; }
+.tab.active .fav { background: #a8c7fa; }
+.tab .spin { width: 10px; height: 10px; margin: 0 10px 0 2px; flex: none; border-radius: 50%;
+             border: 2px solid #c2d5f7; border-top-color: #1a73e8; }
+.tab .title { flex: 1 1 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab .close { flex: none; width: 20px; height: 20px; border-radius: 10px; display: flex;
+              align-items: center; justify-content: center; margin-left: 4px; }
+.tab .close:hover { background: #d3d6db; }
+.tab.crashed .title { color: #b3261e; }
+#new { width: 28px; height: 28px; margin: 0 0 3px 4px; border-radius: 14px; display: flex;
+       align-items: center; justify-content: center; flex: none; }
+#new:hover { background: #cfd2d8; }
+#toolbar { display: flex; align-items: center; height: 42px; padding: 0 8px; background: #ffffff;
+           border-bottom: 1px solid #d3d6db; }
+.btn { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center;
+       justify-content: center; flex: none; margin-right: 2px; }
+.btn:hover { background: #eef0f3; }
+.btn:active { background: #e1e4e8; }
+.btn.off { opacity: 0.32; }
+.btn.off:hover { background: transparent; }
+#omnibox { flex: 1 1 auto; display: flex; align-items: center; height: 34px; margin: 0 6px;
+           border-radius: 17px; background: #f0f2f4; padding: 0 6px 0 12px; }
+#omnibox:hover { background: #e8eaed; }
+#omnibox:focus-within { background: #ffffff; box-shadow: 0 0 0 2px #0b57d0; }
+#lock { width: 16px; height: 16px; flex: none; margin-right: 8px; display: flex; align-items: center; }
+#url { flex: 1 1 auto; height: 30px; border: none; outline: none; background: transparent;
+       font-size: 14px; color: #1f1f1f; padding: 0; font-family: inherit; }
+#zoom { flex: none; font-size: 11px; color: #45474a; padding: 2px 8px; border-radius: 10px; background: #e3e6ea; margin-left: 6px; }
+#zoom.hidden { display: none; }
+svg { display: block; }
+#update { flex: none; margin-left: 6px; padding: 6px 14px; border-radius: 16px; background: #0b57d0; color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; }
+#update:hover { background: #0842a0; }
+#update.hidden { display: none; }

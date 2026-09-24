@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "crates/browser", "crates/shell", "app"]
+members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "crates/browser", "crates/shell", "crates/core", "crates/launcher", "crates/xtask"]
+default-members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "crates/browser", "crates/shell", "crates/core", "crates/launcher"]
 
 [workspace.package]
 version = "0.1.0"

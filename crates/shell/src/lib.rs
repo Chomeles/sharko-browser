@@ -340,6 +340,17 @@ impl App {
                     self.set_zoom(next_zoom(z, false));
                 }
                 Action::ZoomReset => self.set_zoom(1.0),
+                Action::Restart => {
+                    // Start the launcher again (it picks the newly installed version) and
+                    // quit this instance.
+                    if let Ok(exe) = std::env::current_exe() {
+                        let mut cmd = std::process::Command::new(exe);
+                        // Don't pin the child to our (old) core library.
+                        cmd.env_remove("BROWSER_CORE_PATH");
+                        let _ = cmd.spawn();
+                    }
+                    event_loop.exit();
+                }
             }
         }
         self.sync_chrome();
@@ -967,41 +978,13 @@ impl ApplicationHandler<UserEvent> for App {
 }
 
 fn crash_html(url: &str) -> String {
-    let esc = url.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
-    format!(r#"<!DOCTYPE html><html><head><title>Absturz</title><style>
-body{{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:#f8f9fb;color:#1f1f1f;display:flex;justify-content:center;padding-top:20vh}}
-.b{{max-width:520px;padding:0 24px}} h1{{font-weight:500;font-size:24px}} p{{color:#5f6368;line-height:1.5}}
-a{{display:inline-block;margin-top:12px;background:#0b57d0;color:#fff;text-decoration:none;padding:9px 20px;border-radius:18px}}
-</style></head><body><div class="b"><h1>Diese Seite ist abgestürzt</h1>
-<p>Der Renderer-Prozess dieses Tabs wurde beendet. Andere Tabs sind nicht betroffen.</p>
-<a href="{esc}">Neu laden</a></div></body></html>"#)
+    let t = common::i18n::localize(&common::resources::text("pages/crash.html"));
+    common::resources::fill(&t, &[("url", &common::resources::escape_html(url))])
 }
 
-/// Built-in new tab page.
+/// Built-in new tab page (`resources/pages/newtab.html`).
 pub fn newtab_html() -> String {
-    r#"<!DOCTYPE html><html><head><meta charset="utf-8"><title>Neuer Tab</title><style>
-body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:#f8f9fb;color:#1f1f1f}
-.wrap{display:flex;flex-direction:column;align-items:center;padding-top:18vh}
-h1{font-weight:300;font-size:44px;margin:0 0 28px;color:#3c4043;letter-spacing:-1px}
-form{display:flex;width:560px;max-width:90vw}
-input{flex:1;height:46px;border:1px solid #dadce0;border-radius:23px;padding:0 22px;font-size:16px;background:#fff;outline:none}
-input:focus{border-color:#0b57d0}
-.tiles{display:flex;gap:18px;margin-top:44px;flex-wrap:wrap;justify-content:center;max-width:640px}
-.tile{display:flex;flex-direction:column;align-items:center;width:96px;text-decoration:none;color:#3c4043;font-size:12px}
-.ico{width:48px;height:48px;border-radius:24px;background:#e8eaed;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;color:#0b57d0;margin-bottom:8px}
-.tile:hover .ico{background:#dde3ea}
-</style></head><body><div class="wrap">
-<h1>Wohin heute?</h1>
-<form action="https://duckduckgo.com/" method="get"><input name="q" placeholder="Im Web suchen" autocomplete="off"></form>
-<div class="tiles">
-<a class="tile" href="https://de.wikipedia.org"><div class="ico">W</div>Wikipedia</a>
-<a class="tile" href="https://www.tagesschau.de"><div class="ico">T</div>Tagesschau</a>
-<a class="tile" href="https://www.heise.de"><div class="ico">H</div>heise</a>
-<a class="tile" href="https://news.ycombinator.com"><div class="ico">Y</div>Hacker News</a>
-<a class="tile" href="https://www.youtube.com"><div class="ico">▶</div>YouTube</a>
-<a class="tile" href="https://github.com"><div class="ico">G</div>GitHub</a>
-</div></div></body></html>"#
-        .to_string()
+    common::i18n::localize(&common::resources::text("pages/newtab.html"))
 }
 
 /// Run the windowed browser. Returns when the last window closes.

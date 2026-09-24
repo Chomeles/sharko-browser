@@ -16,8 +16,31 @@ pub(crate) fn init_v8() {
     V8_INIT.get_or_init(|| {
         process_start();
         // ICU data must match the ICU version compiled into the prebuilt V8 (78).
-        if let Err(code) = v8::icu::set_common_data_78(deno_core_icudata::ICU_DATA) {
-            eprintln!("script: failed to load ICU data (error {code}); Intl will be limited");
+        // Release builds ship it as `resources/icudtl.dat` (like Chrome); development
+        // builds may embed it (feature `embedded-icu`).
+        let data: Option<&'static [u8]> = match common::resources::read("icudtl.dat") {
+            Some(bytes) => Some(Box::leak(bytes.into_boxed_slice())),
+            None => {
+                #[cfg(feature = "embedded-icu")]
+                {
+                    Some(deno_core_icudata::ICU_DATA)
+                }
+                #[cfg(not(feature = "embedded-icu"))]
+                {
+                    None
+                }
+            }
+        };
+        match data {
+            Some(d) => {
+                if let Err(code) = v8::icu::set_common_data_78(d) {
+                    eprintln!("script: failed to load ICU data (error {code}); Intl will be limited");
+                }
+            }
+            None => eprintln!(
+                "script: {} not found; Intl will be limited",
+                common::resources::path("icudtl.dat").display()
+            ),
         }
         // Harmony features shipped in Chrome are on by default; keep flags minimal.
         v8::V8::set_flags_from_string("--no-freeze-flags-after-init");

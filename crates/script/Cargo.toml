@@ -5,6 +5,12 @@ edition.workspace = true
 description = "V8 JavaScript runtime + DOM bindings"
 build = "build.rs"
 
+[features]
+# Compile the ICU data (~10 MB, for Intl) into the binary. Release builds leave this off
+# and load `resources/icudtl.dat` at runtime instead (see `platform.rs`).
+default = ["embedded-icu"]
+embedded-icu = ["dep:deno_core_icudata"]
+
 [dependencies]
 common = { path = "../common" }
 blitz-dom.workspace = true
@@ -12,7 +18,7 @@ blitz-html.workspace = true
 blitz-traits.workspace = true
 url.workspace = true
 v8 = "152.2"
-deno_core_icudata = "0.78"
+deno_core_icudata = { version = "0.78", optional = true }
 encoding_rs = "0.8"
 getrandom = "0.3"
 serde_json = "1"
