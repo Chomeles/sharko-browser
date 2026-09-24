@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+blitz-dom = { version = "=0.3.0-beta.2", default-features = false, features = ["svg", "woff", "system-fonts", "floats", "complex-scripts"] }
+blitz-html = { version = "=0.3.0-beta.2" }
+blitz-paint = { version = "=0.3.0-beta.2", default-features = false, features = ["svg"] }
+blitz-traits = { version = "=0.3.0-beta.2" }
+anyrender = { version = "0.13", features = ["serde"] }
+anyrender_vello_cpu = { version = "0.17", features = ["multithreading"] }
+serde = { version = "1", features = ["derive", "rc"] }
+url = { version = "2.5", features = ["serde"] }
+tokio = { version = "1.42", features = ["full"] }
+png = "0.18"
+
+[profile.dev]
+opt-level = 1
+debug = 0
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = 0
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = 0
+panic = "unwind"

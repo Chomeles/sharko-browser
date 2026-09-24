@@ -1,0 +1,8 @@
+[package]
+name = "netstack"
+version.workspace = true
+edition.workspace = true
+description = "Network stack + network service process"
+
+[dependencies]
+common = { path = "../common" }

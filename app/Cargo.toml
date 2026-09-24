@@ -1,0 +1,11 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "browser"
+path = "src/main.rs"
+
+[dependencies]
+engine = { path = "../crates/engine" }

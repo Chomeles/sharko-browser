@@ -1,0 +1,17 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+blitz-dom.workspace = true
+blitz-html.workspace = true
+blitz-paint.workspace = true
+blitz-traits.workspace = true
+anyrender.workspace = true
+anyrender_vello_cpu.workspace = true
+url.workspace = true
+png = "0.17"
+common = { path = "../common" }
+postcard = { version = "1.1", features = ["use-std"] }
+kurbo = "0.13"

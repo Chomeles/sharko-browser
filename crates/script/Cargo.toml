@@ -1,0 +1,10 @@
+[package]
+name = "script"
+version.workspace = true
+edition.workspace = true
+description = "V8 JavaScript runtime + DOM bindings"
+
+[dependencies]
+common = { path = "../common" }
+blitz-dom.workspace = true
+blitz-traits.workspace = true
