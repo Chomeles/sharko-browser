@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340">
+  <defs>
+    <linearGradient id="sea" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#031b34"/><stop offset="0.55" stop-color="#063e6b"/><stop offset="1" stop-color="#0b6fa8"/>
+    </linearGradient>
+    <linearGradient id="fin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8f4ff"/><stop offset="1" stop-color="#7cc4f2"/>
+    </linearGradient>
+    <linearGradient id="txt" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#9fdcff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="340" rx="24" fill="url(#sea)"/>
+  <g opacity="0.12" fill="none" stroke="#9fdcff" stroke-width="2">
+    <path d="M0 250 Q 75 230 150 250 T 300 250 T 450 250 T 600 250 T 750 250 T 900 250 T 1050 250 T 1200 250"/>
+    <path d="M0 285 Q 75 265 150 285 T 300 285 T 450 285 T 600 285 T 750 285 T 900 285 T 1050 285 T 1200 285"/>
+    <path d="M0 50 L1200 50 M0 100 L1200 100" stroke-dasharray="2 14"/>
+  </g>
+  <!-- fin -->
+  <path d="M120 250 C 160 200 190 120 250 70 C 245 140 262 200 330 250 Z" fill="url(#fin)"/>
+  <path d="M90 250 Q 210 232 360 250" fill="none" stroke="#e8f4ff" stroke-width="5" stroke-linecap="round"/>
+  <text x="400" y="165" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="92" font-weight="800" fill="url(#txt)" letter-spacing="-2">Sharko</text>
+  <text x="408" y="215" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="30" font-weight="300" fill="#bfe6ff" letter-spacing="8">B R O W S E R</text>
+  <text x="408" y="268" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#7fb8dc">Rust · multi-process · GPU-rendered · built from the fastest open-source engines</text>
+</svg>

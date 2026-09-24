@@ -1,4 +1,6 @@
-# Browser (Arbeitstitel)
+# 🦈 Sharko Browser
+
+**Mir haben die anderen Browser nicht gefallen. Also habe ich meinen eigenen gebaut.**
 
 Ein eigener Web-Browser in Rust – aus den schnellsten Open-Source-Komponenten zusammengesetzt,
 mit Multi-Prozess-Architektur wie Chrome. Status: **früher Prototyp**. [English](README.md)
