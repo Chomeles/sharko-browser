@@ -63,6 +63,19 @@ That's **Sharko**.
 | TLS | [rustls](https://github.com/rustls/rustls) + aws-lc-rs | Rust ecosystem |
 | Windowing | [winit](https://github.com/rust-windowing/winit) | Rust ecosystem |
 
+## 🗺️ Roadmap — this is just the beginning
+
+Sharko is my browser, built the way *I* want a browser to work. The engine is the
+foundation; now come the features I've always missed elsewhere:
+
+- [ ] 🧑‍🤝‍🧑 **Sessions per tab** — every tab can have its own cookie jar and login. Use several
+      accounts on the *same* site side by side (e.g. multiple Microsoft 365 tenants) —
+      no more incognito juggling or separate browser profiles.
+- [ ] 🎛️ **Hardware acceleration per tab** — switch GPU acceleration on or off for a single
+      tab instead of the whole browser.
+- [ ] 🛡️ **Built-in ad blocker** support.
+- [ ] Bookmarks, downloads, password manager, extensions … and whatever else I like. 😄
+
 ## 🏗️ Architecture
 
 ```mermaid

@@ -5,6 +5,12 @@
 Ein eigener Web-Browser in Rust – aus den schnellsten Open-Source-Komponenten zusammengesetzt,
 mit Multi-Prozess-Architektur wie Chrome. Status: **früher Prototyp**. [English](README.md)
 
+## Geplant – das ist erst der Anfang
+
+- **Session pro Tab:** mehrere Konten auf derselben Seite gleichzeitig (z. B. mehrere M365-Tenants)
+- **Hardware-Beschleunigung pro Tab** an/aus statt browserweit
+- **Adblocker-Unterstützung**
+
 ## Installieren (Windows)
 
 1. `browser-<version>-windows-x64.zip` vom [neuesten Release](../../releases/latest) laden.
