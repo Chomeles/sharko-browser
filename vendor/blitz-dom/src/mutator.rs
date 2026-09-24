@@ -1118,7 +1118,8 @@ impl<'doc> DocumentMutator<'doc> {
                     &mut style::stylesheets::CustomMediaEvaluator::none(),
                 )
         };
-        if is_in_head && matches_media && !self.doc.net_provider.is_noop() {
+        if is_in_head && matches_media && !self.doc.parser_done && !self.doc.net_provider.is_noop()
+        {
             self.doc
                 .pending_critical_resources
                 .insert(handler.request_id());

@@ -310,21 +310,37 @@ pub(crate) fn computed_value(
         return String::new();
     }
     ensure_layout(st, doc);
-    let target = match pseudo.trim_start_matches(':') {
+    let pid = match PropertyId::parse_enabled_for_all_content(name) {
+        Ok(p) => p,
+        Err(()) => return String::new(),
+    };
+    let pseudo_name = pseudo.trim_start_matches(':');
+    let target = match pseudo_name {
         "" => Some(id),
         "before" => doc.get_node(id).and_then(|n| n.before()),
         "after" => doc.get_node(id).and_then(|n| n.after()),
         _ => None,
     };
     let Some(target) = target else {
-        return String::new();
+        // PATCH: a ::before/::after that generates no box still has a computed style:
+        // inherited properties from the element, initial values otherwise.
+        if !matches!(pseudo_name, "before" | "after" | "marker") {
+            return String::new();
+        }
+        if name == "content" {
+            return "none".to_string();
+        }
+        let Some(parent) = doc.get_node(id).and_then(|n| n.primary_styles()).map(|s| (*s).clone())
+        else {
+            return String::new();
+        };
+        let device = doc.stylist_device();
+        let cv = style::properties::StyleBuilder::for_inheritance(device, None, Some(&*parent), None)
+            .build();
+        return serialize_computed(&cv, &pid);
     };
     let Some(node) = doc.get_node(target) else {
         return String::new();
-    };
-    let pid = match PropertyId::parse_enabled_for_all_content(name) {
-        Ok(p) => p,
-        Err(()) => return String::new(),
     };
     let Some(styles) = node.primary_styles() else {
         // Not styled (e.g. inside a display:none subtree).
@@ -336,12 +352,32 @@ pub(crate) fn computed_value(
     let cv: &style::properties::ComputedValues = &styles;
 
     // Layout-dependent resolved values (CSSOM "resolved value" special cases).
-    if target == id
-        && let Some(v) = used_value(doc, target, name, cv)
-    {
-        return v;
+    if target == id {
+        if let Some(v) = used_value(doc, target, name, cv) {
+            return v;
+        }
+        // PATCH: `padding`/`margin` shorthands from the used longhands.
+        if matches!(name, "padding" | "margin") {
+            let parts: Option<Vec<String>> = ["top", "right", "bottom", "left"]
+                .iter()
+                .map(|side| used_value(doc, target, &format!("{name}-{side}"), cv))
+                .collect();
+            if let Some(p) = parts {
+                return match (&p[0], &p[1], &p[2], &p[3]) {
+                    (t, r, b, l) if t == r && r == b && b == l => t.clone(),
+                    (t, r, b, l) if t == b && r == l => format!("{t} {r}"),
+                    (t, r, b, l) if r == l => format!("{t} {r} {b}"),
+                    (t, r, b, l) => format!("{t} {r} {b} {l}"),
+                };
+            }
+        }
     }
 
+    serialize_computed(cv, &pid)
+}
+
+/// Serialize the computed value of a longhand, custom property or shorthand.
+fn serialize_computed(cv: &style::properties::ComputedValues, pid: &PropertyId) -> String {
     match pid.as_shorthand() {
         Err(decl_id) => match decl_id {
             PropertyDeclarationId::Longhand(_) | PropertyDeclarationId::Custom(_) => {

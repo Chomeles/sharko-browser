@@ -1285,7 +1285,15 @@ impl<'dom> DomTraversal<BlitzNode<'dom>> for RecalcStyle<'_> {
         if let Some(el) = node.as_element() {
             // let mut data = el.mutate_data().unwrap();
             let mut data = unsafe { el.ensure_data() };
+            // PATCH: an element styled for the first time (e.g. inserted while inside a
+            // `display: none` subtree that is now shown) gets no damage from the style
+            // difference, and damage set at insertion was lost because it had no style
+            // data yet. Without box construction damage its subtree stayed 0×0.
+            let first_style = data.styles.get_primary().is_none();
             recalc_style_at(self, traversal_data, context, el, &mut data, note_child);
+            if first_style {
+                data.damage.insert(crate::layout::damage::ALL_DAMAGE);
+            }
 
             sync_pseudo_element_styles(el, &data, &self.nodes_needing_style_image_flush);
 

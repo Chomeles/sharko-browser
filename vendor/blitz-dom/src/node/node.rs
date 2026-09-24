@@ -71,6 +71,9 @@ bitflags! {
         /// PATCH: a `<select>` whose displayed option is managed by the script runtime
         /// (which knows the selectedness set through the DOM API).
         const IS_SELECT_SCRIPT_MANAGED = 0b100_0000_0000;
+        /// PATCH: laying out this block placed floats into its parent's block formatting
+        /// context (a side effect a cached layout would skip).
+        const PLACES_FLOATS = 0b1000_0000_0000;
     }
 }
 

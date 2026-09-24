@@ -265,6 +265,11 @@ impl BreakerState {
         self.line_max_advance = advance;
     }
 
+    /// PATCH: the height of the content on the current line so far.
+    pub fn line_height(&self) -> f32 {
+        self.line.running_line_height
+    }
+
     /// Get the max-height of the current line
     #[inline(always)]
     pub fn line_max_height(&self) -> f32 {

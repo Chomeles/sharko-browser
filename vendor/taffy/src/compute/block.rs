@@ -242,9 +242,16 @@ impl BlockContext<'_> {
         self.top_adjoining_floats.unwrap_or(self.adjoining_floats)
     }
 
+    /// PATCH: the number of floats placed in the whole block formatting context so far (a
+    /// layout that increases it had the side effect of placing floats).
+    pub fn placed_float_count(&self) -> usize {
+        self.bfc.float_context.left_floats().len() + self.bfc.float_context.right_floats().len()
+    }
+
     /// Update the height that descendent floats with the height that floats consume
-    /// within a particular child
-    fn add_child_floated_content_height_contribution(&mut self, child_contribution: f32) {
+    /// within a particular child (PATCH: public, for inline formatting contexts that place
+    /// floats through a sub-context)
+    pub fn add_child_floated_content_height_contribution(&mut self, child_contribution: f32) {
         self.float_content_contribution = self.float_content_contribution.max(child_contribution);
     }
 
@@ -624,7 +631,10 @@ fn compute_inner(
     // Root BFCs contain floats
     #[cfg(feature = "float_layout")]
     if block_ctx.is_bfc_root() || establishes_new_bfc {
-        intrinsic_outer_height = intrinsic_outer_height.max(block_ctx.floated_content_height_contribution());
+        // PATCH: the float contribution is measured from the border-box top; the bottom
+        // padding and border still lie below the floats (CSS2 §10.6.7).
+        intrinsic_outer_height = intrinsic_outer_height
+            .max(block_ctx.floated_content_height_contribution() + resolved_content_box_inset.bottom);
     }
 
     let container_outer_height = known_dimensions

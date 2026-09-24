@@ -256,6 +256,13 @@ impl Cache {
         }
     }
 
+    /// PATCH: forget only the final layout (e.g. when shared layout state that the final
+    /// layout depends on, like the line breaks of a text layout, was changed by a
+    /// measurement).
+    pub fn clear_final_layout(&mut self) {
+        self.final_layout_entry = None;
+    }
+
     /// Clear all cache entries and reports clear operation outcome ([`ClearState`])
     pub fn clear(&mut self) -> ClearState {
         if self.is_empty {

@@ -378,6 +378,8 @@ impl BaseDocument {
         // println!("\n\nRESOLVE LAYOUT\n===========\n");
 
         taffy::compute_root_layout(self, root_element_id, available_space);
+        // PATCH: text whose line breaks a measurement overwrote after its final layout.
+        self.relayout_stale_inline_roots();
         // PATCH: absolutely positioned/fixed boxes against their real containing block.
         crate::layout::abspos::fixup_out_of_flow_boxes(
             self,

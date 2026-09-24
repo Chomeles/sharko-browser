@@ -600,7 +600,9 @@ impl Renderer {
         // "already sent" set: fonts are shared across documents.
 
         let config = self.document_config(url);
-        let doc = parse_document(html, config, self.config.javascript);
+        let mut doc = parse_document(html, config, self.config.javascript);
+        // Stylesheets inserted by scripts from now on don't block rendering.
+        doc.set_parser_done();
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let host = Rc::new(RendererHost {

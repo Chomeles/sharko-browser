@@ -26,6 +26,12 @@ pub struct TextLayout {
     pub text: String,
     pub content_widths: Option<ContentWidths>,
     pub layout: parley::layout::Layout<TextBrush>,
+    /// PATCH: width (layout units) the lines were broken at by the last final layout,
+    /// and that layout's inputs.
+    pub(crate) last_perform: Option<(f32, taffy::LayoutInput)>,
+    /// PATCH: a size measurement re-broke the lines at another width after the last
+    /// final layout (see `BaseDocument::relayout_stale_inline_roots`).
+    pub(crate) lines_stale: bool,
 }
 
 impl TextLayout {

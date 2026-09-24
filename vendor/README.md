@@ -67,3 +67,25 @@ Patches so far:
     against their containing block (nearest positioned/transformed ancestor, or the
     viewport) instead of their parent; `blitz-paint`: fixed boxes stay in place when the
     viewport scrolls.
+24. `blitz-dom/src/stylo.rs`: an element's first style resolution always carries full
+    layout damage (inserting a subtree that was hidden no longer leaves stale layout).
+25. `blitz-dom/src/document.rs`, `mutator.rs`: stylesheets inserted by script after
+    parsing no longer block rendering (`set_parser_done`), as in browsers.
+26. `blitz-dom/src/layout/inline.rs`, `taffy/src/tree/cache.rs`: inline roots whose line
+    breaks were computed for a different width during intrinsic sizing are re-broken at
+    their final width (`relayout_stale_inline_roots`).
+27. `blitz-dom/src/layout/inline.rs`, `parley/src/layout/line_break.rs`: a float that
+    does not fit next to the content already on the current line is placed below it.
+28. `blitz-dom/src/layout/mod.rs`: block children that place floats bypass the layout
+    cache (their float placement depends on the parent's float context).
+29. `blitz-dom/src/layout/inline.rs`, `taffy/src/compute/block.rs`: floats inside inline
+    content count towards the enclosing block formatting context (its height grows to
+    contain them, and the block is not served from the layout cache, which let a later
+    float overlap them).
+30. `blitz-dom/src/layout/inline.rs`: shrink-to-fit widths include the floats of inline
+    content under a definite available width too.
+31. `taffy/src/compute/block.rs`: a block formatting context whose content ends with
+    floats keeps its bottom padding and border below them.
+32. `blitz-dom/src/document.rs`: `getBoundingClientRect()` applies CSS transforms, ancestor
+    scroll offsets and sticky shifts, and `position: fixed` boxes keep their viewport
+    position when the page scrolls.

@@ -489,9 +489,38 @@ impl taffy::LayoutBlockContainer for BaseDocument {
         inputs: taffy::LayoutInput,
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> taffy::LayoutOutput {
-        compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
-            tree.compute_child_layout_internal(node_id, inputs, block_ctx)
-        })
+        // PATCH: a block in its parent's block formatting context that places floats into
+        // it must be laid out again, not served from the cache: the floats are a side effect
+        // on the shared context (a later float would otherwise overlap them).
+        use crate::node::NodeFlags;
+        match block_ctx {
+            Some(ctx) => {
+                let places_floats = self
+                    .node_from_id(node_id)
+                    .flags
+                    .contains(NodeFlags::PLACES_FLOATS);
+                if places_floats {
+                    return self.compute_child_layout_internal(node_id, inputs, Some(ctx));
+                }
+                let floats_before = ctx.placed_float_count();
+                let output = compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
+                    tree.compute_child_layout_internal(node_id, inputs, Some(&mut *ctx))
+                });
+                // Floats inside inline content are placed through a sub-context, so count them
+                // in the shared context rather than relying on the height contribution.
+                if ctx.placed_float_count() > floats_before
+                    || ctx.floated_content_height_contribution() > f32::NEG_INFINITY
+                {
+                    self.node_from_id_mut(node_id)
+                        .flags
+                        .insert(NodeFlags::PLACES_FLOATS);
+                }
+                output
+            }
+            None => compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
+                tree.compute_child_layout_internal(node_id, inputs, None)
+            }),
+        }
     }
 }
 

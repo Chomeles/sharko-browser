@@ -331,6 +331,9 @@ pub struct BaseDocument {
     /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
     /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
     pub(crate) element_load_events: Vec<(NodeId, bool)>,
+    /// PATCH: set once the parser is done: stylesheets inserted later (by scripts) are
+    /// not render-blocking, as in other browsers.
+    pub(crate) parser_done: bool,
 
     /// Nodes whose `background-image`/`mask-image` layers need flushing to
     /// dedicated storage on the node because their style changed (populated by
@@ -504,6 +507,7 @@ impl BaseDocument {
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
             element_load_events: Vec::new(),
+            parser_done: false,
             pending_style_image_nodes: Vec::new(),
             pending_critical_resources: HashSet::new(),
             controls_to_form: HashMap::new(),
@@ -1488,6 +1492,12 @@ impl BaseDocument {
         !self.pending_critical_resources.is_empty()
     }
 
+    /// PATCH: the document has been parsed; stylesheets added from now on don't block
+    /// rendering.
+    pub fn set_parser_done(&mut self) {
+        self.parser_done = true;
+    }
+
     /// PATCH: take the element resource loads/failures since the last call.
     pub fn take_element_load_events(&mut self) -> Vec<(NodeId, bool)> {
         std::mem::take(&mut self.element_load_events)
@@ -2463,14 +2473,85 @@ impl BaseDocument {
         }
 
         let node = self.get_node(node_id)?;
-        let pos = node.absolute_position(0.0, 0.0);
+        let size = node.unrounded_layout().size;
+        let (w, h) = (size.width as f64, size.height as f64);
+
+        // PATCH: map the border box's corners up the layout tree like painting does: CSS
+        // transforms of the node and its ancestors, ancestors' scroll offsets, sticky shifts,
+        // and `position: fixed` boxes stay put when the viewport scrolls.
+        let scale = self.viewport.scale_f64();
+        let mut corners = [
+            kurbo::Point::new(0.0, 0.0),
+            kurbo::Point::new(w, 0.0),
+            kurbo::Point::new(0.0, h),
+            kurbo::Point::new(w, h),
+        ];
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            let n = &self.nodes[id];
+            if id != node_id {
+                let scroll = n.scroll_offset();
+                for p in &mut corners {
+                    p.x -= scroll.x;
+                    p.y -= scroll.y;
+                }
+            }
+            if let Some(t) = *n.transform() {
+                for p in &mut corners {
+                    let q = t * kurbo::Point::new(p.x * scale, p.y * scale);
+                    *p = kurbo::Point::new(q.x / scale, q.y / scale);
+                }
+            }
+            let location = n.final_layout().location;
+            let position = n.primary_styles().map(|s| s.clone_position());
+            let (dx, dy) = match position {
+                Some(style::computed_values::position::T::Fixed)
+                    if !self.has_fixed_or_transformed_ancestor(id) =>
+                {
+                    (self.viewport_scroll.x, self.viewport_scroll.y)
+                }
+                Some(style::computed_values::position::T::Sticky) => {
+                    let (x, y) = n.sticky_offset.get();
+                    (x as f64, y as f64)
+                }
+                _ => (0.0, 0.0),
+            };
+            for p in &mut corners {
+                p.x += location.x as f64 + dx;
+                p.y += location.y as f64 + dy;
+            }
+            cur = n.layout_parent.get();
+        }
+        let x0 = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let y0 = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let x1 = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        let y1 = corners.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
 
         Some(BoundingRect {
-            x: pos.x as f64 - self.viewport_scroll.x,
-            y: pos.y as f64 - self.viewport_scroll.y,
-            width: node.unrounded_layout().size.width as f64,
-            height: node.unrounded_layout().size.height as f64,
+            x: x0 - self.viewport_scroll.x,
+            y: y0 - self.viewport_scroll.y,
+            width: x1 - x0,
+            height: y1 - y0,
         })
+    }
+
+    /// Whether a layout ancestor of `node_id` is `position: fixed` or transformed (then a
+    /// fixed box moves with it instead of staying at its viewport position).
+    fn has_fixed_or_transformed_ancestor(&self, node_id: NodeId) -> bool {
+        // Same test as blitz-paint's, which decides whether to keep the box in place.
+        let node = &self.nodes[node_id];
+        let mut cur = node.layout_parent.get().or(node.parent);
+        while let Some(id) = cur {
+            let n = &self.nodes[id];
+            if n.primary_styles().is_some_and(|s| {
+                s.clone_position() == style::computed_values::position::T::Fixed
+                    || !s.get_box().transform.0.is_empty()
+            }) {
+                return true;
+            }
+            cur = n.layout_parent.get().or(n.parent);
+        }
+        false
     }
 
     /// Computes the sizes and positions of the `Node`'s box fragments relative to the

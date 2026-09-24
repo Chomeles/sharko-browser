@@ -104,7 +104,7 @@ impl BaseDocument {
         }
 
         // Unwrap the block formatting context if one was passed, or else create a new one
-        match block_ctx {
+        let output = match block_ctx {
             Some(inherited_bfc) if !is_scroll_container => self.compute_inline_layout_inner(
                 node_id,
                 LayoutInput {
@@ -125,6 +125,46 @@ impl BaseDocument {
                     &mut root_ctx,
                 )
             }
+        };
+
+        // PATCH: a measurement that re-broke the lines invalidates the cached final layout.
+        if run_mode != RunMode::PerformLayout {
+            let stale = self.nodes[node_id]
+                .element_data()
+                .and_then(|el| el.inline_layout_data.as_ref())
+                .is_some_and(|l| l.lines_stale);
+            if stale {
+                self.nodes[node_id].cache_mut().clear_final_layout();
+            }
+        } else if let Some(layout) = self.nodes[node_id]
+            .element_data_mut()
+            .and_then(|el| el.inline_layout_data.as_mut())
+        {
+            // The outer inputs (the inner ones have the resolved known dimensions).
+            if let Some((w, _)) = layout.last_perform {
+                layout.last_perform = Some((w, inputs));
+            }
+        }
+        output
+    }
+
+    /// PATCH: after the layout pass, redo the final layout of inline roots whose lines a
+    /// measurement re-broke at another width while their (cached) final layout was kept.
+    pub(crate) fn relayout_stale_inline_roots(&mut self) {
+        let stale: Vec<(NodeId, LayoutInput)> = self
+            .nodes
+            .iter()
+            .filter_map(|(id, node)| {
+                let layout = node.element_data()?.inline_layout_data.as_ref()?;
+                if !layout.lines_stale {
+                    return None;
+                }
+                Some((id, layout.last_perform?.1))
+            })
+            .collect();
+        for (id, inputs) in stale {
+            self.nodes[id].cache_mut().clear_final_layout();
+            taffy::LayoutPartialTree::compute_child_layout(self, crate::taffy_node_id(id), inputs);
         }
     }
 
@@ -132,7 +172,7 @@ impl BaseDocument {
         &mut self,
         node_id: NodeId,
         inputs: taffy::tree::LayoutInput,
-        block_ctx: &mut BlockContext<'_>,
+        parent_ctx: &mut BlockContext<'_>,
     ) -> taffy::LayoutOutput {
         let scale = self.viewport.scale();
         let LayoutInput {
@@ -351,7 +391,6 @@ impl BaseDocument {
 
                 #[cfg(feature = "floats")]
                 let float_width = match available_space.width {
-                    AvailableSpace::Definite(_) => 0.0,
                     AvailableSpace::MinContent => {
                         let mut width: f32 = 0.0;
                         for ibox in inline_layout.layout.inline_boxes_mut() {
@@ -374,7 +413,15 @@ impl BaseDocument {
 
                         width * scale
                     }
-                    AvailableSpace::MaxContent => {
+                    // PATCH: a shrink-to-fit measurement under a definite width also counts
+                    // the floats' max-content contributions (they were ignored, so a float
+                    // containing a floated headline was sized to its other content).
+                    AvailableSpace::MaxContent | AvailableSpace::Definite(_) => {
+                        let child_inputs = taffy::tree::LayoutInput {
+                            available_space: Size::MAX_CONTENT,
+                            parent_size: Size::NONE,
+                            ..child_inputs
+                        };
                         // When computing a max-content size the available width is effectively
                         // infinite, so floats never wrap onto a new "band" due to a lack of
                         // horizontal space. They only move below preceding floats when the `clear`
@@ -447,20 +494,20 @@ impl BaseDocument {
             });
 
         #[cfg(not(feature = "floats"))]
-        let _ = block_ctx; // Suppress unused variable warning
+        let _ = parent_ctx; // Suppress unused variable warning
 
         // Set block context width if this is a block context root
         #[cfg(feature = "floats")]
-        let is_bfc_root = block_ctx.is_bfc_root();
+        let is_bfc_root = parent_ctx.is_bfc_root();
         #[cfg(feature = "floats")]
         if is_bfc_root {
-            block_ctx.set_width((width + pbw) / scale);
+            parent_ctx.set_width((width + pbw) / scale);
         }
 
         // Create sub-context to account for the inline layout's padding/border
         #[cfg(feature = "floats")]
         let mut block_ctx =
-            block_ctx.sub_context(container_pb.top, [container_pb.left, container_pb.right]);
+            parent_ctx.sub_context(container_pb.top, [container_pb.left, container_pb.right]);
         // block_ctx.apply_content_box_inset([container_pb.left, container_pb.right]);
 
         if inputs.run_mode == taffy::RunMode::ComputeSize
@@ -564,7 +611,17 @@ impl BaseDocument {
                             crate::taffy_node_id(node_id),
                             float_child_inputs,
                         );
-                        let min_y = state.line_y() as f32 / scale;
+                        let mut min_y = state.line_y() as f32 / scale;
+                        // PATCH: a float that doesn't fit next to the content already on the
+                        // current line goes below that line (CSS2 §9.5.1) instead of taking
+                        // the line's top and pushing the content aside.
+                        let line_content = box_break_data.advance;
+                        let float_width = (output.size.width + margin_sum.width) * scale;
+                        if line_content > 0.0
+                            && float_width > state.line_max_advance() - line_content + 0.01
+                        {
+                            min_y += state.line_height() / scale;
+                        }
 
                         // Note: `pos` is content-box relative
                         let pos = block_ctx.place_floated_box(
@@ -605,6 +662,24 @@ impl BaseDocument {
                 }
             }
             breaker.finish();
+        }
+
+        // PATCH: remember at which width the lines of the final layout were broken; a
+        // measurement at another width makes them stale (a later cached final layout would
+        // otherwise paint the measurement's line breaks).
+        match inputs.run_mode {
+            taffy::RunMode::PerformLayout => {
+                inline_layout.last_perform = Some((width, inputs));
+                inline_layout.lines_stale = false;
+            }
+            _ => {
+                if inline_layout
+                    .last_perform
+                    .is_some_and(|(w, _)| (w - width).abs() > 0.01)
+                {
+                    inline_layout.lines_stale = true;
+                }
+            }
         }
 
         let alignment = self.nodes[node_id]
@@ -656,6 +731,13 @@ impl BaseDocument {
             if is_bfc_root {
                 height = height.max(block_ctx.floated_content_height_contribution() * scale)
             };
+            // PATCH: floats of the inline content count towards the parent's float height
+            // (the enclosing BFC root grows to contain them).
+            let contribution = block_ctx.floated_content_height_contribution();
+            if contribution > f32::NEG_INFINITY {
+                parent_ctx
+                    .add_child_floated_content_height_contribution(container_pb.top + contribution);
+            }
         }
 
         // Note: `width` and `height` are content-box measurements of the inline content.
