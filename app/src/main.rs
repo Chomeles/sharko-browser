@@ -131,8 +131,15 @@ fn main() {
         std::process::exit(run_headless(bopts, o));
     }
 
-    eprintln!("UI not built yet; use --headless. \n{USAGE}");
-    std::process::exit(2);
+    let urls: Vec<String> = args
+        .iter()
+        .filter(|a| !a.starts_with("--"))
+        .map(|u| normalize_url(u))
+        .collect();
+    if let Err(e) = shell::run(bopts, urls) {
+        eprintln!("browser: {e}");
+        std::process::exit(1);
+    }
 }
 
 /// Turn user input into a URL: keep explicit schemes, map existing file paths to file://,
