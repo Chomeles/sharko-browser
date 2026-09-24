@@ -1041,6 +1041,7 @@ dependencies = [
  "crossbeam-channel",
  "cursor-icon",
  "encoding_rs",
+ "html5ever",
  "keyboard-types",
  "kurbo",
  "netstack",

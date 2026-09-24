@@ -61,6 +61,7 @@ struct Page {
     last_ready_check: Instant,
     last_scroll: (f64, f64),
     resources_were_pending: bool,
+    last_title: String,
 }
 
 pub struct RendererConfig {
@@ -512,7 +513,7 @@ impl Renderer {
         // "already sent" set: fonts are shared across documents.
 
         let config = self.document_config(url);
-        let doc = HtmlDocument::from_html(html, config).into_inner();
+        let doc = parse_document(html, config, self.config.javascript);
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let host = Rc::new(RendererHost {
@@ -538,15 +539,17 @@ impl Renderer {
             last_ready_check: Instant::now(),
             last_scroll: (0.0, 0.0),
             resources_were_pending: true,
+            last_title: String::new(),
         };
+        if self.config.javascript {
+            // Scripting is on: <noscript> content must not render.
+            page.doc
+                .add_user_agent_stylesheet("noscript { display: none !important; }");
+        }
 
         self.send(FromRenderer::UrlChanged(url.to_string()));
-        if let Some(title) = page.doc.find_title_node().map(|n| n.text_content()) {
-            let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
-            self.send(FromRenderer::Title(title));
-        } else {
-            self.send(FromRenderer::Title(String::new()));
-        }
+        page.last_title = document_title(&page.doc);
+        self.send(FromRenderer::Title(page.last_title.clone()));
 
         let t1 = Instant::now();
         if self.config.javascript {
@@ -703,6 +706,12 @@ impl Renderer {
         let list = rec.finish();
         let paint_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
+        let title = document_title(&page.doc);
+        if title != page.last_title {
+            page.last_title = title.clone();
+            self.shared.send(FromRenderer::Title(title));
+        }
+
         let scroll = page.doc.viewport_scroll();
         self.frame_seq += 1;
         let frame = Frame {
@@ -729,6 +738,48 @@ impl Renderer {
             let _ = (style_layout_ms, paint_ms);
         }
     }
+}
+
+fn document_title(doc: &BaseDocument) -> String {
+    doc.find_title_node()
+        .map(|n| n.text_content().split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default()
+}
+
+/// Parse an HTML document with html5ever. Unlike `HtmlDocument::from_html` this honours
+/// the scripting flag: with JavaScript enabled, `<noscript>` content is raw text (as in
+/// every browser), so e.g. `<noscript><style>body{display:none}</style></noscript>` is inert.
+fn parse_document(html: &str, config: DocumentConfig, scripting: bool) -> BaseDocument {
+    use html5ever::tendril::TendrilSink;
+    let trimmed = html.trim_start_matches('\u{feff}').trim_start();
+    if trimmed.starts_with("<?xml") {
+        return HtmlDocument::from_xml(html, config).into_inner();
+    }
+    let mut config = config;
+    if let Some(ss) = &mut config.ua_stylesheets {
+        if !ss.iter().any(|s| s == blitz_dom::DEFAULT_CSS) {
+            ss.push(blitz_dom::DEFAULT_CSS.to_string());
+        }
+    }
+    let mut doc = BaseDocument::new(config);
+    {
+        let mut mutr = doc.mutate();
+        let sink = blitz_html::DocumentHtmlParser::new(&mut mutr);
+        let opts = html5ever::ParseOpts {
+            tokenizer: Default::default(),
+            tree_builder: html5ever::tree_builder::TreeBuilderOpts {
+                exact_errors: false,
+                scripting_enabled: scripting,
+                iframe_srcdoc: false,
+                drop_doctype: true,
+                quirks_mode: html5ever::tree_builder::QuirksMode::NoQuirks,
+            },
+        };
+        let _ = html5ever::parse_document(sink, opts)
+            .from_utf8()
+            .read_from(&mut html.as_bytes());
+    }
+    doc
 }
 
 fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {

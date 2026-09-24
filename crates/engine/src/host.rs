@@ -168,8 +168,10 @@ impl ShellProvider for Shell {
             self.shared.send(FromRenderer::Cursor(kind));
         }
     }
-    fn set_window_title(&self, title: String) {
-        self.shared.send(FromRenderer::Title(title));
+    fn set_window_title(&self, _title: String) {
+        // Ignored: iframe sub-documents share this provider. The renderer reads the main
+        // document's <title> after each frame instead.
+        self.shared.redraw.store(true, Ordering::SeqCst);
     }
     fn set_ime_enabled(&self, is_enabled: bool) {
         self.shared.send(FromRenderer::ImeAllowed(is_enabled));
@@ -261,8 +263,10 @@ impl script::ScriptHost for RendererHost {
     }
 
     fn title_changed(&self, title: &str) {
+        // The <title> element is the source of truth; the renderer reports it after the
+        // next frame.
         *self.title.borrow_mut() = title.to_string();
-        self.shared.send(FromRenderer::Title(title.to_string()));
+        self.shared.redraw.store(true, Ordering::SeqCst);
     }
 
     fn console(&self, level: &str, message: &str) {
