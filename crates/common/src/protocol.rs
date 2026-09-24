@@ -254,6 +254,9 @@ pub enum ToRenderer {
     /// Ask for a frame covering the full page height (for full-page screenshots).
     /// Reply: `Frame` with `full_page = true`.
     CaptureFullPage { id: u64, max_height: u32 },
+    /// Back/forward to a same-document history entry (created by pushState or a
+    /// fragment navigation): update the URL and fire `popstate` instead of reloading.
+    HistoryTraverse { url: String, index: u32 },
     Shutdown,
 }
 
@@ -308,6 +311,9 @@ pub enum FromRenderer {
     },
     /// `history.back()` etc.
     HistoryGo(i32),
+    /// `history.pushState` / `replaceState` / fragment navigation created (or replaced)
+    /// a same-document session history entry.
+    HistoryPush { url: String, replace: bool },
     Cursor(CursorKind),
     Console { level: String, message: String },
     EvalResult { id: u64, ok: bool, value: String },

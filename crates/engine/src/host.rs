@@ -176,6 +176,16 @@ impl ShellProvider for Shell {
     fn set_ime_enabled(&self, is_enabled: bool) {
         self.shared.send(FromRenderer::ImeAllowed(is_enabled));
     }
+    fn get_clipboard_text(&self) -> Result<String, blitz_traits::shell::ClipboardError> {
+        arboard::Clipboard::new()
+            .and_then(|mut c| c.get_text())
+            .map_err(|_| blitz_traits::shell::ClipboardError)
+    }
+    fn set_clipboard_text(&self, text: String) -> Result<(), blitz_traits::shell::ClipboardError> {
+        arboard::Clipboard::new()
+            .and_then(|mut c| c.set_text(text))
+            .map_err(|_| blitz_traits::shell::ClipboardError)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -300,5 +310,18 @@ impl script::ScriptHost for RendererHost {
 
     fn referrer(&self) -> String {
         self.referrer.clone()
+    }
+
+    fn history_push(&self, url: &str, replace: bool) {
+        self.shared.send(FromRenderer::HistoryPush {
+            url: url.to_string(),
+            replace,
+        });
+    }
+
+    fn clipboard_write(&self, text: &str) {
+        if let Ok(mut c) = arboard::Clipboard::new() {
+            let _ = c.set_text(text.to_string());
+        }
     }
 }

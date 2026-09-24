@@ -306,6 +306,21 @@ impl Renderer {
             ToRenderer::CaptureFullPage { id, max_height } => {
                 self.pending_capture = Some((id, max_height));
             }
+            ToRenderer::HistoryTraverse { url, index } => {
+                if let Some(page) = &mut self.page {
+                    page.url = url.clone();
+                    match page.rt.as_mut() {
+                        Some(rt) => rt.history_traversed(&mut page.doc, &url, index),
+                        None => {
+                            if let Some(frag) = url::Url::parse(&url).ok().and_then(|u| u.fragment().map(str::to_string)) {
+                                page.doc.scroll_to_fragment(&frag);
+                            }
+                        }
+                    }
+                    self.shared.send(FromRenderer::UrlChanged(url));
+                    self.shared.redraw.store(true, Ordering::SeqCst);
+                }
+            }
             ToRenderer::Shutdown => return false,
         }
         true

@@ -343,8 +343,13 @@ impl App {
                 _ => self.sync_chrome(),
             },
             BrowserEvent::TabCrashed(id) => {
-                if let Some(t) = self.browser.tab_mut(id) {
-                    t.title = "Absturz".into();
+                // Like Chrome's "sad tab": only this tab's renderer died. Start a fresh
+                // renderer that shows an error page; the user can reload.
+                let url = self.browser.tab(id).map(|t| t.url.clone()).unwrap_or_default();
+                if self.browser.tab(id).is_some() {
+                    if let Err(e) = self.browser.respawn_tab(id, Some(crash_html(&url))) {
+                        eprintln!("[ui] cannot restart renderer: {e}");
+                    }
                 }
                 self.sync_chrome();
             }
@@ -839,6 +844,17 @@ impl ApplicationHandler<UserEvent> for App {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.browser.shutdown();
     }
+}
+
+fn crash_html(url: &str) -> String {
+    let esc = url.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
+    format!(r#"<!DOCTYPE html><html><head><title>Absturz</title><style>
+body{{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:#f8f9fb;color:#1f1f1f;display:flex;justify-content:center;padding-top:20vh}}
+.b{{max-width:520px;padding:0 24px}} h1{{font-weight:500;font-size:24px}} p{{color:#5f6368;line-height:1.5}}
+a{{display:inline-block;margin-top:12px;background:#0b57d0;color:#fff;text-decoration:none;padding:9px 20px;border-radius:18px}}
+</style></head><body><div class="b"><h1>Diese Seite ist abgestürzt</h1>
+<p>Der Renderer-Prozess dieses Tabs wurde beendet. Andere Tabs sind nicht betroffen.</p>
+<a href="{esc}">Neu laden</a></div></body></html>"#)
 }
 
 /// Built-in new tab page.

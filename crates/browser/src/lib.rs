@@ -71,6 +71,25 @@ pub enum BrowserEvent {
 pub struct HistoryEntry {
     pub url: String,
     pub title: String,
+    /// Entries with the same `doc_seq` belong to one document (pushState / fragments):
+    /// moving between them doesn't reload.
+    pub doc_seq: u64,
+    /// Position of this entry among its document's entries (for `popstate` state).
+    pub doc_index: u32,
+}
+
+fn same_document(a: &str, b: &str) -> bool {
+    match (url_without_fragment(a), url_without_fragment(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => false,
+    }
+}
+
+fn url_without_fragment(u: &str) -> Option<&str> {
+    if u.starts_with("about:") {
+        return None;
+    }
+    Some(u.split('#').next().unwrap_or(u))
 }
 
 pub struct Tab {
@@ -117,6 +136,7 @@ pub struct Browser {
     tabs: HashMap<TabId, Tab>,
     order: Vec<TabId>,
     next_tab: TabId,
+    next_doc_seq: u64,
     events_tx: Sender<BrowserEvent>,
     pub events: Receiver<BrowserEvent>,
 }
@@ -151,6 +171,7 @@ impl Browser {
             tabs: HashMap::new(),
             order: Vec::new(),
             next_tab: 1,
+            next_doc_seq: 1,
             events_tx,
             events,
         })
@@ -171,10 +192,12 @@ impl Browser {
         &self.order
     }
 
-    /// Create a tab with its own renderer and start loading `url`.
-    pub fn new_tab(&mut self, url: &str, viewport: ViewportInfo) -> io::Result<TabId> {
-        let id = self.next_tab;
-        self.next_tab += 1;
+    /// Start a renderer process (or thread) for tab `id` and send it `Init`.
+    fn spawn_renderer(
+        &self,
+        id: TabId,
+        viewport: ViewportInfo,
+    ) -> io::Result<(IpcSender<ToRenderer>, Option<Child>)> {
         let listener = IpcListener::new("renderer")?;
         let endpoint = listener.endpoint();
         let mut child = None;
@@ -223,6 +246,14 @@ impl Browser {
             profile_dir: self.opts.profile_dir.display().to_string(),
             javascript: self.opts.javascript,
         });
+        Ok((sender, child))
+    }
+
+    /// Create a tab with its own renderer and start loading `url`.
+    pub fn new_tab(&mut self, url: &str, viewport: ViewportInfo) -> io::Result<TabId> {
+        let id = self.next_tab;
+        self.next_tab += 1;
+        let (sender, child) = self.spawn_renderer(id, viewport)?;
         let tab = Tab {
             id,
             sender,
@@ -251,6 +282,37 @@ impl Browser {
             self.navigate(id, url);
         }
         Ok(id)
+    }
+
+    /// Replace a crashed tab's renderer with a fresh one. The tab keeps its history; the
+    /// new renderer shows `html` (e.g. an error page) or reloads the current entry.
+    pub fn respawn_tab(&mut self, id: TabId, html: Option<String>) -> io::Result<()> {
+        let viewport = match self.tabs.get(&id) {
+            Some(t) => t.viewport,
+            None => return Ok(()),
+        };
+        let (sender, child) = self.spawn_renderer(id, viewport)?;
+        let tab = self.tabs.get_mut(&id).expect("tab exists");
+        if let Some(mut old) = tab.child.take() {
+            let _ = old.kill();
+            let _ = old.wait();
+        }
+        tab.sender = sender;
+        tab.child = child;
+        tab.crashed = false;
+        tab.frame = None;
+        tab.resources = ResourceCache::default();
+        let url = tab.url.clone();
+        match html {
+            Some(html) => tab.send(ToRenderer::LoadHtml { url, html }),
+            None => tab.send(ToRenderer::Navigate {
+                url,
+                method: "GET".into(),
+                body: None,
+                content_type: None,
+            }),
+        }
+        Ok(())
     }
 
     pub fn close_tab(&mut self, id: TabId) {
@@ -287,10 +349,29 @@ impl Browser {
         content_type: Option<String>,
         replace: bool,
     ) {
+        let next_seq = self.next_doc_seq;
         let Some(tab) = self.tabs.get_mut(&id) else { return };
-        let entry = HistoryEntry {
-            url: url.to_string(),
-            title: String::new(),
+        let current = tab.history.get(tab.history_index).cloned();
+        // Fragment-only change of a GET: same document, no reload.
+        let same_doc = method.eq_ignore_ascii_case("GET")
+            && url.contains('#')
+            && current.as_ref().is_some_and(|c| same_document(&c.url, url));
+        let entry = match (&current, same_doc) {
+            (Some(c), true) => HistoryEntry {
+                url: url.to_string(),
+                title: c.title.clone(),
+                doc_seq: c.doc_seq,
+                doc_index: if replace { c.doc_index } else { c.doc_index + 1 },
+            },
+            _ => {
+                self.next_doc_seq += 1;
+                HistoryEntry {
+                    url: url.to_string(),
+                    title: String::new(),
+                    doc_seq: next_seq,
+                    doc_index: 0,
+                }
+            }
         };
         if tab.history.is_empty() {
             tab.history.push(entry);
@@ -303,10 +384,12 @@ impl Browser {
             tab.history_index = tab.history.len() - 1;
         }
         tab.url = url.to_string();
-        tab.loading = true;
-        tab.load_started = Some(Instant::now());
-        tab.dom_content_loaded = None;
-        tab.load_finished = None;
+        if !same_doc {
+            tab.loading = true;
+            tab.load_started = Some(Instant::now());
+            tab.dom_content_loaded = None;
+            tab.load_finished = None;
+        }
         tab.send(ToRenderer::Navigate {
             url: url.to_string(),
             method: method.to_string(),
@@ -317,24 +400,41 @@ impl Browser {
 
     pub fn go(&mut self, id: TabId, delta: i32) {
         let Some(tab) = self.tabs.get_mut(&id) else { return };
-        let target = tab.history_index as i64 + delta as i64;
-        if target < 0 || target >= tab.history.len() as i64 || delta == 0 {
-            if delta == 0 {
-                tab.send(ToRenderer::Reload);
-            }
+        if delta == 0 {
+            tab.send(ToRenderer::Reload);
             return;
         }
+        let target = tab.history_index as i64 + delta as i64;
+        if target < 0 || target >= tab.history.len() as i64 {
+            return;
+        }
+        let cur_seq = tab.history[tab.history_index].doc_seq;
         tab.history_index = target as usize;
-        let url = tab.history[tab.history_index].url.clone();
-        tab.url = url.clone();
-        tab.loading = true;
-        tab.load_started = Some(Instant::now());
-        tab.send(ToRenderer::Navigate {
-            url,
-            method: "GET".into(),
-            body: None,
-            content_type: None,
-        });
+        let entry = tab.history[tab.history_index].clone();
+        tab.url = entry.url.clone();
+        if entry.doc_seq == cur_seq {
+            tab.send(ToRenderer::HistoryTraverse {
+                url: entry.url,
+                index: entry.doc_index,
+            });
+        } else {
+            // Loading another document: its old same-document entries become a new one.
+            let new_seq = self.next_doc_seq;
+            self.next_doc_seq += 1;
+            let old_seq = entry.doc_seq;
+            for e in tab.history.iter_mut().filter(|e| e.doc_seq == old_seq) {
+                e.doc_seq = new_seq;
+            }
+            tab.history[tab.history_index].doc_index = 0;
+            tab.loading = true;
+            tab.load_started = Some(Instant::now());
+            tab.send(ToRenderer::Navigate {
+                url: entry.url,
+                method: "GET".into(),
+                body: None,
+                content_type: None,
+            });
+        }
     }
 
     pub fn reload(&mut self, id: TabId) {
@@ -448,6 +548,25 @@ impl Browser {
                         self.go(id, delta);
                         None
                     }
+                    FromRenderer::HistoryPush { url, replace } => {
+                        if let Some(cur) = tab.history.get(tab.history_index).cloned() {
+                            let entry = HistoryEntry {
+                                url: url.clone(),
+                                title: cur.title.clone(),
+                                doc_seq: cur.doc_seq,
+                                doc_index: if replace { cur.doc_index } else { cur.doc_index + 1 },
+                            };
+                            if replace {
+                                tab.history[tab.history_index] = entry;
+                            } else {
+                                tab.history.truncate(tab.history_index + 1);
+                                tab.history.push(entry);
+                                tab.history_index = tab.history.len() - 1;
+                            }
+                        }
+                        tab.url = url.clone();
+                        Some(BrowserEvent::Tab(id, FromRenderer::UrlChanged(url)))
+                    }
                     FromRenderer::Cursor(c) => {
                         tab.cursor = c;
                         Some(BrowserEvent::Tab(id, FromRenderer::Cursor(c)))
@@ -472,9 +591,31 @@ impl Browser {
     }
 
     pub fn shutdown(&mut self) {
-        let ids: Vec<_> = self.order.clone();
-        for id in ids {
-            self.close_tab(id);
+        // Renderers first (they flush localStorage / cookies through the network
+        // service), then the network service.
+        let mut children = Vec::new();
+        for id in self.order.clone() {
+            if let Some(mut tab) = self.tabs.remove(&id) {
+                tab.send(ToRenderer::Shutdown);
+                if let Some(c) = tab.child.take() {
+                    children.push(c);
+                }
+            }
+        }
+        self.order.clear();
+        let deadline = Instant::now() + Duration::from_millis(1500);
+        for mut c in children {
+            loop {
+                if let Ok(Some(_)) = c.try_wait() {
+                    break;
+                }
+                if Instant::now() > deadline {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
         }
         self.net.shutdown_service();
         if let Some(mut child) = self.net_child.take() {
