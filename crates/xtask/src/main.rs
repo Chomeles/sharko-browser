@@ -205,7 +205,7 @@ fn package(args: &[String]) -> Result<()> {
     std::fs::copy(&icu, vdir.join("resources/icudtl.dat"))
         .map_err(|e| format!("{}: {e}", icu.display()))?;
     std::fs::write(stage.join("version"), &version).map_err(|e| e.to_string())?;
-    for f in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.md", "README.md"] {
+    for f in ["LICENSE.md", "THIRD_PARTY_NOTICES.md", "README.md"] {
         let src = root.join(f);
         if src.is_file() {
             std::fs::copy(&src, stage.join(f)).map_err(|e| e.to_string())?;

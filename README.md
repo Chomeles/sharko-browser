@@ -7,7 +7,7 @@
   <a href="../../actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Chomeles/sharko-browser/ci.yml?branch=master&label=CI&style=for-the-badge" alt="CI"></a>
   <img src="https://img.shields.io/badge/language-Rust-dea584?style=for-the-badge&logo=rust" alt="Rust">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-063e6b?style=for-the-badge" alt="Platforms">
-  <img src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-2ea44f?style=for-the-badge" alt="License">
+  <img src="https://img.shields.io/badge/license-source--available-2ea44f?style=for-the-badge" alt="License">
 </p>
 
 <h3 align="center">I didn't like the other browsers.<br>So I made my own. 🦈</h3>
@@ -143,6 +143,11 @@ browser --headless --dump-dom https://example.com
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
-Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your
-option. Third-party components keep their licenses (Stylo and a few others are MPL-2.0, V8 is
+**Source-available, not open source.** You're welcome to read the code, build it, use it
+privately and — most importantly — **help develop it** via issues and pull requests. Forking
+is fine for preparing pull requests, but publishing your own version or using it
+commercially is not allowed. Details: [LICENSE.md](LICENSE.md) (PolyForm Strict 1.0.0 plus a
+contribution permission).
+
+Third-party components keep their own licenses (Stylo and a few others are MPL-2.0, V8 is
 BSD-3-Clause) — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

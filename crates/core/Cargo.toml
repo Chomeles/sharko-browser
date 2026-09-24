@@ -2,7 +2,7 @@
 name = "browser-core"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "All browser code as one shared library, loaded by the launcher"
 
 [lib]

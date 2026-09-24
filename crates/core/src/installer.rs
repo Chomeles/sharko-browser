@@ -116,7 +116,7 @@ fn do_install() -> io::Result<PathBuf> {
     }
     // License texts travel with the program.
     if let Some(src_root) = exe.parent() {
-        for f in ["LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.md"] {
+        for f in ["LICENSE.md", "THIRD_PARTY_NOTICES.md"] {
             let p = src_root.join(f);
             if p.is_file() && src_root != root {
                 let _ = std::fs::copy(&p, root.join(f));

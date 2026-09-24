@@ -2,7 +2,7 @@
 name = "browser-launcher"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "Tiny launcher: picks the installed version and loads the core library"
 
 [[bin]]

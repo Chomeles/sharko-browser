@@ -68,5 +68,7 @@ cargo run -p browser-launcher
 
 ## Lizenz
 
-MIT oder Apache-2.0 (nach Wahl). Fremdkomponenten behalten ihre Lizenzen, siehe
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Quellcode einsehbar, aber nicht frei: Lesen, selbst bauen, privat nutzen und **mitentwickeln**
+(Issues, Pull Requests) ist erwünscht. Eigene Versionen veröffentlichen oder kommerziell nutzen
+ist nicht erlaubt. Details: [LICENSE.md](LICENSE.md). Fremdkomponenten behalten ihre Lizenzen,
+siehe [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -40,4 +40,7 @@ Where things live: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 * User-visible text goes into `resources/locales/*.json`.
 * Run `cargo fmt` before committing.
 
-By contributing you agree that your contributions are licensed under MIT OR Apache-2.0.
+By submitting a contribution you agree to the contribution terms in
+[LICENSE.md](LICENSE.md): the project owner may use, modify and relicense your contribution
+as part of Sharko Browser. Please don't publish separate versions of the browser — send
+your improvements here instead. 🦈
