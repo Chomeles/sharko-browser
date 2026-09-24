@@ -373,7 +373,11 @@
     const prevWrite = writeState;
     L.currentScript = rec.el;
     if (mode === 'parser') { inParserScript = rec; writeState = { anchor: rec.id, stack: [] }; }
-    else if (mode === 'nonblocking') inNonBlockingScript++;
+    // HTML "ignore-destructive-writes counter": while any external script without an
+    // insertion point runs (async/defer, or inserted by another script, e.g. an ad
+    // loader), document.write() must not implicitly reopen and wipe the document.
+    const ignoresWrites = mode === 'nonblocking' || (mode === 'dynamic' && rec.external);
+    if (ignoresWrites) inNonBlockingScript++;
     try {
       N.evalScript(rec.source === null ? '' : rec.source, rec.external ? rec.url : L.documentURL(), !rec.external);
     } catch (e) {
@@ -381,7 +385,7 @@
     } finally {
       L.currentScript = prevScript;
       if (mode === 'parser') { inParserScript = prevParser; lastParserAnchor = writeState.anchor; writeState = prevWrite; }
-      else if (mode === 'nonblocking') inNonBlockingScript--;
+      if (ignoresWrites) inNonBlockingScript--;
     }
     if (rec.external) fireScriptEvent(rec.el, 'load');
   }

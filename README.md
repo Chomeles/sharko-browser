@@ -49,6 +49,32 @@ That's **Sharko**.
 | 📜 **V8 JavaScript** | The same JS engine as Chrome, with startup snapshots — and no JS runtime at all for pages that don't need one. |
 | 🔄 **Signed auto-updates** | ed25519-signed releases via GitHub, installed in the background, active on next start. |
 
+## 🧪 Tested side by side with Chromium
+
+Every change is checked by loading the same real sites in Sharko and in Chromium 141
+(headless, 1280×800, cold cache) and comparing screenshots, page height, element count
+and timings. Current state (median of 3 runs):
+
+| Site | Sharko first frame | Sharko `load` | Chromium first paint | Chromium `load` | Page height Sharko / Chromium |
+|---|---:|---:|---:|---:|---:|
+| Wikipedia (article) | 534 ms | 1131 ms | 644 ms | 1402 ms | 35825 / 34007 px |
+| Hacker News | 537 ms | 681 ms | 452 ms | 612 ms | 1199 / 1179 px |
+| MDN | 321 ms | 771 ms | 856 ms | 1734 ms | 5311 / 5356 px |
+| BBC News | 624 ms | 2192 ms | 388 ms | 5006 ms | 6085 / 6198 px |
+| tagesschau.de | 1130 ms | 2097 ms | 1088 ms | 3520 ms | 19565 / 20998 px |
+| The Guardian | 687 ms | 2710 ms | 708 ms | 13280 ms | 22907 / 23177 px |
+| docs.rs | 451 ms | 702 ms | 468 ms | 952 ms | 973 / 974 px |
+| python.org | 739 ms | 976 ms | 724 ms | 1093 ms | 2583 / 2474 px |
+| lobste.rs | 561 ms | 809 ms | 988 ms | 1066 ms | 1734 / 1778 px |
+| crates.io | 565 ms | 759 ms | 1528 ms | 411 ms | 2693 / 2693 px |
+| Acid3 | 276 ms | 523 ms | 372 ms | 524 ms | — |
+
+Sharko's numbers include starting its processes (Chromium was already running), and
+news sites finish sooner partly because Sharko does not run every ad script to the end.
+DOM micro-benchmark (create/query/traverse/layout, lower is better): Sharko 1250 ms,
+Chromium 410 ms — the remaining gap is mostly `querySelectorAll` and DOM calls crossing
+from JavaScript into Rust.
+
 ## 🧩 Built from the best
 
 | Layer | Component | Origin |
@@ -113,7 +139,8 @@ cargo run -p browser-launcher    # start the browser
 cargo run -p browser-launcher -- --headless --screenshot=out.png https://example.com
 ```
 
-Release package: `cargo build --release -p browser-core -p browser-launcher` then
+`cargo xtask icu` copies V8's ICU data to `resources/` (needed for `Intl` in release
+builds). Release package: `cargo build --release -p browser-core -p browser-launcher` then
 `cargo xtask package --target <triple>`. Releases are built and signed by GitHub Actions
 ([docs/RELEASING.md](docs/RELEASING.md)).
 
@@ -126,6 +153,9 @@ browser --headless --eval="document.title" --console https://example.com
 browser --headless --dump-dom https://example.com
 ```
 
+`BLITZ_VERIFY_INCREMENTAL=1` re-checks every incremental layout pass against a full one
+and reports differences (for layout development).
+
 ## ⌨️ Keyboard shortcuts
 
 `Ctrl+T` new tab · `Ctrl+W` close · `Ctrl+L` address bar · `Ctrl+Tab` next tab ·
@@ -134,7 +164,9 @@ browser --headless --dump-dom https://example.com
 ## 🚧 Known limitations
 
 - No `<canvas>` drawing, video/audio, WebSockets, Web Workers, WebGL yet
-- iframes render but run no JavaScript; Shadow DOM is approximated; no `:has()`;
+- iframes render but run no JavaScript; Shadow DOM is emulated (styles are scoped,
+  declarative shadow roots work, but the shadow tree is part of the normal DOM);
+  `:has()` works in `querySelector`/`matches` but not yet in stylesheets;
   `position: sticky` only vertically
 - No downloads, bookmarks, extensions, password manager yet
 - Bot-protection pages (Cloudflare challenges etc.) may block the browser
