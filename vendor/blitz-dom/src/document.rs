@@ -2296,7 +2296,14 @@ impl BaseDocument {
                         add(x0, y0, x1, y1);
                     }
                     PositionedLayoutItem::InlineBox(inline_box) => {
-                        if !is_in_target(NodeId::from_u64(inline_box.id)) {
+                        // PATCH: margin spacers are never part of a fragment; border/padding
+                        // spacers belong to their element.
+                        use crate::layout::construct::{INLINE_EDGE_SPACER, INLINE_MARGIN_SPACER};
+                        if inline_box.id & INLINE_MARGIN_SPACER != 0 {
+                            continue;
+                        }
+                        let box_id = inline_box.id & !INLINE_EDGE_SPACER;
+                        if !is_in_target(NodeId::from_u64(box_id)) {
                             continue;
                         }
                         let x0 = inline_box.x as f64;

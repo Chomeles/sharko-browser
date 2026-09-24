@@ -79,6 +79,7 @@ struct App {
     renderer_kind: &'static str,
     frames_presented: u64,
     ime_enabled: bool,
+    debug_events: bool,
 }
 
 fn content_viewport(size: PhysicalSize<u32>, scale: f64, zoom: f32) -> ViewportInfo {
@@ -307,6 +308,12 @@ impl App {
     }
 
     fn handle_browser_event(&mut self, ev: BrowserEvent) {
+        if self.debug_events {
+            match &ev {
+                BrowserEvent::Tab(_, FromRenderer::Frame(_)) => {}
+                other => eprintln!("[ui] event {other:?}"),
+            }
+        }
         let active = self.active;
         let Some(ev) = self.browser.process_event(ev) else {
             // Frames are consumed silently; redraw if it was for the visible tab.
@@ -932,6 +939,7 @@ pub fn run(opts: BrowserOptions, start_urls: Vec<String>) -> Result<(), String> 
         renderer_kind: "",
         frames_presented: 0,
         ime_enabled: false,
+        debug_events: std::env::var("BROWSER_DEBUG_EVENTS").is_ok(),
     };
     let _ = Instant::now();
     event_loop.run_app(&mut app).map_err(|e| e.to_string())

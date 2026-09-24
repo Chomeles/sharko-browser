@@ -38,3 +38,4 @@ panic = "unwind"
 # Engine fixes maintained in-tree (see vendor/README.md).
 [patch.crates-io]
 blitz-dom = { path = "vendor/blitz-dom" }
+blitz-paint = { path = "vendor/blitz-paint" }

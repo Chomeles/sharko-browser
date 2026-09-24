@@ -67,6 +67,8 @@ mod tree;
 mod url;
 
 pub use stylo_to_kurbo::resolve_2d_transform;
+/// PATCH: ids of inline "spacer" boxes (see layout/construct.rs).
+pub use crate::layout::construct::{INLINE_EDGE_SPACER, INLINE_MARGIN_SPACER, INLINE_SPACER_FLAG};
 
 pub mod net;
 pub mod util;

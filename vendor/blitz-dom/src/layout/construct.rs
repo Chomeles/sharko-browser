@@ -1010,6 +1010,42 @@ pub(crate) fn find_inline_layout_embedded_boxes(
     }
 }
 
+/// PATCH: id flag for zero-height "spacer" inline boxes that reserve the horizontal
+/// margin + border + padding of inline elements (Parley has no notion of inline-box
+/// edges). Boxes with this flag don't correspond to a node.
+pub const INLINE_SPACER_FLAG: u64 = (1 << 63) | (1 << 62);
+/// PATCH: spacer that covers border + padding (painted with the element's background).
+pub const INLINE_EDGE_SPACER: u64 = 1 << 62;
+/// PATCH: spacer that covers the margin (never painted).
+pub const INLINE_MARGIN_SPACER: u64 = 1 << 63;
+
+/// PATCH: horizontal (start, end) margin + border + padding of an inline element in CSS
+/// px. Percentages resolve to 0 (they'd need the containing block width).
+/// Returns ((margin_start, edge_start), (edge_end, margin_end)).
+fn inline_edge_extents(node: &crate::Node) -> ((f32, f32), (f32, f32)) {
+    use taffy::ResolveOrZero;
+    let Some(s) = node.primary_styles() else {
+        return ((0.0, 0.0), (0.0, 0.0));
+    };
+    let ts = stylo_taffy::to_taffy_style(&s);
+    let m = ts.margin.resolve_or_zero(None, super::resolve_calc_value);
+    let p = ts.padding.resolve_or_zero(None, super::resolve_calc_value);
+    let b = ts.border.resolve_or_zero(None, super::resolve_calc_value);
+    ((m.left, p.left + b.left), (p.right + b.right, m.right))
+}
+
+fn push_spacer(builder: &mut TreeBuilder<TextBrush>, flag: u64, node_id: NodeId, width: f32) {
+    if width > 0.0 {
+        builder.push_inline_box(InlineBox {
+            id: flag | node_id.as_u64(),
+            kind: InlineBoxKind::InFlow,
+            index: 0,
+            width,
+            height: 0.0,
+        });
+    }
+}
+
 pub(crate) fn build_inline_layout_into(
     nodes: &crate::NodeTree,
     layout_ctx: &mut LayoutContext<TextBrush>,
@@ -1082,6 +1118,7 @@ pub(crate) fn build_inline_layout_into(
             collapse_mode,
             text_transform,
             root_line_height,
+            scale,
         );
     }
     for child_id in root_node.children.iter().copied() {
@@ -1093,6 +1130,7 @@ pub(crate) fn build_inline_layout_into(
             collapse_mode,
             text_transform,
             root_line_height,
+            scale,
         );
     }
     if let Some(after_id) = root_node.after() {
@@ -1104,12 +1142,14 @@ pub(crate) fn build_inline_layout_into(
             collapse_mode,
             text_transform,
             root_line_height,
+            scale,
         );
     }
 
     text_layout.text = builder.build_into(&mut text_layout.layout);
     return;
 
+    #[allow(clippy::too_many_arguments)]
     fn build_inline_layout_recursive(
         builder: &mut TreeBuilder<TextBrush>,
         nodes: &crate::NodeTree,
@@ -1118,6 +1158,7 @@ pub(crate) fn build_inline_layout_into(
         collapse_mode: WhiteSpaceCollapse,
         parent_text_transform: TextTransform,
         root_line_height: f32,
+        scale: f32,
     ) {
         let node = &nodes[node_id];
 
@@ -1175,6 +1216,7 @@ pub(crate) fn build_inline_layout_into(
                                 collapse_mode,
                                 text_transform,
                                 root_line_height,
+                                scale,
                             );
                         }
                     }
@@ -1226,6 +1268,12 @@ pub(crate) fn build_inline_layout_into(
 
                             builder.push_style_span(style);
 
+                            // PATCH: reserve inline-start margin/border/padding.
+                            let ((margin_start, edge_start), (edge_end, margin_end)) =
+                                inline_edge_extents(node);
+                            push_spacer(builder, INLINE_MARGIN_SPACER, node_id, margin_start * scale);
+                            push_spacer(builder, INLINE_EDGE_SPACER, node_id, edge_start * scale);
+
                             if let Some(before_id) = node.before() {
                                 build_inline_layout_recursive(
                                     builder,
@@ -1235,6 +1283,7 @@ pub(crate) fn build_inline_layout_into(
                                     collapse_mode,
                                     text_transform,
                                     root_line_height,
+                                    scale,
                                 );
                             }
 
@@ -1247,6 +1296,7 @@ pub(crate) fn build_inline_layout_into(
                                     collapse_mode,
                                     text_transform,
                                     root_line_height,
+                                    scale,
                                 );
                             }
                             if let Some(after_id) = node.after() {
@@ -1258,8 +1308,13 @@ pub(crate) fn build_inline_layout_into(
                                     collapse_mode,
                                     text_transform,
                                     root_line_height,
+                                    scale,
                                 );
                             }
+
+                            // PATCH: reserve inline-end margin/border/padding.
+                            push_spacer(builder, INLINE_EDGE_SPACER, node_id, edge_end * scale);
+                            push_spacer(builder, INLINE_MARGIN_SPACER, node_id, margin_end * scale);
 
                             builder.pop_style_span();
                         }

@@ -290,6 +290,9 @@ impl BaseDocument {
 
         // Update inline boxes
         for ibox in inline_layout.layout.inline_boxes_mut() {
+            if ibox.id & super::construct::INLINE_SPACER_FLAG != 0 {
+                continue; // PATCH: spacer boxes keep their construction-time width
+            }
             let style = self.nodes[NodeId::from_u64(ibox.id)].style();
             let margin = style
                 .margin
@@ -352,6 +355,9 @@ impl BaseDocument {
                     AvailableSpace::MinContent => {
                         let mut width: f32 = 0.0;
                         for ibox in inline_layout.layout.inline_boxes_mut() {
+            if ibox.id & super::construct::INLINE_SPACER_FLAG != 0 {
+                continue; // PATCH: spacer boxes keep their construction-time width
+            }
                             let style = self.nodes[NodeId::from_u64(ibox.id)].style();
 
                             if style.float.is_floated() {
@@ -381,6 +387,9 @@ impl BaseDocument {
                         let mut right_band: f32 = 0.0;
                         let mut width: f32 = 0.0;
                         for ibox in inline_layout.layout.inline_boxes_mut() {
+            if ibox.id & super::construct::INLINE_SPACER_FLAG != 0 {
+                continue; // PATCH: spacer boxes keep their construction-time width
+            }
                             let style = self.nodes[NodeId::from_u64(ibox.id)].style();
                             let float = style.float;
 
@@ -685,6 +694,9 @@ impl BaseDocument {
         for line in inline_layout.layout.lines() {
             for item in line.items() {
                 if let parley::layout::PositionedLayoutItem::InlineBox(ibox) = item {
+                    if ibox.id & super::construct::INLINE_SPACER_FLAG != 0 {
+                        continue; // PATCH: spacer boxes have no node
+                    }
                     let node = &mut self.nodes[NodeId::from_u64(ibox.id)];
                     let padding = node
                         .style()
