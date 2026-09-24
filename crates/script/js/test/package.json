@@ -1,0 +1,18 @@
+{
+  "name": "browser-js-layer-tests",
+  "private": true,
+  "description": "Node test harness for the JS DOM/Web-API layer (mock __native)",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "dependencies": {
+    "css-select": "^5.2.2",
+    "esbuild": "^0.28.2",
+    "jquery": "^3.7.1",
+    "parse5": "^7.3.0",
+    "preact": "^10.29.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "vue": "^3.5.43"
+  }
+}

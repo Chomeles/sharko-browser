@@ -227,3 +227,81 @@ After `onDocumentParsed`:
    already-started script does nothing. Scripts inserted via `innerHTML` never execute.
 8. Script errors must not stop the loop: catch, report via `N.log("error", …)` with stack,
    dispatch an `ErrorEvent` on window (`window.onerror` support), continue.
+
+## Additions (requested by JS layer)
+
+Everything here is optional unless noted. JS feature-detects each native with
+`typeof N.x === 'function'` and has a fallback. Existing semantics above are unchanged.
+
+### Natives
+| function | semantics (fallback when absent) |
+|---|---|
+| `N.historyIndex()` / `N.historyLength()` | index of the current session-history entry (0-based) / number of entries. JS keys `pushState` states by index. (JS counters) |
+| `N.referrer()` | `document.referrer`. Read lazily, never while the layer loads. (`""`) |
+| `N.openWindow(url, target, features)` | `window.open` for a new top-level context (a target other than `_self`/`_top`/`_parent`/own name). `javascript:` URLs are never passed. The page gets `null`. (no-op) |
+| `N.imageSize(id)` | `[naturalWidth, naturalHeight]` of a decoded `<img>`, or `null`. (layout size once `load` was seen) |
+| `N.parseHTMLDocument(html)` | id of a new detached DocumentFragment with the parsed document's children (`<html>` with `<head>`/`<body>`; no doctype node, JS adds one). Scripting disabled; template contents are in their content fragments. JS wraps it as a Document (DOMParser, `createHTMLDocument`). (JS builds html/head/body and uses `setInnerHTML`) |
+| `N.registerBlobURL(url, arrayBuffer, type)` / `N.revokeBlobURL(url)` | mirror of `URL.createObjectURL`/`revokeObjectURL`, so Rust can load `blob:` URLs in `src`/`href`. fetch/XHR of `blob:` stay in JS. |
+| `N.fetchSync(method, url, headersFlat, bodyOrNull, credentials)` | synchronous request for sync XHR. Returns `[status, statusText, finalUrl, headersFlat, bodyArrayBuffer\|null, errorOrNull]`; status 0 + error if unsupported. (sync XHR throws `InvalidAccessError`) |
+| `N.clipboardWrite(text)` | `navigator.clipboard.writeText`. |
+| `N.doctype()` | `[name, publicId, systemId]` of the main document's `<!DOCTYPE>` as parsed, or `null` if the source had none (then JS reports quirks mode). The Rust DOM has no DocumentType nodes, so at `onDocumentParsed` JS inserts a comment-backed DocumentType before `<html>`. It does the same for DOMParser and `createHTMLDocument` documents, reading the doctype from the markup there. (`<!DOCTYPE html>` assumed) |
+| `N.fetch(reqId, method, url, headersFlat, body, mode, credentials, cache, redirect)` | trailing args added to `N.fetch`. `credentials`: `"omit"`, `"same-origin"` (default) or `"include"`. `cache`: a RequestCache value. `redirect`: `"follow"`, `"error"` or `"manual"`. For `"error"` and `"manual"` Rust does not follow; on a 3xx JS rejects (`"error"`) or returns an `opaqueredirect` Response (`"manual"`). What JS passes: `fetch()` uses the Request's values; XHR sends `include` if `withCredentials`, else `same-origin`; classic scripts send `include` (no `crossorigin` or `use-credentials`) or `same-origin` (anonymous); `sendBeacon` sends `include`. |
+| `N.templateContent(id)` | (Rust addition) id of a `<template>`'s content fragment, created on demand. Native innerHTML/outerHTML/setInnerHTML/cloneNode treat it as the template's contents. After every parse, JS calls it for each `<template>`, so parsed contents that a native left as children get moved. (JS-side fragments; native serialization then cannot see them) |
+| `N.setIndeterminate(id, bool)` | (Rust addition) mirrors `input.indeterminate` for `:indeterminate` matching. |
+| `N.urlSet(href, field, value)` | (Rust addition) urlParse-style components after applying a WHATWG URL setter; used by `URL`/`Location`/`<a>` setters. (JS approximation) |
+
+### Hooks (registered through `N.setHooks`, called by Rust)
+| hook | when / what JS does |
+|---|---|
+| `onElementEvent(id, type)` | `"load"`/`"error"` of an element's subresource (img, stylesheet link, …). JS fires the non-bubbling event on the element; an img also updates `complete`/`naturalWidth`. |
+| `onPopState(url, index)` | Rust changed the document URL through a same-document fragment navigation it performed (called synchronously, after the new history entry) or through a host-driven traversal. JS fires `popstate` with the state stored for `index`, and queues `hashchange` if only the fragment changed. Rust never fires `hashchange`. |
+| `onUnhandledRejection(promise, reason)` | end of a task, after the microtask checkpoint. JS fires the cancelable `unhandledrejection` and logs `Uncaught (in promise) …` unless it was canceled. Rust does not log when this hook is registered. |
+| `onRejectionHandled(promise, reason)` | queued as a task. JS fires `rejectionhandled`. |
+| `onError(msg, file, line, col, error)` | an uncaught exception reached Rust, which already logged it. JS dispatches the window `ErrorEvent` (`window.onerror`) and does not log. Not used for `N.evalScript`: JS catches the rethrown exception and dispatches the event itself. |
+
+### `onEvent`: return flag 4 and the default-action split
+Return value: `1` = canceled, `2` = propagation stopped, **`4` = the JS layer performed the
+default/activation behaviour itself, so Rust must not run its own**.
+
+* **JS does it and returns 4:**
+  * **Click on a checkbox or radio.** Legacy pre-activation happens inside JS's dispatch, so Rust must not toggle anything before calling `onEvent`. After dispatch JS fires `input` and `change`; on a canceled click it restores the old state.
+  * **Click on a `<label>`.** JS focuses the control and forwards the click to it.
+  * **Click on a submit or reset button**, including `<input type=image>`. JS runs constraint validation, fires `submit` (a SubmitEvent), then calls `N.submitForm`, or does the reset.
+  * **Click on a `<summary>`.** JS toggles the parent `<details>` `open` attribute and fires `toggle`.
+  * **Click on a `javascript:` hyperlink.** JS runs the script.
+  * **Not-canceled `keydown` Enter in a text-like `<input>` that has a form owner.** JS does implicit submission.
+* **Rust does it when the event was not canceled and flag 4 is not set:**
+  * following `<a>`/`<area>` hyperlinks (target and modifier keys)
+  * pickers for file/color/date inputs
+  * text editing and caret
+  * focus on pointerdown
+  * scrolling and Tab navigation
+  * keyboard activation (Enter/Space become a trusted `click` through `onEvent`)
+  * `change` on blur for edited text controls
+* **Synthetic clicks** (`el.click()`, `dispatchEvent(new MouseEvent('click'))`): JS performs activation. It calls `N.runDefaultAction(id, "click")` only for untrusted clicks on hyperlinks and on file/color/date inputs.
+* **New `init` field:** `submitterId` on `submit` becomes `SubmitEvent.submitter` (like `relatedTargetId` → `relatedTarget`). `submit` gets SubmitEvent, `toggle`/`beforetoggle` get ToggleEvent.
+
+### Focus
+`N.focus`/`N.blur` may dispatch `blur`/`focusout`/`focus`/`focusin` synchronously through
+`onEvent`, as the Rust natives do. JS counts focus events that arrive during the call and fires
+them itself only if none arrived. `N.activeElement()` must reflect the change immediately.
+
+### Load-time purity (startup snapshot)
+While the layer files run, JS calls only these natives: `documentId`, `setHooks`, `log`, `urlParse`,
+`urlSet`, `textEncode`, `textDecode`, `structuredClone`, `cssSupports`, `compileFunction`
+(`typeof` probes are fine). It never calls `Date.now`/`Math.random`, and no Map/Set/WeakMap/WeakSet
+keyed by `globalThis` survives the load. Page-specific values are read lazily. `js/test` enforces this
+(`00_smoke.test.js`).
+
+### Other behaviour the layer relies on
+* **Timers:** `N.setTimer` callbacks with equal due times fire in registration order (FIFO). 0 ms timers are the JS task queue.
+* **Microtasks:** there is a microtask checkpoint after every hook invocation.
+* **Node ids:** never reused. JS caches wrappers by id for the page's lifetime and does not call `N.releaseNode`.
+* **`pathIds`:** run from the target up to and including the document. JS appends `window`.
+* **Id kinds:** `querySelector(All)`, `innerHTML`, `textContent` and `childIds` accept document and fragment ids.
+* **`setInnerHTML`** works on detached elements. JS parses table/select/template-context fragments through a detached context element.
+* **`<style>`** text changes made through `setText`, `setTextContent` or child insertion re-parse the sheet.
+* **DocumentType nodes** are native Comment nodes that JS types as 10. The main document gets one as its first child at `onDocumentParsed`, so the document can have a comment child before `<html>`.
+* **Selector matching** uses live state: `:checked` (options included), `:indeterminate`, `:disabled`, `:focus`, and so on.
+* **`N.evalScript`:** Rust logs the exception and rethrows. JS dispatches the `ErrorEvent` without logging.
+* **Same-document navigations started from JS** (`location.hash`, `location.href = '#x'`): JS does them itself with `N.historyPush` plus `N.scrollIntoView`/`N.scrollTo`. `N.navigate` is only used for cross-document navigations.
