@@ -267,6 +267,10 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
             .lcx
             .tree_style_builder
             .finish(&mut self.lcx.style_table, &mut self.lcx.style_runs);
+        // PATCH: trailing spaces may have been removed after (transparent) inline boxes.
+        for inline_box in self.lcx.inline_boxes.iter_mut() {
+            inline_box.index = inline_box.index.min(text.len());
+        }
 
         // Call generic layout builder method
         build_into_layout(

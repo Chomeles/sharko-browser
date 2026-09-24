@@ -553,15 +553,116 @@ fn selector_list(
     if let Some(l) = st.selector_cache.borrow().get(sel) {
         return Ok(l.clone());
     }
-    let list = doc
-        .try_parse_selector_list(sel)
-        .map_err(|_| JsErr::dom("SyntaxError", format!("'{sel}' is not a valid selector")))?;
+    let list = parse_dom_selector_list(doc, sel)
+        .ok_or_else(|| JsErr::dom("SyntaxError", format!("'{sel}' is not a valid selector")))?;
     let mut cache = st.selector_cache.borrow_mut();
     if cache.len() >= 256 {
         cache.clear();
     }
     cache.insert(sel.to_string(), list.clone());
     Ok(list)
+}
+
+/// Parse a selector list for the DOM selector APIs (`querySelector*`, `matches`,
+/// `closest`). Stylo's Servo parser disables `:has()` and `:nth-child(An+B of S)` (they
+/// need style invalidation support); for one-off matching against the live tree they
+/// work, so this parser enables them and delegates everything else.
+fn parse_dom_selector_list(doc: &BaseDocument, sel: &str) -> Option<blitz_dom::SelectorList> {
+    use style::selector_parser::SelectorParser;
+    use style::stylesheets::{Namespaces, Origin, UrlExtraData};
+    let namespaces = Namespaces::default();
+    let url_data = UrlExtraData::from(doc.url().clone());
+    let parser = DomSelectorParser(SelectorParser {
+        stylesheet_origin: Origin::Author,
+        namespaces: &namespaces,
+        url_data: &url_data,
+        for_supports_rule: false,
+    });
+    let mut input = cssparser::ParserInput::new(sel);
+    selectors::SelectorList::parse(
+        &parser,
+        &mut cssparser::Parser::new(&mut input),
+        selectors::parser::ParseRelative::No,
+    )
+    .ok()
+}
+
+struct DomSelectorParser<'a>(style::selector_parser::SelectorParser<'a>);
+
+impl<'a, 'i> selectors::parser::Parser<'i> for DomSelectorParser<'a> {
+    type Impl = style::selector_parser::SelectorImpl;
+    type Error = style_traits::StyleParseErrorKind<'i>;
+
+    fn parse_has(&self) -> bool {
+        true
+    }
+    fn parse_nth_child_of(&self) -> bool {
+        true
+    }
+    fn parse_is_and_where(&self) -> bool {
+        self.0.parse_is_and_where()
+    }
+    fn parse_parent_selector(&self) -> bool {
+        self.0.parse_parent_selector()
+    }
+    fn parse_part(&self) -> bool {
+        self.0.parse_part()
+    }
+    fn parse_host(&self) -> bool {
+        self.0.parse_host()
+    }
+    fn parse_slotted(&self) -> bool {
+        self.0.parse_slotted()
+    }
+    fn allow_forgiving_selectors(&self) -> bool {
+        self.0.allow_forgiving_selectors()
+    }
+    fn is_is_alias(&self, name: &str) -> bool {
+        self.0.is_is_alias(name)
+    }
+    fn parse_non_ts_pseudo_class(
+        &self,
+        location: cssparser::SourceLocation,
+        name: cssparser::CowRcStr<'i>,
+    ) -> Result<
+        style::selector_parser::NonTSPseudoClass,
+        cssparser::ParseError<'i, Self::Error>,
+    > {
+        self.0.parse_non_ts_pseudo_class(location, name)
+    }
+    fn parse_non_ts_functional_pseudo_class<'t>(
+        &self,
+        name: cssparser::CowRcStr<'i>,
+        parser: &mut cssparser::Parser<'i, 't>,
+        after_part: bool,
+    ) -> Result<
+        style::selector_parser::NonTSPseudoClass,
+        cssparser::ParseError<'i, Self::Error>,
+    > {
+        self.0.parse_non_ts_functional_pseudo_class(name, parser, after_part)
+    }
+    fn parse_pseudo_element(
+        &self,
+        location: cssparser::SourceLocation,
+        name: cssparser::CowRcStr<'i>,
+    ) -> Result<style::selector_parser::PseudoElement, cssparser::ParseError<'i, Self::Error>>
+    {
+        self.0.parse_pseudo_element(location, name)
+    }
+    fn parse_functional_pseudo_element<'t>(
+        &self,
+        name: cssparser::CowRcStr<'i>,
+        arguments: &mut cssparser::Parser<'i, 't>,
+    ) -> Result<style::selector_parser::PseudoElement, cssparser::ParseError<'i, Self::Error>>
+    {
+        self.0.parse_functional_pseudo_element(name, arguments)
+    }
+    fn default_namespace(&self) -> Option<style::Namespace> {
+        self.0.default_namespace()
+    }
+    fn namespace_for_prefix(&self, prefix: &style::Prefix) -> Option<style::Namespace> {
+        self.0.namespace_for_prefix(prefix)
+    }
 }
 
 /// Selector matching over a subtree in tree order. blitz's `TNode::next_sibling`

@@ -1300,6 +1300,12 @@ fn perform_final_layout_on_in_flow_children(
 
             #[cfg(feature = "float_layout")]
             let clear_threshold = block_ctx.cleared_threshold(item.clear);
+            // PATCH: whether floats adjoining the current strut force clearance must be decided
+            // before laying out the item: the item's own floats (merged into `block_ctx` below)
+            // must not force clearance on the item itself, which moved a cleared block up to the
+            // bottom of earlier floats, over the preceding sibling (python.org's slideshow).
+            #[cfg(feature = "float_layout")]
+            let forced_clearance = block_ctx.has_adjoining_float(item.clear);
             #[cfg(feature = "float_layout")]
             let clear_pos = clear_threshold.unwrap_or(f32::NEG_INFINITY);
             #[cfg(not(feature = "float_layout"))]
@@ -1402,7 +1408,6 @@ fn perform_final_layout_on_in_flow_children(
                     // adjoining the margin-collapse strut that the item's top margin would collapse into:
                     // if the margins were allowed to collapse they would pull the float down with the item,
                     // so clearance is inserted to separate the two, placing the item just below the float.
-                    let forced_clearance = block_ctx.has_adjoining_float(item.clear);
                     if forced_clearance || hypothetical_y < threshold {
                         has_clearance = true;
                         // Clearance stops the item's top margin collapsing with preceding margins. If those

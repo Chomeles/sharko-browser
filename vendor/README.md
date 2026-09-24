@@ -41,3 +41,14 @@ Patches so far:
     and for `sticky` (applied at paint time) instead of acting as relative offsets.
 14. `blitz-dom/src/layout/construct.rs`, `document.rs`: empty inline elements get a
     zero-width box, so they have a position (`getClientRects()`, IntersectionObserver).
+15. `blitz-dom/src/font_defaults.rs`, `stylo_to_parley.rs`: browser default fonts
+    (`sans-serif` → Arial, `serif` → Times New Roman) and metric-compatible substitutes
+    (Liberation/Croscore) for missing Arial, Helvetica, Times, Courier.
+16. `blitz-dom/src/net.rs`: `@font-face` `format()` strings (`'woff'`,
+    `'embedded-opentype'`, …) and URL extensions with `?query#fragment`: the bulletproof
+    `url(f.eot?#iefix) format('embedded-opentype'), url(f.woff)` syntax loaded the EOT.
+17. `parley/src/resolve/tree.rs`: collapsible spaces at the end of the paragraph are
+    removed even inside an inline element (no empty line for a trailing space).
+18. `taffy/src/compute/block.rs`: an item's own floats no longer force clearance on it;
+    `taffy/src/compute/float.rs`: floats fit with 1/64 px tolerance (percentage columns
+    that add up to 100%).

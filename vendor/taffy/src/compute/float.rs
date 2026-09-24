@@ -133,11 +133,17 @@ fn float_fits_horizontally(
     float_insets: [f32; 2],
     cb_insets: [f32; 2],
 ) -> bool {
+    // PATCH: tolerate rounding error of one LayoutUnit (1/64 px, the precision browsers lay
+    // out with): percentage columns that add up to exactly 100% (e.g. 4 × 23.40426% +
+    // 3 × 2.12766%) must fit side by side instead of the last float dropping below.
+    const EPSILON: f32 = 1.0 / 64.0;
     let lead = direction as usize;
     let trail = 1 - lead;
     let x_inset = float_insets[lead].max(cb_insets[lead]);
-    let fits_opposite_floats = float_insets[trail] == 0.0 || x_inset + width <= bfc_width - float_insets[trail];
-    let fits_containing_block = float_insets[lead] == 0.0 || x_inset + width <= bfc_width - cb_insets[trail];
+    let fits_opposite_floats =
+        float_insets[trail] == 0.0 || x_inset + width <= bfc_width - float_insets[trail] + EPSILON;
+    let fits_containing_block =
+        float_insets[lead] == 0.0 || x_inset + width <= bfc_width - cb_insets[trail] + EPSILON;
     fits_opposite_floats && fits_containing_block
 }
 

@@ -560,7 +560,11 @@ impl Renderer {
             Arc::new(move || waker_shared.wake()),
         );
         if self.font_ctx.is_none() {
-            self.font_ctx = Some(FontContext::default());
+            let mut font_ctx = FontContext::default();
+            // Arial/Times New Roman defaults and metric-compatible substitutes, as in
+            // other browsers (page layouts depend on these metrics).
+            blitz_dom::apply_web_font_defaults(&mut font_ctx);
+            self.font_ctx = Some(font_ctx);
         }
         let mut config = DocumentConfig {
             viewport: Some(self.viewport()),

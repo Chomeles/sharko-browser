@@ -65,6 +65,11 @@ pub(crate) fn query_font_family(input: &stylo::SingleFontFamily) -> parley::Quer
                     break 'ret parley::QueryFamily::Generic(parley::GenericFamily::SystemUi);
                 }
 
+                // PATCH: metric-compatible substitute for a missing Arial/Times/…
+                if let Some(alias) = crate::font_defaults::family_alias(name) {
+                    break 'ret parley::QueryFamily::Named(alias);
+                }
+
                 break 'ret parley::QueryFamily::Named(name);
             }
         }
@@ -345,6 +350,11 @@ pub(crate) fn style(
                         break 'ret parley::FontFamilyName::Generic(
                             parley::GenericFamily::SystemUi,
                         );
+                    }
+
+                    // PATCH: metric-compatible substitute for a missing Arial/Times/…
+                    if let Some(alias) = crate::font_defaults::family_alias(name) {
+                        break 'ret parley::FontFamilyName::Named(Cow::Borrowed(alias));
                     }
 
                     break 'ret parley::FontFamilyName::Named(Cow::Owned(name.to_string()));

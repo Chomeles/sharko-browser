@@ -1556,3 +1556,26 @@ fn natives_never_panic_on_garbage() {
         e.host.errors()
     );
 }
+
+#[test]
+fn selectors_has_and_nth_child_of() {
+    let mut e = env();
+    // `:has()` (relative selectors) and `:nth-child(An+B of S)` in the DOM selector APIs.
+    assert_eq!(
+        e.eval("N.querySelectorAll(N.documentId(), 'div:has(> #s2)').map(id => N.getAttr(id, 'id'))"),
+        "[\"a\"]"
+    );
+    assert_eq!(e.eval("N.querySelectorAll(N.documentId(), 'p:has(b), ul:has(li:nth-child(3))').length"), "2");
+    assert_eq!(e.eval("N.querySelectorAll(N.documentId(), 'body > :has(+ p)').length"), "1");
+    assert_eq!(e.eval("N.matches(N.getElementById('a'), ':has(span)')"), "true");
+    assert_eq!(e.eval("N.matches(N.getElementById('p'), ':has(span)')"), "false");
+    assert_eq!(
+        e.eval("N.getAttr(N.closest(N.getElementById('s1'), ':has(> span + span)'), 'id')"),
+        "\"a\""
+    );
+    assert_eq!(
+        e.eval("N.textContent(N.querySelector(N.documentId(), 'span:nth-child(1 of #s2, #s1)'))"),
+        "\"one\""
+    );
+    assert_eq!(e.eval("try { N.querySelector(N.documentId(), 'div:has(') } catch (e) { 'threw' }"), "\"threw\"");
+}

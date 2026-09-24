@@ -33,6 +33,8 @@ pub(crate) struct TreeStyleBuilder<B: Brush> {
     uncommitted_text: String,
     current_span: usize,
     is_span_first: bool,
+    /// PATCH: whether the last committed text run was in `WhiteSpaceCollapse::Collapse`.
+    last_run_collapsible: bool,
     last_item_kind: ItemKind,
 }
 
@@ -53,6 +55,7 @@ impl<B: Brush> Default for TreeStyleBuilder<B> {
             uncommitted_text: String::new(),
             current_span: usize::MAX,
             is_span_first: false,
+            last_run_collapsible: false,
             last_item_kind: ItemKind::None,
         }
     }
@@ -79,6 +82,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
         self.is_span_first = true;
         // PATCH: don't carry the last item kind over from a previous layout.
         self.last_item_kind = ItemKind::TextRun;
+        self.last_run_collapsible = false;
     }
 
     pub(crate) fn set_white_space_mode(&mut self, white_space_collapse: WhiteSpaceCollapse) {
@@ -151,6 +155,7 @@ impl<B: Brush> TreeStyleBuilder<B> {
         self.text.push_str(&span_text);
         self.is_span_first = false;
         self.last_item_kind = ItemKind::TextRun;
+        self.last_run_collapsible = matches!(self.white_space_collapse, WhiteSpaceCollapse::Collapse);
     }
 
     fn resolve_current_style_id(&mut self) -> u16 {
@@ -218,6 +223,20 @@ impl<B: Brush> TreeStyleBuilder<B> {
         }
 
         self.push_uncommitted_text(true);
+
+        // PATCH: collapsible spaces at the end of the paragraph are removed even when they
+        // were committed inside an inline element (`<span>x </span>` at the end): left in,
+        // a space that doesn't fit would start an empty line.
+        if self.last_item_kind == ItemKind::TextRun && self.last_run_collapsible {
+            let trimmed_len = self.text.trim_end_matches(|c: char| c.is_ascii_whitespace()).len();
+            if trimmed_len < self.text.len() {
+                self.text.truncate(trimmed_len);
+                self.style_runs.retain_mut(|run| {
+                    run.range.end = run.range.end.min(trimmed_len);
+                    run.range.start < run.range.end
+                });
+            }
+        }
 
         style_table.clear();
         style_runs.clear();

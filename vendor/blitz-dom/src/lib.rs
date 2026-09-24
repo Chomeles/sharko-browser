@@ -55,6 +55,8 @@ mod resolve;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
 pub mod shadow_css;
+mod font_defaults;
+pub use font_defaults::apply_web_font_defaults;
 mod selection;
 /// Implementations that interact with servo's style engine
 mod stylo;
