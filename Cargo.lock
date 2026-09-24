@@ -223,6 +223,7 @@ dependencies = [
  "engine",
  "env_logger",
  "shell",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -1,3 +1,7 @@
+// A GUI app on Windows: no console window when started from Explorer. Headless mode
+// re-attaches to the console of the terminal it was started from (see `attach_console`).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 //! Entry point. One executable, several process roles (like Chromium):
 //!
 //! * no `--type`            → browser process (window UI, or `--headless`)
@@ -32,10 +36,26 @@ Common options:
   --no-js                   disable JavaScript
   --profile=DIR             profile directory (cookies, cache, storage)
   --verbose                 verbose logging
+  --cpu                     render the UI on the CPU (no GPU)
 ";
+
+#[cfg(windows)]
+fn attach_console() {
+    // Reuse the parent terminal's console so --headless / --help output is visible.
+    unsafe {
+        windows_sys::Win32::System::Console::AttachConsole(
+            windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS,
+        );
+    }
+}
+#[cfg(not(windows))]
+fn attach_console() {}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--headless" || a == "--help" || a.starts_with("--type=")) {
+        attach_console();
+    }
     let get = |name: &str| -> Option<String> {
         let prefix = format!("--{name}=");
         args.iter().find_map(|a| a.strip_prefix(&prefix).map(|s| s.to_string()))
@@ -136,6 +156,10 @@ fn main() {
         .filter(|a| !a.starts_with("--"))
         .map(|u| normalize_url(u))
         .collect();
+    if has("cpu") {
+        // SAFETY: single-threaded at this point.
+        unsafe { std::env::set_var("BROWSER_RENDERER", "cpu") };
+    }
     if let Err(e) = shell::run(bopts, urls) {
         eprintln!("browser: {e}");
         std::process::exit(1);

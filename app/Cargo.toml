@@ -13,3 +13,6 @@ shell = { path = "../crates/shell" }
 engine = { path = "../crates/engine" }
 common = { path = "../crates/common" }
 env_logger = { version = "0.11", default-features = false, features = ["auto-color"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }

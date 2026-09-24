@@ -263,12 +263,18 @@ pub fn spawn_child(
     extra_args: &[String],
 ) -> io::Result<std::process::Child> {
     let exe = std::env::current_exe()?;
-    std::process::Command::new(exe)
-        .arg(format!("--type={process_type}"))
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg(format!("--type={process_type}"))
         .arg(format!("--ipc={endpoint}"))
         .args(extra_args)
-        .stdin(std::process::Stdio::null())
-        .spawn()
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.spawn()
 }
 
 #[cfg(test)]
