@@ -13,7 +13,7 @@ mod installer;
 
 use browser::headless::{HeadlessOptions, run_headless};
 use browser::{BrowserOptions, default_profile_dir};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Version of this build (`CARGO_PKG_VERSION`).
@@ -80,13 +80,58 @@ fn attach_console() {
 #[cfg(not(windows))]
 fn attach_console() {}
 
+/// Directory of the launcher executable.
+fn app_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+/// Portable mode: a file named `portable` next to the launcher keeps the profile
+/// (cookies, cache, logs) in a `profile` folder beside it instead of the user's AppData.
+fn portable_profile_dir() -> Option<PathBuf> {
+    let dir = app_dir()?;
+    dir.join("portable").is_file().then(|| dir.join("profile"))
+}
+
+/// Windows GUI processes have no stderr: send log output (of this process and, through
+/// inherited handles, of its renderer/network processes) to `<profile>/logs/browser.log`.
+/// The previous run's log is kept as `browser.old.log`. The startup timeline is always
+/// recorded there (a few lines; helps diagnosing slow starts on other machines).
+#[cfg(windows)]
+fn log_to_file(profile: &Path) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Console::{STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle};
+    let dir = profile.join("logs");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("browser.log");
+    let _ = std::fs::rename(&path, dir.join("browser.old.log"));
+    let Ok(file) = std::fs::File::create(&path) else { return };
+    let handle = file.as_raw_handle();
+    // The file stays open for the lifetime of the process.
+    std::mem::forget(file);
+    // SAFETY: `handle` is a valid, open file handle that is never closed.
+    unsafe {
+        SetStdHandle(STD_ERROR_HANDLE, handle);
+        SetStdHandle(STD_OUTPUT_HANDLE, handle);
+    }
+    common::trace::enable();
+    if std::env::var_os("BROWSER_TRACE_STARTUP").is_none() {
+        // SAFETY: still single-threaded (nothing has been started yet); child processes
+        // inherit the variable and trace into the same log.
+        unsafe { std::env::set_var("BROWSER_TRACE_STARTUP", "1") };
+    }
+}
+
 /// Run the browser with the process command line; returns the exit code.
 pub fn run() -> i32 {
+    common::trace::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| {
+    let console_command = args.iter().any(|a| {
         a == "--headless" || a == "--help" || a == "--version" || a.starts_with("--type=")
             || a == "--install" || a == "--uninstall" || a == "--check-update"
-    }) {
+    });
+    if console_command {
         attach_console();
     }
     let get = |name: &str| -> Option<String> {
@@ -95,6 +140,15 @@ pub fn run() -> i32 {
     };
     let has = |name: &str| args.iter().any(|a| a == &format!("--{name}"));
     let verbose = has("verbose");
+    let profile_dir = get("profile")
+        .map(PathBuf::from)
+        .or_else(portable_profile_dir)
+        .unwrap_or_else(default_profile_dir);
+    #[cfg(windows)]
+    if !console_command {
+        log_to_file(&profile_dir);
+    }
+    common::trace::mark("core: start");
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(if verbose {
         "info"
@@ -111,8 +165,7 @@ pub fn run() -> i32 {
         }
         Some("network") => {
             let Some(ep) = get("ipc") else { return 2 };
-            let profile = get("profile").map(PathBuf::from).unwrap_or_else(default_profile_dir);
-            browser::network_main(&ep, profile);
+            browser::network_main(&ep, profile_dir);
             return 0;
         }
         Some(other) => {
@@ -145,7 +198,7 @@ pub fn run() -> i32 {
 
     let bopts = BrowserOptions {
         single_process: has("single-process"),
-        profile_dir: get("profile").map(PathBuf::from).unwrap_or_else(default_profile_dir),
+        profile_dir,
         javascript: !has("no-js"),
         verbose,
         app_version: VERSION.to_string(),

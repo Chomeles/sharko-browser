@@ -45,7 +45,33 @@ browser ──ToRenderer/FromRenderer──► renderer (per tab)
    the browser UI.
 
 Frames are produced at most every 16.7 ms, and every 100 ms while a page is still loading
-(style work is batched during load).
+(style work is batched during load) unless the user is interacting with it. Pointer moves
+are coalesced to one per UI event-loop turn and only cause a new frame when something
+changed (hover state, script mutations).
+
+## Startup
+
+The window appears together with its first frame, and the UI thread never waits for
+other processes or the GPU:
+
+1. The browser process starts the network process and continues immediately: IPC
+   messages are queued until a child connects (`ipc::connect_in_background`,
+   `IpcListener::accept_in_background`). The same applies to renderer processes.
+2. The window is created hidden. The GPU compositor — wgpu instance, adapter, device,
+   Vello's compute pipelines and a warm-up frame — initialises on a background thread.
+   Vulkan pipelines are cached in `<profile>/GPUCache`.
+3. Meanwhile the browser UI document is styled and laid out and the first tab's renderer
+   starts.
+4. The window is shown with the GPU if it is ready within 250 ms, otherwise with frames
+   rendered by vello_cpu; the GPU takes over once ready. On Windows the window is shown
+   *cloaked* and uncloaked after the first present (no white flash).
+5. Software adapters (WARP, llvmpipe, SwiftShader) are not used: vello_cpu is faster than
+   Vello's compute pipeline on an emulated GPU. If GPU initialisation crashes the
+   process, the next start renders on the CPU (`GPUCache/init-pending`, expires after a
+   week).
+
+`BROWSER_TRACE_STARTUP=1` prints the timeline, UI-thread stalls and paint rates; on
+Windows the windowed browser always writes it to `<profile>/logs/browser.log`.
 
 ## Updates
 

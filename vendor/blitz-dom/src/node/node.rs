@@ -110,6 +110,9 @@ pub struct Node {
     pub anonymous_blocks: ThinVec<NodeId>,
     /// The same as layout_children, but sorted by z-index
     pub paint_children: RefCell<Option<ThinVec<NodeId>>>,
+    /// PATCH: offset (CSS px) applied to a `position: sticky` box during the last paint,
+    /// so hit testing matches what is on screen.
+    pub sticky_offset: Cell<(f32, f32)>,
     pub stacking_context: Option<Box<HoistedPaintChildren>>,
 
     // Flags
@@ -297,6 +300,7 @@ impl Node {
             anonymous_blocks: ThinVec::new(),
             paint_children: RefCell::new(None),
             stacking_context: None,
+            sticky_offset: Cell::new((0.0, 0.0)),
 
             flags: NodeFlags::empty(),
             data,
@@ -1206,8 +1210,10 @@ impl Node {
             .primary_styles()
             .is_some_and(|style| style.clone_pointer_events() == PointerEvents::None);
 
-        let mut x = x - self.final_layout().location.x + self.scroll_offset().x as f32;
-        let mut y = y - self.final_layout().location.y + self.scroll_offset().y as f32;
+        // PATCH: include the paint-time offset of `position: sticky` boxes.
+        let (sticky_x, sticky_y) = self.sticky_offset.get();
+        let mut x = x - self.final_layout().location.x - sticky_x + self.scroll_offset().x as f32;
+        let mut y = y - self.final_layout().location.y - sticky_y + self.scroll_offset().y as f32;
 
         if let Some(t) = *self.transform() {
             let p = t.inverse() * kurbo::Point::new(x as f64 * scale, y as f64 * scale);

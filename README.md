@@ -25,6 +25,9 @@ yet.)*
 2. Unzip anywhere and run `browser.exe` — or run `browser.exe --install` for a per-user
    installation with Start menu shortcut and automatic updates.
 
+Portable mode: an empty file named `portable` next to `browser.exe` keeps the profile
+(cookies, cache, logs) in a `profile` folder beside it instead of `%LOCALAPPDATA%`.
+
 Updates are downloaded in the background, verified (ed25519 signature + SHA-256) and become
 active on the next start.
 
@@ -76,7 +79,8 @@ browser --headless --dump-dom https://example.com
 ## Known limitations
 
 - No `<canvas>` drawing, video/audio, WebSockets, Web Workers, WebGL yet
-- iframes render but run no JavaScript; Shadow DOM is approximated; no `:has()`, no `position: sticky`
+- iframes render but run no JavaScript; Shadow DOM is approximated; no `:has()`;
+  `position: sticky` only vertically
 - No downloads, bookmarks, extensions, password manager yet
 - Bot-protection pages (Cloudflare challenges etc.) may block the browser
 

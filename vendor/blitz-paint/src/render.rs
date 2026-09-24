@@ -284,6 +284,63 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
     ///
     /// Approaching rendering this way guarantees we have all the styles we need when rendering text with not having
     /// to traverse back to the parent for its styles, or needing to pass down styles
+    /// PATCH: vertical `position: sticky` offset (in scaled px) for a box whose unshifted
+    /// border-box origin is `box_position` in its parent's coordinate space.
+    fn sticky_shift(
+        &self,
+        node: &blitz_dom::Node,
+        styles: &style::properties::ComputedValues,
+        parent_transform: Affine,
+        box_position: Vec2,
+        size: taffy::Size<f32>,
+        clip_rect: Rect,
+    ) -> (f64, f64) {
+        use style::values::generics::position::GenericInset;
+        let px = |inset: &style::values::computed::position::Inset| -> Option<f64> {
+            match inset {
+                GenericInset::LengthPercentage(lp) => lp.to_length().map(|l| l.px() as f64),
+                _ => None,
+            }
+        };
+        let pos = styles.get_position();
+        let (top, bottom) = (px(&pos.top), px(&pos.bottom));
+        if top.is_none() && bottom.is_none() {
+            return (0.0, 0.0);
+        }
+        let to_screen = Affine::translate(Vec2::new(-self.initial_x, -self.initial_y)) * parent_transform;
+        let origin = to_screen * kurbo::Point::new(box_position.x, box_position.y);
+        let h = size.height as f64 * self.scale;
+        let parent_id = node.layout_parent.get().or(node.parent);
+        let (cb_top, cb_bottom) = match parent_id.and_then(|p| self.dom.as_ref().get_node(p)) {
+            Some(parent) => {
+                let l = parent.final_layout();
+                let top = (l.padding.top + l.border.top) as f64 * self.scale;
+                let bottom = (l.size.height - l.padding.bottom - l.border.bottom) as f64 * self.scale;
+                (
+                    (to_screen * kurbo::Point::new(0.0, top)).y,
+                    (to_screen * kurbo::Point::new(0.0, bottom)).y,
+                )
+            }
+            None => (f64::NEG_INFINITY, f64::INFINITY),
+        };
+        let mut dy = 0.0;
+        if let Some(t) = top {
+            let want = clip_rect.y0 + t * self.scale;
+            if origin.y < want {
+                dy = (want - origin.y).min((cb_bottom - (origin.y + h)).max(0.0));
+            }
+        }
+        if dy == 0.0 {
+            if let Some(b) = bottom {
+                let want = clip_rect.y1 - b * self.scale;
+                if origin.y + h > want {
+                    dy = (want - (origin.y + h)).max((cb_top - origin.y).min(0.0));
+                }
+            }
+        }
+        (0.0, dy)
+    }
+
     fn render_element(
         &self,
         scene: &mut impl PaintScene,
@@ -365,7 +422,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             location,
             ..
         } = *node.final_layout();
-        let box_position = Vec2::new(location.x as f64, location.y as f64) * self.scale;
+        let mut box_position = Vec2::new(location.x as f64, location.y as f64) * self.scale;
+        // PATCH: `position: sticky` — keep the box inside the nearest scrollport
+        // (`clip_rect`), limited by its containing block. Remember the shift for hit testing.
+        if styles.get_box().position == style::computed_values::position::T::Sticky {
+            let (dx, dy) =
+                self.sticky_shift(node, &styles, parent_style_transform, box_position, size, clip_rect);
+            box_position.x += dx;
+            box_position.y += dy;
+            node.sticky_offset
+                .set(((dx / self.scale) as f32, (dy / self.scale) as f32));
+        }
         let box_size = Size::new(size.width as f64, size.height as f64);
         let border_box = Rect::from_origin_size(box_position.to_point(), box_size);
         let scaled_pb = (padding + border).map(f64::from);

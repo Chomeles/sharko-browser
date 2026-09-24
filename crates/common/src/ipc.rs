@@ -166,24 +166,12 @@ impl Connection {
         std::thread::Builder::new()
             .name(thread_name.to_string())
             .spawn(move || {
-                loop {
-                    let frame = match read_frame(&mut reader) {
-                        Ok(f) => f,
-                        Err(_) => break,
-                    };
-                    match postcard::from_bytes::<R>(&frame) {
-                        Ok(msg) => on_message(Some(msg)),
-                        Err(e) => {
-                            eprintln!("[ipc] failed to decode message: {e}");
-                            break;
-                        }
-                    }
-                }
+                read_loop(&mut reader, &mut on_message);
                 on_message(None);
             })
             .expect("failed to spawn ipc reader thread");
         IpcSender {
-            inner: Arc::new(Mutex::new(self.writer)),
+            inner: Arc::new(Mutex::new(SendState::Open(self.writer))),
             _t: PhantomData,
         }
     }
@@ -211,9 +199,161 @@ impl Connection {
     }
 }
 
-/// Typed, cloneable, thread-safe sending half of an IPC connection.
+/// Deliver every incoming message to `on_message` until the peer disconnects (or sends
+/// garbage). Does not report the disconnect itself.
+fn read_loop<R, F>(reader: &mut BufReader<RecvHalf>, on_message: &mut F)
+where
+    R: DeserializeOwned,
+    F: FnMut(Option<R>),
+{
+    loop {
+        let frame = match read_frame(reader) {
+            Ok(f) => f,
+            Err(_) => break,
+        };
+        match postcard::from_bytes::<R>(&frame) {
+            Ok(msg) => on_message(Some(msg)),
+            Err(e) => {
+                eprintln!("[ipc] failed to decode message: {e}");
+                break;
+            }
+        }
+    }
+}
+
+enum SendState {
+    /// The peer has not connected yet: serialized messages wait here (in order).
+    Pending(Vec<Vec<u8>>),
+    Open(BufWriter<SendHalf>),
+    /// The peer went away or never connected.
+    Closed,
+}
+
+fn lock_state(state: &Mutex<SendState>) -> std::sync::MutexGuard<'_, SendState> {
+    state.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Switch a pending sender to the connected writer, flushing queued messages first.
+fn open_sender(state: &Mutex<SendState>, mut writer: BufWriter<SendHalf>) -> io::Result<()> {
+    let mut st = lock_state(state);
+    match &mut *st {
+        SendState::Pending(queue) => {
+            for frame in queue.drain(..) {
+                write_frame(&mut writer, &frame)?;
+            }
+            writer.flush()?;
+            *st = SendState::Open(writer);
+            Ok(())
+        }
+        SendState::Open(_) | SendState::Closed => Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "ipc sender already opened or closed",
+        )),
+    }
+}
+
+impl IpcListener {
+    /// Accept the first authenticated connection on a background thread instead of blocking
+    /// the caller (process start-up must never stall the UI).
+    ///
+    /// Messages sent before the peer connects are queued and delivered in order.
+    /// `on_message` works like in [`Connection::split`]: it runs on the reader thread and
+    /// receives `None` once — when the peer disconnects or doesn't connect within `timeout`.
+    pub fn accept_in_background<S, R, F>(
+        self,
+        timeout: std::time::Duration,
+        thread_name: &str,
+        mut on_message: F,
+    ) -> IpcSender<S>
+    where
+        S: Serialize,
+        R: DeserializeOwned + Send + 'static,
+        F: FnMut(Option<R>) + Send + 'static,
+    {
+        let state = Arc::new(Mutex::new(SendState::Pending(Vec::new())));
+        let st = Arc::clone(&state);
+        let endpoint = self.endpoint();
+        let spawned = std::thread::Builder::new()
+            .name(thread_name.to_string())
+            .spawn(move || {
+                // `accept` blocks without a timeout, so it runs on a helper thread.
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                let listener = self;
+                std::thread::spawn(move || {
+                    let _ = tx.send(listener.accept());
+                });
+                match rx.recv_timeout(timeout) {
+                    Ok(Ok(conn)) => {
+                        let mut reader = conn.reader;
+                        if open_sender(&st, conn.writer).is_ok() {
+                            read_loop(&mut reader, &mut on_message);
+                        }
+                    }
+                    Ok(Err(e)) => eprintln!("[ipc] accept failed: {e}"),
+                    Err(_) => {
+                        // Unblock the helper (it accepts our connection and exits).
+                        let _ = connect(&endpoint);
+                    }
+                }
+                *lock_state(&st) = SendState::Closed;
+                on_message(None);
+            });
+        if spawned.is_err() {
+            *lock_state(&state) = SendState::Closed;
+        }
+        IpcSender {
+            inner: state,
+            _t: PhantomData,
+        }
+    }
+}
+
+/// Connect to `endpoint` on a background thread (retrying until `timeout` while the server
+/// starts), without blocking the caller. Messages sent meanwhile are queued. `on_message`
+/// works like in [`Connection::split`] and receives `None` if the connection fails.
+pub fn connect_in_background<S, R, F>(
+    endpoint: &str,
+    timeout: std::time::Duration,
+    thread_name: &str,
+    mut on_message: F,
+) -> IpcSender<S>
+where
+    S: Serialize,
+    R: DeserializeOwned + Send + 'static,
+    F: FnMut(Option<R>) + Send + 'static,
+{
+    let state = Arc::new(Mutex::new(SendState::Pending(Vec::new())));
+    let st = Arc::clone(&state);
+    let endpoint = endpoint.to_string();
+    let spawned = std::thread::Builder::new()
+        .name(thread_name.to_string())
+        .spawn(move || {
+            match connect_retry(&endpoint, timeout) {
+                Ok(conn) => {
+                    let mut reader = conn.reader;
+                    if open_sender(&st, conn.writer).is_ok() {
+                        read_loop(&mut reader, &mut on_message);
+                    }
+                }
+                Err(e) => eprintln!("[ipc] cannot connect: {e}"),
+            }
+            *lock_state(&st) = SendState::Closed;
+            on_message(None);
+        });
+    if spawned.is_err() {
+        *lock_state(&state) = SendState::Closed;
+    }
+    IpcSender {
+        inner: state,
+        _t: PhantomData,
+    }
+}
+
+/// Typed, cloneable, thread-safe sending half of an IPC connection. It may still be
+/// waiting for the peer (see [`IpcListener::accept_in_background`]); messages are queued
+/// until then.
 pub struct IpcSender<T> {
-    inner: Arc<Mutex<BufWriter<SendHalf>>>,
+    inner: Arc<Mutex<SendState>>,
     _t: PhantomData<fn(T)>,
 }
 
@@ -230,9 +370,26 @@ impl<T: Serialize> IpcSender<T> {
     pub fn send(&self, msg: &T) -> io::Result<()> {
         let bytes = postcard::to_allocvec(msg)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let mut w = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        write_frame(&mut *w, &bytes)?;
-        w.flush()
+        let mut st = lock_state(&self.inner);
+        match &mut *st {
+            SendState::Pending(queue) => {
+                queue.push(bytes);
+                Ok(())
+            }
+            SendState::Open(w) => {
+                write_frame(&mut *w, &bytes)?;
+                w.flush()
+            }
+            SendState::Closed => Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "ipc peer is gone",
+            )),
+        }
+    }
+
+    /// Whether the peer has not connected yet.
+    pub fn is_pending(&self) -> bool {
+        matches!(*lock_state(&self.inner), SendState::Pending(_))
     }
 }
 
@@ -296,5 +453,70 @@ mod tests {
         assert_eq!(rx.recv().unwrap(), "hello");
         tx.send(&"world".to_string()).unwrap();
         assert_eq!(t.join().unwrap(), "world");
+    }
+
+    #[test]
+    fn queued_until_connected() {
+        let listener = IpcListener::new("test").unwrap();
+        let ep = listener.endpoint();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let sender: IpcSender<String> = listener.accept_in_background(
+            std::time::Duration::from_secs(10),
+            "test-accept",
+            move |m: Option<String>| {
+                let _ = tx.send(m);
+            },
+        );
+        // Sent before anybody connected: must arrive first and in order.
+        sender.send(&"one".to_string()).unwrap();
+        sender.send(&"two".to_string()).unwrap();
+        assert!(sender.is_pending());
+        let client = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let conn = connect(&ep).unwrap();
+            let (ctx, crx) = conn.split_channel::<String, String>("client");
+            let a = crx.recv().unwrap();
+            let b = crx.recv().unwrap();
+            ctx.send(&format!("{a}+{b}")).unwrap();
+        });
+        assert_eq!(rx.recv().unwrap().as_deref(), Some("one+two"));
+        client.join().unwrap();
+    }
+
+    #[test]
+    fn accept_timeout_reports_disconnect() {
+        let listener = IpcListener::new("test").unwrap();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let sender: IpcSender<String> = listener.accept_in_background(
+            std::time::Duration::from_millis(100),
+            "test-timeout",
+            move |m: Option<String>| {
+                let _ = tx.send(m);
+            },
+        );
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), None);
+        assert!(sender.send(&"late".to_string()).is_err());
+    }
+
+    #[test]
+    fn connect_in_background_waits_for_server() {
+        let ep = random_endpoint("test");
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let sender: IpcSender<String> = connect_in_background(
+            &ep,
+            std::time::Duration::from_secs(10),
+            "test-connect",
+            move |m: Option<String>| {
+                let _ = tx.send(m);
+            },
+        );
+        sender.send(&"early".to_string()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let listener = IpcListener::bind(&ep).unwrap();
+        let conn = listener.accept().unwrap();
+        let (stx, srx) = conn.split_channel::<String, String>("server");
+        assert_eq!(srx.recv().unwrap(), "early");
+        stx.send(&"reply".to_string()).unwrap();
+        assert_eq!(rx.recv().unwrap().as_deref(), Some("reply"));
     }
 }

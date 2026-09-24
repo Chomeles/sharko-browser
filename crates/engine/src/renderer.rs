@@ -94,6 +94,9 @@ pub struct Renderer {
     font_ctx: Option<FontContext>,
     last_mouse: (f32, f32),
     pending_capture: Option<(u64, u32)>,
+    /// Last user input: while the user interacts, frames are produced at full rate even if
+    /// the page is still loading.
+    last_input: Option<Instant>,
 }
 
 impl Renderer {
@@ -128,6 +131,7 @@ impl Renderer {
             font_ctx: None,
             last_mouse: (-1.0, -1.0),
             pending_capture: None,
+            last_input: None,
         }
     }
 
@@ -222,8 +226,13 @@ impl Renderer {
     }
 
     fn frame_interval(&self) -> Duration {
+        let interacting = self
+            .last_input
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(1000));
         match &self.page {
-            Some(p) if !p.load_sent && p.first_frame_costs.is_some() => LOADING_FRAME_INTERVAL,
+            Some(p) if !p.load_sent && p.first_frame_costs.is_some() && !interacting => {
+                LOADING_FRAME_INTERVAL
+            }
             _ => FRAME_INTERVAL,
         }
     }
@@ -295,6 +304,7 @@ impl Renderer {
             }
             ToRenderer::Input(ev) => self.handle_input(ev),
             ToRenderer::ScrollTo { x, y } => {
+                self.last_input = Some(Instant::now());
                 if let Some(page) = &mut self.page {
                     let vp = page.doc.viewport().clone();
                     let css_w = vp.window_size.0 as f64 / vp.scale_f64();
@@ -363,6 +373,10 @@ impl Renderer {
     }
 
     fn handle_input(&mut self, ev: InputEvent) {
+        let is_move = matches!(ev, InputEvent::MouseMove { .. });
+        if !is_move {
+            self.last_input = Some(Instant::now());
+        }
         let Some(page) = &mut self.page else { return };
         let scroll = page.doc.viewport_scroll();
         let scroll = (scroll.x, scroll.y);
@@ -408,13 +422,18 @@ impl Renderer {
 
         // Scroll notifications for JS
         let s = page.doc.viewport_scroll();
-        if (s.x, s.y) != page.last_scroll {
+        let scrolled = (s.x, s.y) != page.last_scroll;
+        if scrolled {
             page.last_scroll = (s.x, s.y);
             if let Some(rt) = page.rt.as_mut() {
                 rt.scrolled(&mut page.doc);
             }
         }
-        self.shared.redraw.store(true, Ordering::SeqCst);
+        // Pointer moves only need a new frame when something changed: hover changes and
+        // DOM mutations by event handlers request one themselves.
+        if !is_move || scrolled {
+            self.shared.redraw.store(true, Ordering::SeqCst);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -615,6 +634,7 @@ impl Renderer {
         page.last_title = document_title(&page.doc);
         self.send(FromRenderer::Title(page.last_title.clone()));
 
+        common::trace::mark("renderer: document parsed");
         let t1 = Instant::now();
         if self.config.javascript {
             let mut rt = ScriptRuntime::new(
@@ -636,6 +656,7 @@ impl Renderer {
             page.rt = Some(rt);
         }
         page.script_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        common::trace::mark("renderer: scripts started (runtime ready)");
 
         self.page = Some(page);
         self.shared.redraw.store(true, Ordering::SeqCst);
@@ -893,6 +914,7 @@ fn error_page(url: &str, err: &str) -> String {
 
 /// Entry point of a `--type=renderer` process (or thread in single-process mode).
 pub fn renderer_main(endpoint: &str, verbose_console: bool) {
+    common::trace::mark("renderer: start");
     let conn = match ipc::connect_retry(endpoint, Duration::from_secs(10)) {
         Ok(c) => c,
         Err(e) => {
@@ -921,6 +943,7 @@ pub fn renderer_main(endpoint: &str, verbose_console: bool) {
             _ => continue,
         }
     };
+    common::trace::mark("renderer: init received");
     let net = match netstack_connect(&net_endpoint) {
         Some(n) => n,
         None => {

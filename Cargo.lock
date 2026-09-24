@@ -180,8 +180,6 @@ dependencies = [
 [[package]]
 name = "anyrender_vello"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1301d68b8d7a9333c242225bb026dc08f70a5b0ab096087866c06ceab227de5"
 dependencies = [
  "anyrender",
  "debug_timer",

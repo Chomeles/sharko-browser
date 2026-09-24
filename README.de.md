@@ -9,6 +9,9 @@ mit Multi-Prozess-Architektur wie Chrome. Status: **früher Prototyp**. [English
 2. Entpacken und `browser.exe` starten – oder `browser.exe --install` für eine Installation
    mit Startmenü-Eintrag und automatischen Updates.
 
+Portabel: Eine leere Datei `portable` neben `browser.exe` legt das Profil (Cookies, Cache,
+Logs) im Ordner `profile` daneben ab statt unter `%LOCALAPPDATA%`.
+
 Updates werden im Hintergrund geladen, geprüft (ed25519-Signatur + SHA-256) und sind nach
 dem nächsten Start aktiv.
 

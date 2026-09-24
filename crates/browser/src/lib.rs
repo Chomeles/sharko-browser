@@ -72,6 +72,15 @@ pub enum BrowserEvent {
     Tab(TabId, FromRenderer),
     /// The renderer process went away (crash or kill).
     TabCrashed(TabId),
+    /// Raw message from a renderer connection (`None` = disconnected). Internal:
+    /// [`Browser::process_event`] turns it into `Tab` / `TabCrashed`, or drops it when it
+    /// comes from a renderer that has since been replaced.
+    #[doc(hidden)]
+    Renderer {
+        tab: TabId,
+        epoch: u32,
+        msg: Option<FromRenderer>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +111,9 @@ fn url_without_fragment(u: &str) -> Option<&str> {
 pub struct Tab {
     pub id: TabId,
     sender: IpcSender<ToRenderer>,
+    /// Incremented whenever the renderer is replaced (crash recovery), so that late
+    /// messages from the old one are ignored.
+    epoch: u32,
     child: Option<Child>,
     pub url: String,
     pub title: String,
@@ -170,7 +182,9 @@ impl Browser {
                 &[format!("--profile={}", opts.profile_dir.display())],
             )?);
         }
-        let net = connect_net(&net_endpoint)?;
+        // Don't wait for the network process to come up: requests are queued until it
+        // accepts the connection (startup runs in parallel with window/GPU creation).
+        let net = NetClient::connect_in_background(&net_endpoint, Duration::from_secs(20));
         let (events_tx, events) = crossbeam_channel::unbounded();
         Ok(Self {
             opts,
@@ -205,6 +219,7 @@ impl Browser {
     fn spawn_renderer(
         &self,
         id: TabId,
+        epoch: u32,
         viewport: ViewportInfo,
     ) -> io::Result<(IpcSender<ToRenderer>, Option<Child>)> {
         let listener = IpcListener::new("renderer")?;
@@ -225,29 +240,17 @@ impl Browser {
             child = Some(ipc::spawn_child("renderer", &endpoint, &args)?);
         }
 
-        // Accept with a timeout (a renderer that fails to start must not hang us).
-        let (acc_tx, acc_rx) = crossbeam_channel::bounded(1);
-        std::thread::spawn(move || {
-            let _ = acc_tx.send(listener.accept());
-        });
-        let conn = match acc_rx.recv_timeout(Duration::from_secs(20)) {
-            Ok(Ok(c)) => c,
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                if let Some(mut c) = child {
-                    let _ = c.kill();
-                }
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "renderer did not start"));
-            }
-        };
+        // Never block on the renderer starting up: the connection is accepted in the
+        // background and messages (Init, Navigate, …) are queued until then. A renderer
+        // that doesn't connect in time is reported as crashed.
         let tx = self.events_tx.clone();
-        let sender: IpcSender<ToRenderer> =
-            conn.split(&format!("tab-{id}-ipc"), move |msg: Option<FromRenderer>| {
-                let _ = tx.send(match msg {
-                    Some(m) => BrowserEvent::Tab(id, m),
-                    None => BrowserEvent::TabCrashed(id),
-                });
-            });
+        let sender: IpcSender<ToRenderer> = listener.accept_in_background(
+            Duration::from_secs(20),
+            &format!("tab-{id}-ipc"),
+            move |msg: Option<FromRenderer>| {
+                let _ = tx.send(BrowserEvent::Renderer { tab: id, epoch, msg });
+            },
+        );
         let _ = sender.send(&ToRenderer::Init {
             net_endpoint: self.net_endpoint.clone(),
             viewport,
@@ -262,10 +265,11 @@ impl Browser {
     pub fn new_tab(&mut self, url: &str, viewport: ViewportInfo) -> io::Result<TabId> {
         let id = self.next_tab;
         self.next_tab += 1;
-        let (sender, child) = self.spawn_renderer(id, viewport)?;
+        let (sender, child) = self.spawn_renderer(id, 0, viewport)?;
         let tab = Tab {
             id,
             sender,
+            epoch: 0,
             child,
             url: url.to_string(),
             title: String::new(),
@@ -297,12 +301,13 @@ impl Browser {
     /// Replace a crashed tab's renderer with a fresh one. The tab keeps its history; the
     /// new renderer shows `html` (e.g. an error page) or reloads the current entry.
     pub fn respawn_tab(&mut self, id: TabId, html: Option<String>) -> io::Result<()> {
-        let viewport = match self.tabs.get(&id) {
-            Some(t) => t.viewport,
+        let (viewport, epoch) = match self.tabs.get(&id) {
+            Some(t) => (t.viewport, t.epoch.wrapping_add(1)),
             None => return Ok(()),
         };
-        let (sender, child) = self.spawn_renderer(id, viewport)?;
+        let (sender, child) = self.spawn_renderer(id, epoch, viewport)?;
         let tab = self.tabs.get_mut(&id).expect("tab exists");
+        tab.epoch = epoch;
         if let Some(mut old) = tab.child.take() {
             let _ = old.kill();
             let _ = old.wait();
@@ -480,6 +485,18 @@ impl Browser {
     /// Apply an event to the browser state. Returns an optional follow-up the embedder
     /// should know about (e.g. a new tab was opened).
     pub fn process_event(&mut self, ev: BrowserEvent) -> Option<BrowserEvent> {
+        let ev = match ev {
+            BrowserEvent::Renderer { tab, epoch, msg } => {
+                if self.tabs.get(&tab).is_none_or(|t| t.epoch != epoch) {
+                    return None; // closed tab or replaced renderer
+                }
+                match msg {
+                    Some(m) => BrowserEvent::Tab(tab, m),
+                    None => BrowserEvent::TabCrashed(tab),
+                }
+            }
+            other => other,
+        };
         match ev {
             BrowserEvent::TabCrashed(id) => {
                 if let Some(tab) = self.tabs.get_mut(&id) {
@@ -488,6 +505,7 @@ impl Browser {
                 }
                 Some(BrowserEvent::TabCrashed(id))
             }
+            BrowserEvent::Renderer { .. } => None, // converted above
             BrowserEvent::Tab(id, msg) => {
                 let verbose = self.opts.verbose;
                 let tab = self.tabs.get_mut(&id)?;
@@ -641,17 +659,6 @@ impl Browser {
             }
             let _ = child.kill();
             let _ = child.wait();
-        }
-    }
-}
-
-fn connect_net(endpoint: &str) -> io::Result<NetClient> {
-    let start = Instant::now();
-    loop {
-        match NetClient::connect(endpoint) {
-            Ok(c) => return Ok(c),
-            Err(e) if start.elapsed() > Duration::from_secs(10) => return Err(e),
-            Err(_) => std::thread::sleep(Duration::from_millis(5)),
         }
     }
 }

@@ -1,8 +1,13 @@
 //! Windowed browser UI.
 //!
 //! * Window + input: winit
-//! * Compositor: Vello on the GPU via wgpu (DX12/Vulkan/Metal), vello_cpu + softbuffer as
-//!   fallback when no usable GPU adapter exists (or `BROWSER_RENDERER=cpu`).
+//! * Compositor: Vello on the GPU via wgpu (Vulkan/Metal/DX12), vello_cpu + softbuffer as
+//!   fallback when no hardware GPU is usable (or `BROWSER_RENDERER=cpu`).
+//! * Startup: the window is created hidden and shown with its first frame. The GPU
+//!   compositor initialises on a background thread; if that takes longer than
+//!   [`GPU_WAIT`], the first frames are rendered on the CPU and the GPU takes over when
+//!   ready. Renderer and network processes start in the background too, so the UI thread
+//!   never blocks during startup.
 //! * Browser chrome (tabs, toolbar, address bar): an HTML/CSS document rendered by Blitz
 //!   in this process (see [`chrome`]).
 //! * Page content: display lists received from the tab's renderer process, replayed into
@@ -17,6 +22,8 @@ use chrome::{Action, CHROME_HEIGHT, Chrome, TabView, ToolbarView};
 use common::protocol::{CursorKind, FromRenderer, InputEvent, Modifiers, ToRenderer, ViewportInfo};
 use kurbo::{Affine, Rect};
 use peniko::{Color, Fill};
+use anyrender_vello::{VelloRendererOptions, VelloWindowRenderer};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
@@ -32,10 +39,24 @@ enum UserEvent {
     Redraw,
     /// A newer version was installed in the background.
     UpdateReady(String),
+    /// The GPU compositor finished (or failed) initialising in the background.
+    GpuReady,
 }
 
+/// How long the hidden window waits for the GPU compositor before its first frames are
+/// rendered on the CPU instead (the GPU takes over once ready). On Apple platforms Metal
+/// initialises quickly and mixing CPU (CALayer) and Metal presentation is avoided.
+const GPU_WAIT: Duration = if cfg!(target_vendor = "apple") {
+    Duration::from_millis(3000)
+} else {
+    Duration::from_millis(250)
+};
+
+/// Progress bar animation interval while a page loads.
+const ANIMATION_INTERVAL: Duration = Duration::from_millis(33);
+
 enum Renderer {
-    Gpu(Box<anyrender_vello::VelloWindowRenderer>),
+    Gpu(Box<VelloWindowRenderer>),
     Cpu(Box<anyrender_vello_cpu::VelloCpuWindowRenderer>),
 }
 
@@ -120,6 +141,26 @@ struct App {
     frames_presented: u64,
     ime_enabled: bool,
     debug_events: bool,
+    first_content_traced: bool,
+    /// GPU compositor still initialising in the background.
+    gpu: Option<Box<VelloWindowRenderer>>,
+    /// When to stop waiting for the GPU and render the first frames on the CPU.
+    cpu_fallback_at: Option<Instant>,
+    window_shown: bool,
+    /// Next progress-bar animation frame.
+    anim_at: Option<Instant>,
+    /// Latest pointer move over the page, sent once per event-loop turn (coalescing).
+    pending_mouse: Option<InputEvent>,
+    /// Whether the pointer is over the page (for MouseLeave).
+    pointer_in_content: bool,
+    /// Recent renderer restarts per tab (crash-loop protection).
+    respawns: HashMap<TabId, (Instant, u32)>,
+    /// Start of the current event-loop turn (stall tracing).
+    turn_started: Option<Instant>,
+    /// Frames presented by the current compositor (tracing).
+    frames_by_kind: u64,
+    /// (window of measurement start, frames at start, reports so far) (tracing).
+    paint_stats: (Instant, u64, u32),
 }
 
 fn content_viewport(size: PhysicalSize<u32>, scale: f64, zoom: f32) -> ViewportInfo {
@@ -361,7 +402,8 @@ impl App {
     fn handle_browser_event(&mut self, ev: BrowserEvent) {
         if self.debug_events {
             match &ev {
-                BrowserEvent::Tab(_, FromRenderer::Frame(_)) => {}
+                BrowserEvent::Tab(_, FromRenderer::Frame(_))
+                | BrowserEvent::Renderer { msg: Some(FromRenderer::Frame(_)), .. } => {}
                 other => eprintln!("[ui] event {other:?}"),
             }
         }
@@ -374,6 +416,7 @@ impl App {
             return;
         };
         match ev {
+            BrowserEvent::Renderer { .. } => {}
             BrowserEvent::Tab(id, msg) => match msg {
                 FromRenderer::Cursor(c) if Some(id) == active => {
                     if self.capture != Some(PointerTarget::Chrome)
@@ -402,9 +445,20 @@ impl App {
             },
             BrowserEvent::TabCrashed(id) => {
                 // Like Chrome's "sad tab": only this tab's renderer died. Start a fresh
-                // renderer that shows an error page; the user can reload.
+                // renderer that shows an error page; the user can reload. A renderer that
+                // keeps dying right away (can't start at all) is not restarted forever.
                 let url = self.browser.tab(id).map(|t| t.url.clone()).unwrap_or_default();
-                if self.browser.tab(id).is_some() {
+                let now = Instant::now();
+                let entry = self.respawns.entry(id).or_insert((now, 0));
+                if now.duration_since(entry.0) > Duration::from_secs(30) {
+                    *entry = (now, 0);
+                }
+                entry.1 += 1;
+                let allowed = entry.1 <= 3;
+                if !allowed {
+                    eprintln!("[ui] renderer for tab {id} keeps crashing; not restarting");
+                }
+                if allowed && self.browser.tab(id).is_some() {
                     if let Err(e) = self.browser.respawn_tab(id, Some(crash_html(&url))) {
                         eprintln!("[ui] cannot restart renderer: {e}");
                     }
@@ -443,10 +497,123 @@ impl App {
         engine::input::to_ui_event(&ev, (0.0, 0.0)).expect("pointer event")
     }
 
-    fn send_content(&self, ev: InputEvent) {
+    fn send_content(&mut self, ev: InputEvent) {
+        // Keep event order: a pending pointer move goes first.
+        self.flush_mouse_move();
         if let Some(a) = self.active {
             self.browser.send(a, ToRenderer::Input(ev));
         }
+    }
+
+    /// Pointer moves arrive at the device rate (up to 1000/s); only the latest one per
+    /// event-loop turn is sent to the renderer.
+    fn queue_mouse_move(&mut self, ev: InputEvent) {
+        self.pending_mouse = Some(ev);
+    }
+
+    fn flush_mouse_move(&mut self) {
+        if let (Some(ev), Some(a)) = (self.pending_mouse.take(), self.active) {
+            self.browser.send(a, ToRenderer::Input(ev));
+        }
+    }
+
+    /// The pointer left the page area (to the browser UI or out of the window).
+    fn leave_content(&mut self) {
+        if self.pointer_in_content {
+            self.pointer_in_content = false;
+            self.pending_mouse = None;
+            self.send_content(InputEvent::MouseLeave);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Startup: compositor selection and first frame
+    // -----------------------------------------------------------------------
+
+    fn start_cpu_renderer(&mut self) {
+        let Some(window) = self.window.clone() else { return };
+        let mut r = anyrender_vello_cpu::VelloCpuWindowRenderer::new();
+        let proxy = self.proxy.clone();
+        r.resume(window, self.size.width.max(1), self.size.height.max(1), move || {
+            let _ = proxy.send_event(UserEvent::Redraw);
+        });
+        self.renderer = Some(Renderer::Cpu(Box::new(r)));
+        self.renderer_kind = "CPU (vello_cpu)";
+        common::trace::mark("ui: CPU compositor ready");
+    }
+
+    /// Exists while the GPU initialises: if the process dies there (driver crash), the next
+    /// start uses the CPU instead of crashing again.
+    fn gpu_marker(&self) -> std::path::PathBuf {
+        self.browser.opts.profile_dir.join("GPUCache").join("init-pending")
+    }
+
+    /// The background GPU initialisation finished (or failed).
+    fn on_gpu_ready(&mut self) {
+        let marker = self.gpu_marker();
+        let Some(gpu) = self.gpu.as_mut() else { return };
+        let t0 = Instant::now();
+        let active = gpu.complete_resume();
+        if active || !gpu.is_pending() {
+            // Initialisation is over (success or clean failure): it didn't crash.
+            let _ = std::fs::remove_file(&marker);
+        }
+        if active {
+            if common::trace::enabled() {
+                common::trace::mark(&format!(
+                    "ui: GPU surface configured in {:.1} ms",
+                    t0.elapsed().as_secs_f64() * 1000.0
+                ));
+            }
+            let gpu = self.gpu.take().expect("gpu renderer");
+            if let Some(info) = gpu.adapter_info() {
+                eprintln!("[ui] compositor: GPU (Vello/wgpu) on {} via {:?}", info.name, info.backend);
+            }
+            self.renderer_kind = "GPU (Vello/wgpu)";
+            self.cpu_fallback_at = None;
+            common::trace::mark("ui: GPU compositor ready");
+            let previous = self.renderer.replace(Renderer::Gpu(gpu));
+            self.frames_by_kind = 0;
+            if self.window_shown {
+                // Replace the CPU-rendered frame right away.
+                self.paint();
+            } else {
+                self.show_window();
+            }
+            // The CPU presenter is released only after the GPU frame is on screen.
+            drop(previous);
+        } else if !gpu.is_pending() {
+            let why = gpu.init_error().unwrap_or("unknown error").to_string();
+            eprintln!("[ui] GPU compositor unavailable ({why}); rendering on the CPU");
+            common::trace::mark("ui: GPU unavailable");
+            self.gpu = None;
+            self.cpu_fallback_at = None;
+            if self.renderer.is_none() {
+                self.start_cpu_renderer();
+            }
+            self.show_window();
+        }
+    }
+
+    /// Show the (hidden) window together with its first frame.
+    fn show_window(&mut self) {
+        if self.window_shown || self.renderer.is_none() {
+            return;
+        }
+        let Some(window) = self.window.clone() else { return };
+        self.window_shown = true;
+        // Windows: show the window cloaked (invisible to the compositor), present the first
+        // frame, then uncloak — no blank or white flash, like other browsers.
+        #[cfg(windows)]
+        let cloaked = win::set_cloaked(&window, true);
+        window.set_visible(true);
+        self.paint();
+        #[cfg(windows)]
+        if cloaked {
+            win::set_cloaked(&window, false);
+        }
+        window.request_redraw();
+        common::trace::mark("ui: window shown");
     }
 
     fn pointer_target(&self) -> PointerTarget {
@@ -466,7 +633,14 @@ impl App {
         let height = self.size.height;
         let scale = self.scale;
         let Some(chrome) = self.chrome.as_mut() else { return };
+        let resolve_start = Instant::now();
         chrome.doc.resolve(0.0);
+        if common::trace::enabled() && self.frames_presented < 3 {
+            common::trace::mark(&format!(
+                "ui: chrome resolve {:.1} ms",
+                resolve_start.elapsed().as_secs_f64() * 1000.0
+            ));
+        }
         let tab = self.active.and_then(|a| self.browser.tab(a));
 
         fn paint_all(
@@ -478,11 +652,18 @@ impl App {
             chrome_px: f64,
             scale: f64,
         ) {
-            // Content area background.
+            // Content area background. Until the new tab page's first frame arrives, use
+            // its background colour so that it doesn't flash white first.
+            let placeholder = match tab {
+                Some(t) if t.frame.is_none() && t.url == "about:newtab" => {
+                    Color::from_rgb8(0xf8, 0xf9, 0xfb)
+                }
+                _ => Color::WHITE,
+            };
             scene.fill(
                 Fill::NonZero,
                 Affine::IDENTITY,
-                Color::WHITE,
+                placeholder,
                 None,
                 &Rect::new(0.0, chrome_px, width as f64, height as f64),
             );
@@ -527,23 +708,50 @@ impl App {
             blitz_paint::paint_scene(scene, &mut chrome.doc, scale, width, chrome_px as u32, 0, 0);
         }
 
-        match self.renderer.as_mut() {
+        let render_start = Instant::now();
+        let gpu_failed = match self.renderer.as_mut() {
             Some(Renderer::Gpu(r)) if r.is_active() => {
-                r.render(|scene| paint_all(scene, chrome, tab, width, height, chrome_px, scale))
+                // A lost device (driver reset or crash) makes Vello panic: continue on the
+                // CPU instead of taking the browser down.
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    r.render(|scene| paint_all(scene, chrome, tab, width, height, chrome_px, scale))
+                }))
+                .is_err()
             }
             Some(Renderer::Cpu(r)) if r.is_active() => {
-                r.render(|scene| paint_all(scene, chrome, tab, width, height, chrome_px, scale))
+                r.render(|scene| paint_all(scene, chrome, tab, width, height, chrome_px, scale));
+                false
             }
             _ => return,
+        };
+        if gpu_failed {
+            eprintln!("[ui] GPU rendering failed; continuing on the CPU");
+            self.renderer = None;
+            self.start_cpu_renderer();
+            self.request_redraw();
+            return;
         }
         self.frames_presented += 1;
-        // Keep animating the progress bar while loading.
-        if tab.is_some_and(|t| t.loading) {
-            let proxy = self.proxy.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(33));
-                let _ = proxy.send_event(UserEvent::Redraw);
-            });
+        self.frames_by_kind += 1;
+        if common::trace::enabled() && self.frames_by_kind <= 3 {
+            common::trace::mark(&format!(
+                "ui: frame {} ({}) rendered in {:.1} ms",
+                self.frames_presented,
+                self.renderer_kind,
+                render_start.elapsed().as_secs_f64() * 1000.0
+            ));
+        }
+        if self.frames_presented == 1 {
+            common::trace::mark("ui: first paint presented");
+        }
+        if !self.first_content_traced && tab.is_some_and(|t| t.frame.is_some()) {
+            self.first_content_traced = true;
+            common::trace::mark("ui: first page content presented");
+        }
+        // Keep animating the progress bar while loading (one timer, driven by the event
+        // loop — see `about_to_wait`).
+        if tab.is_some_and(|t| t.loading) && self.anim_at.is_none() {
+            self.anim_at = Some(Instant::now() + ANIMATION_INTERVAL);
         }
     }
 }
@@ -557,26 +765,17 @@ fn next_zoom(z: f32, up: bool) -> f32 {
     }
 }
 
-fn gpu_available() -> bool {
-    use anyrender_vello::wgpu;
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: None,
-    }))
-    .is_ok()
-}
-
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
         }
+        // Hidden until the first frame is ready: never show a blank or frozen window.
         let attrs = Window::default_attributes()
-            .with_title("Neuer Tab")
+            .with_title(common::i18n::t("tab.new"))
             .with_inner_size(LogicalSize::new(1280.0, 860.0))
-            .with_min_inner_size(LogicalSize::new(400.0, 300.0));
+            .with_min_inner_size(LogicalSize::new(400.0, 300.0))
+            .with_visible(false);
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
@@ -587,50 +786,43 @@ impl ApplicationHandler<UserEvent> for App {
         };
         self.size = window.inner_size();
         self.scale = window.scale_factor();
+        self.window = Some(window.clone());
+        common::trace::mark("ui: window created (hidden)");
 
-        let use_gpu = !self.force_cpu && gpu_available();
-        let handle: Arc<dyn anyrender::WindowHandle> = window.clone();
-        let (w, h) = (self.size.width, self.size.height);
-        let mut renderer = None;
-        if use_gpu {
-            // GPU init can fail on exotic drivers (panics inside wgpu/vello): fall back to
-            // the CPU compositor instead of crashing.
+        // GPU compositor: adapter, device and shader pipelines are set up on a background
+        // thread while the UI and the first tab start.
+        if !self.force_cpu && gpu_init_crashed_before(&self.gpu_marker()) {
+            eprintln!(
+                "[ui] GPU initialisation crashed during a previous start; rendering on the CPU \
+                 (delete {} to retry)",
+                self.gpu_marker().display()
+            );
+            self.force_cpu = true;
+        }
+        if !self.force_cpu {
+            let marker = self.gpu_marker();
+            if let Some(dir) = marker.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&marker, b"GPU initialisation in progress\n");
+            // Software "GPUs" (WARP, llvmpipe, SwiftShader) are slower than vello_cpu.
+            let allow_software = std::env::var_os("BROWSER_ALLOW_SOFTWARE_GPU").is_some();
+            let options = VelloRendererOptions::new()
+                .pipeline_cache_dir(self.browser.opts.profile_dir.join("GPUCache"))
+                .allow_software_adapter(allow_software);
+            let mut gpu = Box::new(VelloWindowRenderer::with_options(options));
             let proxy = self.proxy.clone();
-            let handle2 = handle.clone();
-            let gpu = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                let mut r = anyrender_vello::VelloWindowRenderer::new();
-                r.resume(handle2, w, h, move || {
-                    let _ = proxy.send_event(UserEvent::Redraw);
-                });
-                r.complete_resume();
-                r
-            }));
-            match gpu {
-                Ok(r) if r.is_active() || r.is_pending() => {
-                    self.renderer_kind = "GPU (Vello/wgpu)";
-                    renderer = Some(Renderer::Gpu(Box::new(r)));
-                }
-                _ => eprintln!("[ui] GPU compositor unavailable, using CPU"),
-            }
+            gpu.resume_in_background(
+                window.clone(),
+                self.size.width.max(1),
+                self.size.height.max(1),
+                move || {
+                    let _ = proxy.send_event(UserEvent::GpuReady);
+                },
+            );
+            self.gpu = Some(gpu);
+            self.cpu_fallback_at = Some(Instant::now() + GPU_WAIT);
         }
-        let mut renderer = match renderer {
-            Some(r) => r,
-            None => {
-                self.renderer_kind = "CPU (vello_cpu)";
-                let mut r = anyrender_vello_cpu::VelloCpuWindowRenderer::new();
-                let proxy = self.proxy.clone();
-                r.resume(handle, w, h, move || {
-                    let _ = proxy.send_event(UserEvent::Redraw);
-                });
-                r.complete_resume();
-                Renderer::Cpu(Box::new(r))
-            }
-        };
-        if let Renderer::Gpu(r) = &mut renderer {
-            r.complete_resume();
-        }
-        eprintln!("[ui] compositor: {}", self.renderer_kind);
-        self.renderer = Some(renderer);
 
         let redraw_proxy = self.proxy.clone();
         self.chrome = Some(Chrome::new(
@@ -640,21 +832,32 @@ impl ApplicationHandler<UserEvent> for App {
                 let _ = redraw_proxy.send_event(UserEvent::Redraw);
             }),
         ));
-        self.window = Some(window);
+        common::trace::mark("ui: chrome document built");
 
         let urls = std::mem::take(&mut self.start_urls);
-        for (i, url) in urls.iter().enumerate() {
+        for url in &urls {
             self.open_tab(url);
-            if i == 0 {
-                if let Some(first) = self.browser.tab_ids().first().copied() {
-                    self.active = Some(first);
-                }
-            }
         }
         if let Some(first) = self.browser.tab_ids().first().copied() {
             self.active = Some(first);
         }
         self.sync_chrome();
+        common::trace::mark("ui: first tab opened");
+        if let Some(c) = self.chrome.as_mut() {
+            // Style + layout (and font loading) now, while the GPU initialises, instead of
+            // in the first frame.
+            c.doc.resolve(0.0);
+        }
+        common::trace::mark("ui: chrome resolved");
+
+        if self.gpu.is_none() {
+            self.start_cpu_renderer();
+            self.show_window();
+        }
+    }
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+        self.turn_started = Some(Instant::now());
     }
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -668,10 +871,66 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.request_redraw();
             }
+            UserEvent::GpuReady => self.on_gpu_ready(),
+        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.flush_mouse_move();
+        let now = Instant::now();
+        if self.cpu_fallback_at.is_some_and(|t| now >= t) {
+            self.cpu_fallback_at = None;
+            if self.renderer.is_none() {
+                // The GPU is still busy (first run, slow shader compiler): show the window
+                // now with CPU-rendered frames; the GPU takes over when it is ready.
+                common::trace::mark("ui: GPU not ready yet, first frames on the CPU");
+                if cfg!(target_vendor = "apple") {
+                    // Don't mix CALayer and Metal presentation: stay on the CPU.
+                    self.gpu = None;
+                    let _ = std::fs::remove_file(self.gpu_marker());
+                }
+                self.start_cpu_renderer();
+                self.show_window();
+            }
+        }
+        if self.anim_at.is_some_and(|t| now >= t) {
+            self.anim_at = None;
+            if self.active.and_then(|a| self.browser.tab(a)).is_some_and(|t| t.loading) {
+                self.request_redraw();
+            }
+        }
+        let next = [self.cpu_fallback_at, self.anim_at].into_iter().flatten().min();
+        event_loop.set_control_flow(match next {
+            Some(t) => ControlFlow::WaitUntil(t),
+            None => ControlFlow::Wait,
+        });
+        if let Some(t0) = self.turn_started.take() {
+            let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            if ms > 30.0 && common::trace::enabled() {
+                common::trace::mark(&format!("ui: event-loop turn blocked {ms:.0} ms"));
+            }
+        }
+        if common::trace::enabled() && self.window_shown {
+            let (since, frames, reports) = &mut self.paint_stats;
+            if since.elapsed() >= Duration::from_secs(1) && *reports < 8 {
+                common::trace::mark(&format!(
+                    "ui: {} paints in the last {:.1} s",
+                    self.frames_presented - *frames,
+                    since.elapsed().as_secs_f64()
+                ));
+                *since = Instant::now();
+                *frames = self.frames_presented;
+                *reports += 1;
+            }
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if self.debug_events
+            && !matches!(event, WindowEvent::CursorMoved { .. } | WindowEvent::RedrawRequested)
+        {
+            eprintln!("[ui] window event {event:?}");
+        }
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -680,6 +939,9 @@ impl ApplicationHandler<UserEvent> for App {
                 self.size = size;
                 if let Some(r) = self.renderer.as_mut() {
                     r.set_size(size.width.max(1), size.height.max(1));
+                }
+                if let Some(g) = self.gpu.as_mut() {
+                    g.set_size(size.width.max(1), size.height.max(1));
                 }
                 if let Some(c) = self.chrome.as_mut() {
                     c.resize(size.width, self.scale as f32);
@@ -730,30 +992,35 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 match self.pointer_target() {
                     PointerTarget::Chrome => {
-                        if let Some(c) = self.chrome.as_mut() {
-                            let ev = {
-                                let x = (position.x / self.scale) as f32;
-                                let y = (position.y / self.scale) as f32;
-                                engine::input::to_ui_event(
-                                    &InputEvent::MouseMove { x, y, buttons: self.buttons, mods: self.mods },
-                                    (0.0, 0.0),
-                                )
-                            };
-                            if let Some(ev) = ev {
-                                let actions = c.handle_ui_event(ev);
-                                let cur = c.cursor().unwrap_or(CursorIcon::Default);
-                                self.set_cursor(cur);
-                                self.run_actions(actions, event_loop);
+                        self.leave_content();
+                        let ev = {
+                            let x = (position.x / self.scale) as f32;
+                            let y = (position.y / self.scale) as f32;
+                            engine::input::to_ui_event(
+                                &InputEvent::MouseMove { x, y, buttons: self.buttons, mods: self.mods },
+                                (0.0, 0.0),
+                            )
+                        };
+                        if let (Some(c), Some(ev)) = (self.chrome.as_mut(), ev) {
+                            let hover_before = c.doc.get_hover_node_id();
+                            let actions = c.handle_ui_event(ev);
+                            let cur = c.cursor().unwrap_or(CursorIcon::Default);
+                            // Repaint only if something visible changed (hover, drag-select).
+                            let changed = c.doc.get_hover_node_id() != hover_before
+                                || self.buttons != 0
+                                || !actions.is_empty();
+                            self.set_cursor(cur);
+                            self.run_actions(actions, event_loop);
+                            if changed {
+                                self.request_redraw();
                             }
-                            // Leaving the content area.
-                            self.send_content(InputEvent::MouseLeave);
                         }
-                        self.request_redraw();
                     }
                     PointerTarget::Scrollbar(_) => {}
                     PointerTarget::Content => {
+                        self.pointer_in_content = true;
                         let (x, y) = self.content_point();
-                        self.send_content(InputEvent::MouseMove { x, y, buttons: self.buttons, mods: self.mods });
+                        self.queue_mouse_move(InputEvent::MouseMove { x, y, buttons: self.buttons, mods: self.mods });
                         if let Some(tab) = self.active.and_then(|a| self.browser.tab(a)) {
                             let c = map_cursor(tab.cursor);
                             self.set_cursor(c);
@@ -766,7 +1033,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::CursorLeft { .. } => {
-                self.send_content(InputEvent::MouseLeave);
+                self.leave_content();
                 if let Some(c) = self.chrome.as_mut() {
                     c.doc.clear_hover();
                 }
@@ -982,8 +1249,24 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.gpu.is_some() {
+            // Quit while the GPU was still initialising: that's not a crash.
+            let _ = std::fs::remove_file(self.gpu_marker());
+        }
         self.browser.shutdown();
     }
+}
+
+/// Whether a previous start died while initialising the GPU (see `App::gpu_marker`).
+/// The verdict expires after a week (drivers get updated).
+fn gpu_init_crashed_before(marker: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::metadata(marker) else { return false };
+    let age = meta.modified().ok().and_then(|m| m.elapsed().ok());
+    if age.is_some_and(|a| a > Duration::from_secs(7 * 24 * 3600)) {
+        let _ = std::fs::remove_file(marker);
+        return false;
+    }
+    true
 }
 
 fn crash_html(url: &str) -> String {
@@ -1003,7 +1286,9 @@ pub fn run(opts: BrowserOptions, start_urls: Vec<String>) -> Result<(), String> 
         .map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
+    common::trace::mark("ui: event loop created");
     let browser = Browser::new(opts).map_err(|e| e.to_string())?;
+    common::trace::mark("ui: network service up");
 
     // Forward browser events (IPC reader threads) into the winit loop.
     let rx = browser.events.clone();
@@ -1075,7 +1360,48 @@ pub fn run(opts: BrowserOptions, start_urls: Vec<String>) -> Result<(), String> 
         frames_presented: 0,
         ime_enabled: false,
         debug_events: std::env::var("BROWSER_DEBUG_EVENTS").is_ok(),
+        first_content_traced: false,
+        gpu: None,
+        cpu_fallback_at: None,
+        window_shown: false,
+        anim_at: None,
+        pending_mouse: None,
+        pointer_in_content: false,
+        respawns: HashMap::new(),
+        turn_started: None,
+        frames_by_kind: 0,
+        paint_stats: (Instant::now(), 0, 0),
     };
-    let _ = Instant::now();
     event_loop.run_app(&mut app).map_err(|e| e.to_string())
+}
+
+/// Windows-specific window handling.
+#[cfg(windows)]
+mod win {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use winit::window::Window;
+
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmSetWindowAttribute(hwnd: isize, attribute: u32, value: *const core::ffi::c_void, size: u32) -> i32;
+    }
+    const DWMWA_CLOAK: u32 = 13;
+
+    /// Cloak/uncloak the window: a cloaked window is "visible" (it gets painted and can be
+    /// presented to) but the desktop compositor doesn't show it.
+    pub fn set_cloaked(window: &Window, cloaked: bool) -> bool {
+        let Ok(handle) = window.window_handle() else { return false };
+        let RawWindowHandle::Win32(h) = handle.as_raw() else { return false };
+        let value: i32 = cloaked as i32;
+        // SAFETY: valid HWND of a live window; value points to a BOOL of the given size.
+        let hr = unsafe {
+            DwmSetWindowAttribute(
+                h.hwnd.get(),
+                DWMWA_CLOAK,
+                (&value as *const i32).cast(),
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
+        hr >= 0
+    }
 }

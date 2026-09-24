@@ -18,6 +18,18 @@ node crates/script/js/test/run.js             # JS DOM layer tests (after npm in
 
 Where things live: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Debugging
+
+| Variable / flag | Effect |
+|---|---|
+| `BROWSER_TRACE_STARTUP=1` | startup milestones, UI-thread stalls, paint rate |
+| `BROWSER_DEBUG_EVENTS=1` | log window and renderer events |
+| `--cpu` (or `BROWSER_RENDERER=cpu`) | render the UI with vello_cpu |
+| `BROWSER_ALLOW_SOFTWARE_GPU=1` | also use software GPU adapters (lavapipe, WARP) |
+| `WGPU_BACKEND`, `WGPU_ADAPTER_NAME`, `WGPU_POWER_PREF` | GPU backend / adapter choice |
+| `--single-process` | network service and renderers as threads |
+| `portable` file next to the launcher | profile (and logs) in `profile/` beside it |
+
 ## Guidelines
 
 * Keep changes focused; add a test or a headless reproduction where possible.

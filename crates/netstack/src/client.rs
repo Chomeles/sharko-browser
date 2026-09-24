@@ -193,6 +193,28 @@ impl NetClient {
         Ok(Self::new(callbacks, Backend::Ipc(IpcBackend { sender, shared })))
     }
 
+    /// Like [`connect`](Self::connect), but returns immediately: the connection is made
+    /// on a background thread (retrying while the service starts, up to `timeout`) and
+    /// requests issued meanwhile are queued. Used at startup so that launching the network
+    /// process never blocks the UI.
+    pub fn connect_in_background(endpoint: &str, timeout: Duration) -> NetClient {
+        let callbacks = CallbackPool::new();
+        let shared = Arc::new(IpcShared {
+            pending: Mutex::new(HashMap::new()),
+            cookie_waiters: Mutex::new(HashMap::new()),
+            connected: AtomicBool::new(true),
+            callbacks: callbacks.clone(),
+        });
+        let reader_shared = Arc::clone(&shared);
+        let sender = ipc::connect_in_background::<WireToNetwork, WireFromNetworkIn, _>(
+            endpoint,
+            timeout,
+            "net-client-reader",
+            move |msg| reader_shared.on_message(msg),
+        );
+        Self::new(callbacks, Backend::Ipc(IpcBackend { sender, shared }))
+    }
+
     /// Runs the network stack inside this process with state under `profile_dir`
     /// (single-process mode, tests). Same API and behaviour as [`connect`](Self::connect).
     pub fn in_process(profile_dir: PathBuf) -> NetClient {

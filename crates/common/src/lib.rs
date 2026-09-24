@@ -6,6 +6,7 @@ pub mod i18n;
 pub mod ipc;
 pub mod protocol;
 pub mod resources;
+pub mod trace;
 
 /// Default User-Agent. Chrome-compatible token so sites serve modern markup.
 pub const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
