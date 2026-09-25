@@ -181,3 +181,33 @@ test('inline scripts inside innerHTML never run; javascript: hrefs and setTimeou
   await e.flush();
   assert.strictEqual(e.run('window.__str'), 2);
 });
+
+test('an async script does not run before the parser reaches it', async () => {
+  const html = `<!DOCTYPE html><html><head>
+    <script>window.__log = [];</script>
+    <script src="/blocking.js"></script>
+    <script>__log.push('inline-cfg'); window._cfg = { ok: true };</script>
+    <script async src="/async.js"></script>
+  </head><body></body></html>`;
+  const e = await createEnv({
+    html,
+    routes: {
+      'https://example.com/blocking.js': { body: "__log.push('blocking')", delay: 80 },
+      'https://example.com/async.js': { body: "__log.push('async:' + typeof _cfg)", delay: 5 },
+    },
+    flush: false,
+  });
+  await e.flush();
+  assert.deepStrictEqual(log(e), ['blocking', 'inline-cfg', 'async:object']);
+});
+
+test('named access does not see elements the parser has not reached yet', async () => {
+  const html = `<!DOCTYPE html><html><head>
+    <script>window.__log = []; window.zdconsent = window.zdconsent || { run: [] }; __log.push(Array.isArray(zdconsent.run));
+      document.write('<b id="written"></b>'); __log.push(typeof window.written);
+      const d = document.createElement('div'); d.id = 'made'; document.documentElement.append(d); __log.push(typeof window.made);</script>
+    <script id="zdconsent">__log.push('later:' + (window.zdconsent instanceof HTMLScriptElement === false));</script>
+  </head><body><div id="later"></div><script>__log.push(typeof window.later);</script></body></html>`;
+  const e = await createEnv({ html, routes: {} });
+  assert.deepStrictEqual(log(e), [true, 'object', 'object', 'later:true', 'object']);
+});

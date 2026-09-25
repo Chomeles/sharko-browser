@@ -300,6 +300,11 @@
     return new Uint8Array(out);
   }
   function utf8Decode(bytes) {
+    // The native decoder is ~200x faster (and far lighter) than the loop below, which
+    // builds the string one code point at a time (responseText of a 20 MB body: 5.7 s).
+    if (bytes.length > 256) {
+      try { return N.textDecode(bytes, 'utf-8', false); } catch (_) { /* fall back */ }
+    }
     let out = '';
     const n = bytes.length;
     let i = 0;
@@ -1759,8 +1764,22 @@
   // `credentials` ('omit' | 'same-origin' | 'include'), `cache` and `redirect` ('follow' |
   // 'error' | 'manual') are optional trailing arguments of N.fetch (see NATIVE_API.md Additions).
   const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress) {
+  // `initiator` ('fetch', 'xmlhttprequest'): record a PerformanceResourceTiming entry. The
+  // first downloaded bytes (a progress report) stand in for responseStart.
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator) {
     const reqId = nextReqId++;
+    if (initiator !== undefined) {
+      const timing = { start: N.now(), firstByte: 0 };
+      const userDone = done, userProgress = progress;
+      done = (status, statusText, finalUrl, rflat, rbody, error) => {
+        L.addResourceTiming(url, initiator, timing, status, rbody, error);
+        userDone(status, statusText, finalUrl, rflat, rbody, error);
+      };
+      progress = (loaded, total, upload) => {
+        if (!upload && loaded > 0 && timing.firstByte === 0) timing.firstByte = N.now();
+        if (typeof userProgress === 'function') userProgress(loaded, total, upload);
+      };
+    }
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
@@ -1896,7 +1915,7 @@
           }
           fields = { type, url: fu, status, statusText: `${statusText || ''}`, headers: headersFromFlat(hflat, 'immutable'), redirected };
           resolve(makeResponse(fields, bodyBytes));
-        }, d.credentials, d.cache, d.redirect);
+        }, d.credentials, d.cache, d.redirect, undefined, 'fetch');
         L.addAbortAlgorithm(signal, () => {
           if (finished) return;
           L.cancelNativeFetch(reqId);
@@ -2031,7 +2050,7 @@
             const init = { loaded, total, lengthComputable: total > 0 };
             if (upload) { if (uploadListeners) L.fire(s.upload, 'progress', init, L.ProgressEvent); }
             else L.fire(this, 'progress', init, L.ProgressEvent);
-          });
+          }, 'xmlhttprequest');
       }
       if (s.timeout > 0) {
         s.timer = L.internalTimeout(() => {
@@ -2232,6 +2251,51 @@
   }
   L.defineConstants([XMLHttpRequest, XMLHttpRequest.prototype], { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
   L.defineEventHandlers(XMLHttpRequest.prototype, ['onreadystatechange']);
+
+  // =======================================================================================
+  // TextEncoderStream / TextDecoderStream
+  // =======================================================================================
+  class TextEncoderStream {
+    #ts; #enc = new TextEncoder(); #pendingHigh = '';
+    constructor() {
+      this.#ts = new TransformStream({
+        transform: (chunk, c) => {
+          let s = this.#pendingHigh + `${chunk}`;
+          this.#pendingHigh = '';
+          // A lone high surrogate at the end may pair with the next chunk.
+          const last = s.charCodeAt(s.length - 1);
+          if (last >= 0xd800 && last <= 0xdbff) { this.#pendingHigh = s.slice(-1); s = s.slice(0, -1); }
+          if (s.length) c.enqueue(this.#enc.encode(s));
+        },
+        flush: (c) => { if (this.#pendingHigh) c.enqueue(new Uint8Array([0xef, 0xbf, 0xbd])); },
+      });
+    }
+    get encoding() { return 'utf-8'; }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  class TextDecoderStream {
+    #ts; #dec;
+    constructor(label = 'utf-8', options) {
+      this.#dec = new TextDecoder(label, options);
+      this.#ts = new TransformStream({
+        transform: (chunk, c) => {
+          const bytes = toBytes(chunk);
+          if (bytes === null) throw new TypeError("Failed to execute 'transform' on 'TextDecoderStream': The provided value is not of type '(ArrayBuffer or ArrayBufferView)'.");
+          const s = this.#dec.decode(bytes, { stream: true });
+          if (s.length) c.enqueue(s);
+        },
+        flush: (c) => { const s = this.#dec.decode(); if (s.length) c.enqueue(s); },
+      });
+    }
+    get encoding() { return this.#dec.encoding; }
+    get fatal() { return this.#dec.fatal; }
+    get ignoreBOM() { return this.#dec.ignoreBOM; }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  L.expose('TextEncoderStream', TextEncoderStream);
+  L.expose('TextDecoderStream', TextDecoderStream);
 
   // =======================================================================================
   // WebSocket (the connection itself lives in the network process: N.wsOpen/wsSend/wsClose,
@@ -2891,6 +2955,26 @@
     if (TIMING_KEYS.includes(s)) return 0;
     throw new DOMException(`Failed to execute '${method}' on 'Performance': The mark '${s}' does not exist.`, 'SyntaxError');
   }
+  let resourceBufferSize = 250, bufferFullFired = false;
+  const resourceCount = () => { let n = 0; for (const e of perfEntries) if (e.entryType === 'resource') n++; return n; };
+  L.addResourceTiming = function (url, initiator, timing, status, body, error) {
+    const end = N.now();
+    const failed = (error !== null && error !== undefined) || status === 0;
+    const size = failed || body === null || body === undefined ? 0 : body.byteLength;
+    const responseStart = failed ? 0 : (timing.firstByte || end);
+    const e = new PerformanceResourceTiming(INTERNAL, stripFragment(`${url}`), 'resource', timing.start, end - timing.start, {
+      initiatorType: initiator, nextHopProtocol: '', workerStart: 0, redirectStart: 0, redirectEnd: 0,
+      fetchStart: timing.start, domainLookupStart: timing.start, domainLookupEnd: timing.start,
+      connectStart: timing.start, connectEnd: timing.start, secureConnectionStart: 0, requestStart: timing.start,
+      responseStart, responseEnd: end,
+      // Headers are not measured: estimate them like a typical response.
+      transferSize: failed ? 0 : size + 300, encodedBodySize: size, decodedBodySize: size,
+      renderBlockingStatus: 'non-blocking', responseStatus: failed ? 0 : status, deliveryType: '',
+    });
+    if (resourceCount() < resourceBufferSize) perfEntries.push(e);
+    else if (!bufferFullFired) { bufferFullFired = true; L.postTask(() => L.fire(performance, 'resourcetimingbufferfull', {})); }
+    queuePerfEntry(e);
+  };
   const timingObj = new PerformanceTiming(INTERNAL);
   const navigationObj = new PerformanceNavigation(INTERNAL);
   class Performance extends EventTarget {
@@ -2926,8 +3010,8 @@
     }
     clearMarks(name) { removeEntries('mark', name); }
     clearMeasures(name) { removeEntries('measure', name); }
-    clearResourceTimings() { }
-    setResourceTimingBufferSize() { }
+    clearResourceTimings() { removeEntries('resource'); bufferFullFired = false; }
+    setResourceTimingBufferSize(n) { resourceBufferSize = Math.max(0, Number(n) | 0); bufferFullFired = false; }
     getEntries() { return [navigationEntry()].concat(perfEntries).sort((a, b) => a.startTime - b.startTime); }
     getEntriesByType(type) {
       const t = `${type}`;

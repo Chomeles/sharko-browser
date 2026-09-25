@@ -504,3 +504,21 @@ test('CSS animation and transition events from the style engine', async () => {
   e.hook('onAnimationEvent', id, 'animationend', 'fadeIn', 0.4, '::before');
   assert.deepStrictEqual(Array.from(e.run('ev')), ['transitionend:opacity:0.3:true:anim', 'animationend:fadeIn:::before:true']);
 });
+
+test('TextEncoderStream / TextDecoderStream and resource timing for fetch', async () => {
+  const e = await env();
+  const r = await settle(e, `
+    const enc = new ReadableStream({ start(c) { c.enqueue('h\\u00e9'); c.enqueue('\\ud83d'); c.enqueue('\\ude00!'); c.close(); } })
+      .pipeThrough(new TextEncoderStream());
+    const bytes = [];
+    for (const reader = enc.getReader(); ;) { const { done, value } = await reader.read(); if (done) break; bytes.push(...value); }
+    const dec = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(bytes.slice(0, 2))); c.enqueue(new Uint8Array(bytes.slice(2))); c.close(); } })
+      .pipeThrough(new TextDecoderStream());
+    let text = '';
+    for (const reader = dec.getReader(); ;) { const { done, value } = await reader.read(); if (done) break; text += value; }
+    await (await fetch('/api/data.json')).text();
+    const t = performance.getEntriesByName('https://example.com/api/data.json')[0];
+    return [bytes.join(','), text, t.initiatorType, t.transferSize > 0, t.responseEnd >= t.startTime, performance.getEntriesByType('resource').length];
+  `);
+  assert.deepStrictEqual(Array.from(r), ['104,195,169,240,159,152,128,33', 'hé😀!', 'fetch', true, true, 1]);
+});

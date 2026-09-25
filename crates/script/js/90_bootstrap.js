@@ -25,6 +25,7 @@
     if (name === '' || name.length > 256) return undefined;
     let id = 0;
     try { id = N.getElementById(name); } catch (_) { id = 0; }
+    if (id !== 0 && notYetParsed(id)) id = 0;
     if (id !== 0) return wrap(id);
     let sel = NAMED_SEL_CACHE.get(name);
     if (sel === undefined) {
@@ -34,7 +35,21 @@
       NAMED_SEL_CACHE.set(name, sel);
     }
     try { id = N.querySelector(docId, sel); } catch (_) { id = 0; }
+    if (id !== 0 && notYetParsed(id)) id = 0;
     return id === 0 ? undefined : wrap(id);
+  }
+  // The whole document is parsed before scripts run. While a parser-blocking script
+  // runs, parser-created elements after its insertion point would not exist yet in a
+  // browser: named access must not find them (`window.cfg = window.cfg || {}` next to a
+  // later `<script id=cfg>` would keep the element). Elements created later have higher
+  // ids than any parser-created one.
+  let parserMaxNodeId = 0;
+  function notYetParsed(id) {
+    try {
+      if (id > parserMaxNodeId || inParserScript === null || writeState === null) return false;
+      const pos = N.compareDocumentPosition(writeState.anchor, id);
+      return (pos & 4) !== 0 && (pos & 16) === 0;
+    } catch (_) { return false; }
   }
   const WindowProperties = new Proxy(namedPropsTarget, {
     get(t, p, r) {
@@ -403,11 +418,23 @@
     });
   }
 
+  let parserSeq = 0;               // document order of parser-inserted scripts
+  const asyncWaiting = [];         // fetched async scripts the parser has not reached yet
+  function asyncMayRun(rec) {
+    return rec.seq === undefined || parsingFinished || parserQueue.length === 0 || parserQueue[0].seq > rec.seq;
+  }
+  function releaseAsync() {
+    for (let i = 0; i < asyncWaiting.length;) {
+      const w = asyncWaiting[i];
+      if (asyncMayRun(w.rec)) { asyncWaiting.splice(i, 1); L.postTask(w.run); } else i++;
+    }
+  }
   function pumpParser() {
     if (parserQueue.length === 0) { finishParsing(); return; }
     const rec = parserQueue[0];
     if (rec.state === 'pending') return;
     parserQueue.shift();
+    if (asyncWaiting.length) releaseAsync();
     L.internalTimeout(pumpParser, 0); // next parser step runs in its own task
     if (rec.state === 'error') { fireScriptEvent(rec.el, 'error'); return; }
     if (rec.type === 'module') { deferQueue.push(rec); return; }
@@ -416,6 +443,7 @@
   function finishParsing() {
     if (parsingFinished) return;
     parsingFinished = true;
+    if (asyncWaiting.length) releaseAsync();
     registerBodyHandlers();
     L.milestones.domInteractive = N.now();
     setReadyState('interactive');
@@ -483,10 +511,17 @@
       if (rec.external && rec.async) {
         asyncPending++;
         startScriptFetch(rec, (r) => {
-          asyncPending--;
-          if (r.state === 'error') fireScriptEvent(r.el, 'error');
-          else execClassic(r, 'nonblocking');
-          maybeFireLoad();
+          const run = () => {
+            asyncPending--;
+            if (r.state === 'error') fireScriptEvent(r.el, 'error');
+            else execClassic(r, 'nonblocking');
+            maybeFireLoad();
+          };
+          // An async script cannot run before the parser has reached it: earlier
+          // parser-blocking and inline scripts go first (consent managers configure
+          // themselves in an inline script before their async loader).
+          if (asyncMayRun(r)) run();
+          else asyncWaiting.push({ rec: r, run });
         });
         return 'async';
       }
@@ -517,12 +552,14 @@
     if (typeof N.doctype === 'function') { try { dt = N.doctype(); } catch (_) { /* keep default */ } }
     if (dt === null || dt === undefined) L.quirksMode = true;
     else L.ensureDoctype(docId, dt);
+    for (const id of N.querySelectorAll(docId, '*')) if (id > parserMaxNodeId) parserMaxNodeId = id;
     const ids = N.querySelectorAll(docId, 'script');
     for (const id of ids) {
       L.pendingScripts.delete(id);
       if (N.closest(id, 'template') !== 0) continue;
       const rec = makeRecord(id, true);
       if (rec === null) continue;
+      rec.seq = ++parserSeq;
       if (rec.state === 'error' && rec.external) { L.postTask(() => fireScriptEvent(rec.el, 'error')); continue; }
       if (scheduleParserRecord(rec) === 'blocking') parserQueue.push(rec);
     }
