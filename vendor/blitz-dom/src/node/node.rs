@@ -869,7 +869,7 @@ impl Node {
             if id == root {
                 break;
             }
-            let node = self.with(id);
+            let node = self.try_with(id)?;
             chain.push(node);
             if chain.len() > 1024 {
                 return None;
@@ -926,6 +926,12 @@ impl Node {
 
     pub fn with(&self, id: NodeId) -> &Node {
         self.tree().get(id).unwrap()
+    }
+
+    /// PATCH: like [`with`](Self::with) for ids that may be stale (a `layout_parent`
+    /// recorded before its anonymous box was rebuilt): `None` for a dropped node.
+    pub fn try_with(&self, id: NodeId) -> Option<&Node> {
+        self.tree().get(id)
     }
 
     pub fn print_tree(&self, level: usize) {
@@ -1478,7 +1484,7 @@ impl Node {
                 return Some(node);
             }
             let id = node.layout_parent.get()?;
-            node = self.with(id);
+            node = self.try_with(id)?;
         }
     }
 
@@ -1529,7 +1535,8 @@ impl Node {
         // Recurse up the layout hierarchy
         self.layout_parent
             .get()
-            .map(|i| self.with(i).absolute_position(x, y))
+            .and_then(|i| self.try_with(i))
+            .map(|parent| parent.absolute_position(x, y))
             .unwrap_or(crate::util::Point { x, y })
     }
 
@@ -1562,7 +1569,7 @@ impl Node {
     pub fn offset_parent(&self) -> Option<&Node> {
         let mut node = self;
         loop {
-            node = self.with(node.layout_parent.get()?);
+            node = self.try_with(node.layout_parent.get()?)?;
             if node.is_offset_parent() {
                 return Some(node);
             }
@@ -1583,7 +1590,9 @@ impl Node {
             let Some(parent_id) = current.layout_parent.get() else {
                 break;
             };
-            let parent = self.with(parent_id);
+            let Some(parent) = self.try_with(parent_id) else {
+                break;
+            };
             if parent.is_offset_parent() && !parent.is_static_body() {
                 let border = parent.final_layout().border;
                 x -= border.left;

@@ -211,3 +211,11 @@ Patches so far:
 66. `blitz-dom/src/document.rs`, `mutator.rs`: `linked_stylesheet_source()` keeps the
     source text of each `<link rel=stylesheet>`'s sheet (CSSOM `cssRules` of linked
     sheets).
+67. `blitz-dom/src/node/node.rs`, `document.rs`: walks up `layout_parent` tolerate ids of
+    dropped nodes (`try_with`), instead of panicking in a native (a stale pointer to a
+    rebuilt anonymous box crashed getBoundingClientRect on welt.de once).
+68. `taffy/src/compute/grid/types/grid_item.rs`: a grid item's specified minimum size that
+    can't be resolved during track sizing (a percentage against the indefinite grid area)
+    counts as zero for its minimum contribution instead of falling back to the
+    content-based automatic minimum; `main { min-width: 100% }` in a `1fr` column full of
+    wide slider content stretched the column (n-tv.de grew to 10^35 px).

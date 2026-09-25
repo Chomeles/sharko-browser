@@ -2541,7 +2541,7 @@ impl BaseDocument {
                 return Some(CursorIcon::Pointer);
             }
 
-            maybe_node = node.layout_parent.get().map(|node_id| node.with(node_id));
+            maybe_node = node.layout_parent.get().and_then(|node_id| node.try_with(node_id));
         }
 
         // Return text cursor for text nodes
@@ -2623,7 +2623,7 @@ impl BaseDocument {
         ];
         let mut cur = Some(node_id);
         while let Some(id) = cur {
-            let n = &self.nodes[id];
+            let Some(n) = self.nodes.get(id) else { break };
             if id != node_id {
                 let scroll = n.scroll_offset();
                 for p in &mut corners {
@@ -2677,7 +2677,7 @@ impl BaseDocument {
         let node = &self.nodes[node_id];
         let mut cur = node.layout_parent.get().or(node.parent);
         while let Some(id) = cur {
-            let n = &self.nodes[id];
+            let Some(n) = self.nodes.get(id) else { break };
             if n.primary_styles().is_some_and(|s| {
                 s.clone_position() == style::computed_values::position::T::Fixed
                     || !s.get_box().transform.0.is_empty()
