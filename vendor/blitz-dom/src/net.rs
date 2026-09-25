@@ -66,6 +66,9 @@ pub enum Resource {
     DocumentSrc(String),
     /// PATCH: a `<link rel=preload>` resource was fetched (its `load` event fires).
     Preloaded,
+    /// PATCH: an `@import`ed stylesheet, hooked into its import rule by the document (on
+    /// its own thread: the network callback thread must not borrow the style lock).
+    NestedCss(ServoArc<Locked<ImportRule>>, ServoArc<Stylesheet>),
     None,
 }
 
@@ -229,7 +232,6 @@ impl ServoStylesheetLoader for StylesheetLoader {
                     lock: lock.clone(),
                     media,
                     import_rule: import.clone(),
-                    net_provider: self.net_provider.clone(),
                 },
             ),
         );
@@ -244,7 +246,6 @@ struct NestedStylesheetHandler {
     url: ServoArc<Url>,
     media: ServoArc<Locked<MediaList>>,
     import_rule: ServoArc<Locked<ImportRule>>,
-    net_provider: Arc<dyn NetProvider>,
 }
 
 impl NetHandler for ResourceHandler<NestedStylesheetHandler> {
@@ -268,23 +269,11 @@ impl NetHandler for ResourceHandler<NestedStylesheetHandler> {
             AllowImportRules::Yes,
         ));
 
-        // Fetch @font-face fonts
-        fetch_font_face(
-            self.tx.clone(),
-            self.doc_id,
-            self.node_id,
-            &sheet,
-            &self.data.net_provider,
-            &self.shell_provider,
-            &self.data.lock.read(),
-            self.data.loader.abort_signal.as_ref(),
-        );
-
-        let mut guard = self.data.lock.write();
-        self.data.import_rule.write_with(&mut guard).stylesheet = ImportSheet::Sheet(sheet);
-        drop(guard);
-
-        self.respond(resolved_url, Ok(Resource::None))
+        // PATCH: fonts and the import rule are handled by the document on its thread
+        // (`BaseDocument::load_resource`): reading or writing the shared style lock here
+        // raced with the page ("already immutably borrowed" panics on nytimes.com).
+        let import_rule = self.data.import_rule.clone();
+        self.respond(resolved_url, Ok(Resource::NestedCss(import_rule, sheet)))
     }
 }
 

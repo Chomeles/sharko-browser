@@ -1732,6 +1732,26 @@ impl BaseDocument {
                     self.push_element_load_event(node_id, true);
                 }
             }
+            Resource::NestedCss(import_rule, sheet) => {
+                crate::net::fetch_font_face(
+                    self.tx.clone(),
+                    self.id,
+                    res.node_id,
+                    &sheet,
+                    &self.net_provider,
+                    &self.shell_provider,
+                    &self.guard.read(),
+                    self.abort_signal.as_ref(),
+                );
+                {
+                    let mut guard = self.guard.write();
+                    import_rule.write_with(&mut guard).stylesheet =
+                        style::stylesheets::import_rule::ImportSheet::Sheet(sheet);
+                }
+                self.stylist
+                    .force_stylesheet_origins_dirty(OriginSet::all());
+                self.shell_provider.request_redraw();
+            }
             Resource::None => {
                 // Do nothing
             }

@@ -219,3 +219,7 @@ Patches so far:
     counts as zero for its minimum contribution instead of falling back to the
     content-based automatic minimum; `main { min-width: 100% }` in a `1fr` column full of
     wide slider content stretched the column (n-tv.de grew to 10^35 px).
+69. `blitz-dom/src/net.rs`, `document.rs`: an `@import`ed stylesheet is handed to the
+    document as `Resource::NestedCss` and hooked into its import rule (and its fonts
+    fetched) on the document's thread; the network callback thread wrote the shared
+    style lock, which panicked while the page was styling (nytimes.com: 20 panics).
