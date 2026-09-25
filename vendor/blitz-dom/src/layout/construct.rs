@@ -726,6 +726,15 @@ fn flush_pseudo_elements(doc: &mut BaseDocument, node_id: NodeId) {
             let node = &mut doc.nodes[node_id];
             node.set_pe_by_index(idx, None);
             node.insert_damage(ALL_DAMAGE);
+            // PATCH: also forget it in the element's layout and paint children, which are
+            // not rebuilt for inline elements (the dangling id panicked a later traversal
+            // and left welt.de blank).
+            if let Some(children) = node.layout_children.get_mut().as_mut() {
+                children.retain(|id| *id != pe_node_id);
+            }
+            if let Some(children) = node.paint_children.get_mut().as_mut() {
+                children.retain(|id| *id != pe_node_id);
+            }
         }
 
         // Create pseudo element if it should exist but doesn't

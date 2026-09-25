@@ -38,6 +38,10 @@ impl BaseDocument {
         node_id: NodeId,
         damage_from_parent: RestyleDamage,
     ) -> RestyleDamage {
+        // PATCH: see `clear_damage_and_dirty_flags`.
+        if !self.nodes.contains_key(node_id) {
+            return RestyleDamage::empty();
+        }
         let mut damage = if let Some(data) = self.nodes[node_id]
             .stylo_element_data_opt_mut()
             .and_then(|s| s.get_mut())
@@ -135,6 +139,11 @@ impl BaseDocument {
     /// on all nodes which may carry them, using the `damaged_descendants`
     /// flags to skip clean subtrees (mirroring `propagate_damage_flags`).
     pub(crate) fn clear_damage_and_dirty_flags(&mut self, node_id: NodeId) {
+        // PATCH: tolerate ids of nodes that were dropped meanwhile (a panic here left
+        // welt.de blank).
+        if !self.nodes.contains_key(node_id) {
+            return;
+        }
         {
             let node = &self.nodes[node_id];
             let has_damage = node.damage().is_some_and(|d| !d.is_empty());

@@ -174,3 +174,7 @@ Patches so far:
     available space is fit-content wide (max-content clamped to the space, at least its
     items' minimum sizes), not max-content: text in a flex row inside a column with
     `align-items: flex-start` didn't wrap (heise.de's consent dialog overflowed).
+57. `blitz-dom/src/layout/construct.rs`, `layout/damage.rs`: a removed `::before`/`::after`
+    is also dropped from its element's layout and paint children (not rebuilt for inline
+    elements), and damage traversals skip ids of dropped nodes; the dangling id panicked
+    and left welt.de blank.
