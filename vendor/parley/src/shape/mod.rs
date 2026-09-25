@@ -226,6 +226,23 @@ pub(crate) fn shape_text<'a, B: Brush>(
 
 // Rebuilds the provided `char_cluster` in-place using the existing allocation
 // for the given grapheme `segment_text`, consuming items from `item_infos_iter`.
+/// PATCH: whether a BMP character has Emoji_Presentation=Yes (Unicode emoji-data.txt).
+fn has_bmp_emoji_presentation(ch: char) -> bool {
+    const RANGES: &[(u32, u32)] = &[
+        (0x231A, 0x231B), (0x23E9, 0x23EC), (0x23F0, 0x23F0), (0x23F3, 0x23F3),
+        (0x25FD, 0x25FE), (0x2614, 0x2615), (0x2648, 0x2653), (0x267F, 0x267F),
+        (0x2693, 0x2693), (0x26A1, 0x26A1), (0x26AA, 0x26AB), (0x26BD, 0x26BE),
+        (0x26C4, 0x26C5), (0x26CE, 0x26CE), (0x26D4, 0x26D4), (0x26EA, 0x26EA),
+        (0x26F2, 0x26F3), (0x26F5, 0x26F5), (0x26FA, 0x26FA), (0x26FD, 0x26FD),
+        (0x2705, 0x2705), (0x270A, 0x270B), (0x2728, 0x2728), (0x274C, 0x274C),
+        (0x274E, 0x274E), (0x2753, 0x2755), (0x2757, 0x2757), (0x2795, 0x2797),
+        (0x27B0, 0x27B0), (0x27BF, 0x27BF), (0x2B1B, 0x2B1C), (0x2B50, 0x2B50),
+        (0x2B55, 0x2B55),
+    ];
+    let c = ch as u32;
+    RANGES.iter().any(|&(lo, hi)| c >= lo && c <= hi)
+}
+
 fn fill_cluster_in_place(
     segment_text: &str,
     item_infos_iter: &mut core::slice::Iter<'_, (CharInfo, u16)>,
@@ -277,6 +294,19 @@ fn fill_cluster_in_place(
             style_index: *style_index,
             is_control_character: info.is_control(),
         });
+    }
+
+    // PATCH: a pictograph with the default text presentation (Emoji_Presentation=No, e.g.
+    // ▶ ✔ ❤ ☀) and no U+FE0F is text: it uses the text fonts and their fallbacks like
+    // Chrome, instead of the emoji font first (whose color bitmaps may not render). U+FE0E
+    // asks for text presentation explicitly.
+    if is_emoji_or_pictograph {
+        let has_vs16 = char_cluster.chars.iter().any(|c| c.ch == '\u{FE0F}');
+        let has_vs15 = char_cluster.chars.iter().any(|c| c.ch == '\u{FE0E}');
+        let base = char_cluster.chars.first().map(|c| c.ch).unwrap_or('\0');
+        if !has_vs16 && (has_vs15 || ((base as u32) < 0x10000 && !has_bmp_emoji_presentation(base))) {
+            is_emoji_or_pictograph = false;
+        }
     }
 
     // Finalize cluster metadata

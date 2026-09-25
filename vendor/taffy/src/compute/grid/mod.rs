@@ -54,6 +54,47 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
 ) -> LayoutOutput {
     let LayoutInput { known_dimensions, parent_size, available_space, run_mode, .. } = inputs;
 
+    // PATCH: a grid container whose width is neither known nor set is fit-content wide
+    // under a definite available width: its max-content width, clamped to the available
+    // space but not below its min-content width. Flexible tracks used to keep their
+    // max-content size, so e.g. a `1fr 1fr` grid in a column flex container with
+    // `align-items: flex-start` overflowed it instead of wrapping its text.
+    if known_dimensions.width.is_none() {
+        if let AvailableSpace::Definite(available_width) = available_space.width {
+            let preferred_width = if inputs.sizing_mode == SizingMode::InherentSize {
+                let style = tree.get_grid_container_style(node);
+                style.size().width.maybe_resolve(parent_size.width, |val, basis| tree.calc(val, basis))
+            } else {
+                None
+            };
+            if preferred_width.is_none() {
+                let measure = |tree: &mut Tree, width: AvailableSpace| {
+                    compute_grid_layout(
+                        tree,
+                        node,
+                        LayoutInput {
+                            run_mode: RunMode::ComputeSize,
+                            available_space: Size { width, height: available_space.height },
+                            ..inputs
+                        },
+                    )
+                    .size
+                    .width
+                };
+                let max_content = measure(tree, AvailableSpace::MaxContent);
+                if max_content > available_width + 0.01 {
+                    let min_content = measure(tree, AvailableSpace::MinContent);
+                    let width = f32_max(min_content, available_width);
+                    return compute_grid_layout(
+                        tree,
+                        node,
+                        LayoutInput { known_dimensions: Size { width: Some(width), ..known_dimensions }, ..inputs },
+                    );
+                }
+            }
+        }
+    }
+
     let style = tree.get_grid_container_style(node);
     let direction = style.direction();
     let contain = style.contain();

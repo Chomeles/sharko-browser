@@ -565,6 +565,10 @@ impl BaseDocument {
         let display = {
             let node = self.nodes.get_mut(node_id).unwrap();
             let _damage = node.damage().unwrap_or(ALL_DAMAGE);
+            let is_button = node
+                .data
+                .downcast_element()
+                .is_some_and(|el| el.name.local == crate::local_name!("button"));
 
             // Compute the owned taffy style and display in an inner scope so the
             // immutable borrow of `node` (held by the stylo element data guard)
@@ -593,6 +597,27 @@ impl BaseDocument {
                         right: taffy::LengthPercentageAuto::auto(),
                         top: taffy::LengthPercentageAuto::auto(),
                         bottom: taffy::LengthPercentageAuto::auto(),
+                    };
+                }
+                // PATCH: buttons center their contents with the UA's `justify-content:
+                // center` (they are inline-flex containers, not blocks with an anonymous
+                // content box as in browsers), so `text-align: left/right` on a button
+                // aligns its contents instead.
+                if is_button
+                    && taffy_style.display == taffy::Display::Flex
+                    && taffy_style.flex_direction == taffy::FlexDirection::Row
+                    && taffy_style.justify_content == Some(taffy::JustifyContent::CENTER)
+                {
+                    use style::values::specified::TextAlignKeyword;
+                    let rtl = style.clone_direction() == style::computed_values::direction::T::Rtl;
+                    let start = taffy::JustifyContent::FLEX_START;
+                    let end = taffy::JustifyContent::FLEX_END;
+                    taffy_style.justify_content = match style.clone_text_align() {
+                        TextAlignKeyword::Left | TextAlignKeyword::MozLeft => Some(if rtl { end } else { start }),
+                        TextAlignKeyword::Right | TextAlignKeyword::MozRight => Some(if rtl { start } else { end }),
+                        TextAlignKeyword::Start => Some(start),
+                        TextAlignKeyword::End => Some(end),
+                        _ => taffy_style.justify_content,
                     };
                 }
                 (taffy_style, style.clone_display())

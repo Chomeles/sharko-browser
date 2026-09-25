@@ -181,3 +181,14 @@ Patches so far:
 58. `blitz-dom/src/stylo.rs`: `frameborder` on `<iframe>`/`<frame>` that isn't a non-zero
     integer ("0", "no") maps to zero border widths, as in Chrome (ad iframes showed 2px
     inset borders).
+59. `taffy/src/compute/grid/mod.rs`: a grid container with an unknown width under a
+    definite available width is fit-content wide (its max-content width clamped to the
+    available space, not below its min-content width); `1fr` columns kept their
+    max-content size, so a grid in a column flex container with `align-items:
+    flex-start` overflowed it (focus.de consent dialog).
+60. `blitz-dom/src/layout/damage.rs`, `assets/default.css`: buttons are `box-sizing:
+    border-box` (as in Chrome), and `text-align: left/right/start/end` on a button whose
+    contents the UA centers (`justify-content: center`) aligns them to that side.
+61. `parley/src/shape/mod.rs`: a pictograph with the default text presentation (e.g.
+    ▶ ✔ ❤, Emoji_Presentation=No) and no U+FE0F is shaped with the text fonts and their
+    fallbacks instead of the emoji font first (its color bitmaps didn't render: blank).
