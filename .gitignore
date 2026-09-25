@@ -6,3 +6,4 @@ node_modules/
 !resources/**/*.png
 update-signing.key
 /resources/icudtl.dat
+/tools/api-inventory/out/

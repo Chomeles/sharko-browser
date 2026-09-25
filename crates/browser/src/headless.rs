@@ -30,6 +30,10 @@ pub struct HeadlessOptions {
     pub click_text: Vec<String>,
     /// Scroll by this many CSS px after load (before the screenshot).
     pub scroll_y: f64,
+    /// Before `--eval`, poll this expression until it is truthy (or `timeout` passes).
+    pub wait_for: Option<String>,
+    /// Poll interval for `wait_for`.
+    pub wait_poll: Duration,
 }
 
 impl Default for HeadlessOptions {
@@ -51,6 +55,8 @@ impl Default for HeadlessOptions {
             timings: true,
             clicks: Vec::new(),
             scroll_y: 0.0,
+            wait_for: None,
+            wait_poll: Duration::from_millis(50),
         }
     }
 }
@@ -186,6 +192,47 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
             }),
         );
         d.pump_until(Duration::from_millis(300), |_| false);
+    }
+
+    // Wait for a page condition (test harness completion, a rendered widget, ...).
+    if let Some(cond) = &opts.wait_for {
+        let source = format!("!!({cond})");
+        let deadline = Instant::now() + opts.timeout;
+        let mut n = 0u64;
+        loop {
+            let id = 2000 + n;
+            n += 1;
+            d.browser.send(tab, ToRenderer::Eval { id, source: source.clone() });
+            let ev = d.pump_until(Duration::from_secs(10), |ev| {
+                matches!(
+                    ev,
+                    BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id
+                ) || matches!(ev, BrowserEvent::TabCrashed(_))
+            });
+            match ev {
+                Some(BrowserEvent::TabCrashed(_)) => {
+                    d.browser.shutdown();
+                    return 3;
+                }
+                Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { ok, value, .. }))
+                    if ok && value == "true" =>
+                {
+                    break;
+                }
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                eprintln!("[headless] wait-for timeout after {:?}", opts.timeout);
+                exit = exit.max(4);
+                break;
+            }
+            if let Some(BrowserEvent::TabCrashed(_)) = d.pump_until(opts.wait_poll, |ev| {
+                matches!(ev, BrowserEvent::TabCrashed(_))
+            }) {
+                d.browser.shutdown();
+                return 3;
+            }
+        }
     }
 
     // Evaluate scripts.

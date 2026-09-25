@@ -1,0 +1,85 @@
+<!doctype html>
+<!--
+  Web API inventory. Lists every global of `window` and, for interfaces, the own
+  members of the constructor and its prototype. tools/api-inventory/compare.js runs
+  it in Sharko and in Chromium and diffs the two, which turns "site X breaks" into a
+  ranked list of missing APIs.
+-->
+<meta charset="utf-8">
+<title>API inventory</title>
+<script>
+(() => {
+  const members = (obj) => {
+    const out = {};
+    if (!obj) return out;
+    for (const name of Object.getOwnPropertyNames(obj)) {
+      if (name === 'constructor') continue;
+      let d;
+      try { d = Object.getOwnPropertyDescriptor(obj, name); } catch (_) { continue; }
+      if (!d) continue;
+      out[name] = 'value' in d ? (typeof d.value === 'function' ? 'method' : 'value') : (d.get && d.set ? 'accessor' : d.get ? 'getter' : 'setter');
+    }
+    for (const sym of Object.getOwnPropertySymbols(obj)) out[String(sym)] = 'symbol';
+    return out;
+  };
+  const inv = { globals: {}, interfaces: {} };
+  const names = Object.getOwnPropertyNames(window).sort();
+  for (const name of names) {
+    let v;
+    try { v = window[name]; } catch (_) { inv.globals[name] = 'throws'; continue; }
+    const t = typeof v;
+    inv.globals[name] = t;
+    if (t === 'function' && v.prototype && /^[A-Z]/.test(name)) {
+      // `proto`/`static`: own members (what the interface itself defines); `chain`: the
+      // interfaces up the prototype chain, so compare.js can credit inherited members
+      // to an engine that keeps them on a base class. (Kept compact: the dump is read
+      // back through one --eval result.)
+      const chain = [];
+      let depth = 0;
+      for (let p = Object.getPrototypeOf(v.prototype); p && p !== Object.prototype && depth++ < 12; p = Object.getPrototypeOf(p)) {
+        const c = Object.getOwnPropertyDescriptor(p, 'constructor');
+        chain.push(c && c.value && c.value.name ? c.value.name : '?');
+      }
+      inv.interfaces[name] = { static: members(v), proto: members(v.prototype), chain };
+    }
+  }
+  // Instances whose prototype chain is not reachable from a global constructor.
+  const instances = {
+    'navigator': () => navigator, 'document': () => document, 'location': () => location, 'history': () => history,
+    'screen': () => screen, 'performance': () => performance, 'crypto': () => crypto, 'localStorage': () => localStorage,
+    'document.body': () => document.body, 'document.documentElement.style': () => document.documentElement.style,
+    'navigator.storage': () => navigator.storage, 'navigator.permissions': () => navigator.permissions,
+    'navigator.clipboard': () => navigator.clipboard, 'navigator.mediaDevices': () => navigator.mediaDevices,
+    'navigator.serviceWorker': () => navigator.serviceWorker, 'navigator.userAgentData': () => navigator.userAgentData,
+    'document.fonts': () => document.fonts, 'document.timeline': () => document.timeline,
+    'crypto.subtle': () => crypto.subtle, 'CSS': () => CSS, 'Intl': () => Intl, 'console': () => console,
+    'canvas2d': () => document.createElement('canvas').getContext('2d'),
+    'webgl': () => document.createElement('canvas').getContext('webgl'),
+    'getComputedStyle': () => getComputedStyle(document.documentElement),
+  };
+  inv.instances = {};
+  for (const [name, get] of Object.entries(instances)) {
+    let v;
+    try { v = get(); } catch (_) { inv.instances[name] = 'throws'; continue; }
+    if (v === null || v === undefined) { inv.instances[name] = String(v); continue; }
+    const seen = {};
+    let p = v;
+    let depth = 0;
+    while (p && p !== Object.prototype && depth++ < 8) {
+      Object.assign(seen, members(p));
+      p = Object.getPrototypeOf(p);
+    }
+    inv.instances[name] = seen;
+  }
+  // CSS properties the engine knows (via the CSSStyleDeclaration of a fresh element).
+  const cssProps = new Set();
+  try {
+    const st = document.createElement('div').style;
+    for (const k in st) if (typeof st[k] !== 'function' && /^[a-z]/.test(k)) cssProps.add(k);
+    for (let i = 0; i < st.length; i++) cssProps.add(st.item(i));
+    for (const k of Object.getOwnPropertyNames(Object.getPrototypeOf(st))) if (/^[a-z]/.test(k) && k !== 'length') cssProps.add(k);
+  } catch (_) {}
+  inv.cssProperties = [...cssProps].sort();
+  window.__api = inv;
+})();
+</script>

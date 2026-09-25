@@ -49,9 +49,20 @@ That's **Sharko**.
 | 📜 **V8 JavaScript** | The same JS engine as Chrome, with startup snapshots — and no JS runtime at all for pages that don't need one. |
 | 🔄 **Signed auto-updates** | ed25519-signed releases via GitHub, installed in the background, active on next start. |
 
-## 🧪 Tested side by side with Chromium
+## 🧪 Tested against the specs and side by side with Chromium
 
-Every change is checked by loading the same real sites in Sharko and in Chromium 141
+Conformance is measured with [web-platform-tests](tools/wpt/README.md), the suite every
+major engine runs: `node tools/wpt/run.js` runs thousands of harness tests (DOM, HTML,
+Fetch, URL, encoding, CSSOM, storage, workers, ...) through the headless binary and diffs
+every subtest against `tools/wpt/expected.json`, so a change shows up as new passes or as
+a failing run. `node tools/fuzz/run.js` hammers the DOM with seeded random mutations (and
+native clicks) and reports renderer panics with a reproducible seed.
+`node tools/api-inventory/compare.js` diffs the Web API surface against Chromium, which
+turns "site X breaks" into a list of missing interfaces and members. `tools/check.sh` runs
+the fast suites (JS-layer tests, fuzzer, a quick WPT subset; `--rust` adds `cargo test`)
+before a push.
+
+Every change is also checked by loading the same real sites in Sharko and in Chromium 141
 (headless, 1280×800, cold cache) and comparing screenshots, page height, element count
 and timings. Current state (median of 3 runs):
 
@@ -153,7 +164,12 @@ browser --headless --eval="document.title" --console https://example.com
 browser --headless --dump-dom https://example.com
 browser --headless --click=640,400 --click-wait=2000 --screenshot=after.png https://example.com
 browser --headless --click-text="^(alle )?akzeptieren" --click-wait=5000 --screenshot=home.png https://www.heise.de
+browser --headless --wait-for="window.appReady" --eval="app.state()" https://example.com
 ```
+
+`--wait-for=JS` polls an expression (every `--wait-poll` ms, up to `--timeout`) before the
+`--eval`s run, so a test can wait for a harness or an app to finish instead of guessing a
+`--settle` time.
 
 `SHARKO_DEBUG_FRAMES=1` logs iframe runtimes and their `postMessage`s; with it,
 `--eval="frames:JS"` evaluates in every iframe that runs script.

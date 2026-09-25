@@ -1,0 +1,174 @@
+<!doctype html>
+<!--
+  DOM mutation fuzzer. Loaded by tools/fuzz/run.js through the headless binary with
+  ?seed=N&rounds=M. Every round applies a batch of random tree, attribute, style and
+  geometry operations to a small document, then forces style/layout/hit-testing, so
+  stale cached node ids (layout_children, paint_children, hoisted children, inline
+  brushes), invalidation and slot-map lifetime bugs turn into renderer panics with a
+  reproducible seed instead of into crashes on random websites.
+
+  Only renderer panics, hangs and JS-layer exceptions count as findings; DOM
+  exceptions thrown by the operations themselves are expected and swallowed.
+-->
+<meta charset="utf-8">
+<title>DOM mutation fuzzer</title>
+<style>
+  #arena { width: 600px; min-height: 200px; border: 1px solid #888; font: 14px sans-serif; }
+  .flex { display: flex; flex-wrap: wrap; gap: 4px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .contents { display: contents; }
+  .ib { display: inline-block; width: 40px; height: 20px; background: #cde; }
+  .tbl { display: table; } .row { display: table-row; } .cell { display: table-cell; }
+  .abs { position: absolute; top: 10px; left: 10px; } .fix { position: fixed; bottom: 0; right: 0; }
+  .rel { position: relative; z-index: 2; } .float { float: left; width: 50px; height: 30px; }
+  .hidden { display: none; } .ovf { overflow: hidden; height: 40px; } .scr { overflow: auto; height: 60px; }
+  .xf { transform: rotate(3deg) translate(2px, 1px); } .op { opacity: 0.5; } .clip { clip-path: inset(2px); }
+  .pb::before { content: "«"; color: #a00; } .pa::after { content: "»"; color: #0a0; }
+  .col { columns: 2; } .ws { white-space: pre; } .big { font-size: 28px; } .rtl { direction: rtl; }
+  .stk { position: sticky; top: 0; } .anim { animation: spin 1s linear infinite; }
+  .tr { transition: color 0.3s; } .tr:hover { color: red; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  :focus { outline: 2px solid orange; } input:checked + label { font-weight: bold; }
+  details[open] summary { color: navy; }
+</style>
+<div id="arena"></div>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const seed = parseInt(q.get('seed') || '1', 10);
+  const rounds = parseInt(q.get('rounds') || '200', 10);
+  const opsPerRound = parseInt(q.get('ops') || '12', 10);
+
+  // Mulberry32: tiny seeded PRNG, so a crash is reproducible from its seed.
+  let s = seed >>> 0;
+  const rnd = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const int = (n) => Math.floor(rnd() * n);
+
+  const arena = document.getElementById('arena');
+  const TAGS = ['div', 'span', 'p', 'b', 'a', 'ul', 'li', 'table', 'tr', 'td', 'button', 'input', 'label',
+    'img', 'br', 'section', 'h2', 'pre', 'textarea', 'select', 'option', 'details', 'summary', 'svg', 'iframe',
+    'template', 'slot', 'canvas', 'video', 'hr', 'em', 'code', 'ruby', 'rt', 'wbr', 'fieldset', 'legend'];
+  const CLASSES = ['flex', 'grid', 'contents', 'ib', 'tbl', 'row', 'cell', 'abs', 'fix', 'rel', 'float', 'hidden',
+    'ovf', 'scr', 'xf', 'op', 'clip', 'pb', 'pa', 'col', 'ws', 'big', 'rtl', 'stk', 'anim', 'tr'];
+  const WORDS = ['lorem', 'ipsum', 'Grüße', '日本語', 'emoji😀', 'a­b', 'x'.repeat(60), ' ', '\n', 'العربية', '👨‍👩‍👧', 'ﬁ'];
+  const STYLE_PROPS = [
+    ['display', ['block', 'inline', 'flex', 'grid', 'contents', 'none', 'inline-block', 'table', 'table-cell', 'list-item']],
+    ['position', ['static', 'relative', 'absolute', 'fixed', 'sticky']],
+    ['width', ['auto', '0', '10px', '50%', 'max-content', 'fit-content', '1e6px']],
+    ['height', ['auto', '0', '30px', '100%']],
+    ['margin', ['0', '-10px', '5px', 'auto']],
+    ['padding', ['0', '8px', '50%']],
+    ['float', ['none', 'left', 'right']],
+    ['overflow', ['visible', 'hidden', 'auto', 'clip']],
+    ['transform', ['none', 'scale(0)', 'rotate(45deg)', 'translate(-9999px,0)']],
+    ['zIndex', ['auto', '0', '-1', '999']],
+    ['opacity', ['1', '0', '0.3']],
+    ['fontSize', ['0', '8px', '40px', '150%']],
+    ['lineHeight', ['normal', '0', '3']],
+    ['columns', ['auto', '3']],
+    ['writingMode', ['horizontal-tb', 'vertical-rl']],
+    ['visibility', ['visible', 'hidden', 'collapse']],
+    ['contain', ['none', 'layout', 'size', 'strict']],
+    ['clip', ['auto', 'rect(0 0 0 0)']],
+    ['content', ['normal', '"x"']],
+    ['color', ['red', 'inherit', 'currentColor']],
+  ];
+
+  const all = () => [arena, ...arena.querySelectorAll('*')];
+  const any = () => pick(all());
+  const make = () => {
+    const el = document.createElement(pick(TAGS));
+    if (rnd() < 0.7) el.className = pick(CLASSES);
+    if (rnd() < 0.6) el.textContent = pick(WORDS);
+    if (el.tagName === 'INPUT' && rnd() < 0.5) el.type = pick(['checkbox', 'radio', 'text', 'range', 'file']);
+    if (el.tagName === 'IMG') el.src = pick(['data:image/gif;base64,R0lGODlhAQABAAAAACw=', 'missing.png', '']);
+    return el;
+  };
+  const html = (depth) => {
+    if (depth <= 0) return pick(WORDS);
+    let out = '';
+    for (let i = 0, n = 1 + int(3); i < n; i++) {
+      const tag = pick(TAGS);
+      const cls = rnd() < 0.7 ? ` class="${pick(CLASSES)}"` : '';
+      out += ['br', 'hr', 'img', 'wbr', 'input'].includes(tag) ? `<${tag}${cls}>` : `<${tag}${cls}>${html(depth - 1)}</${tag}>`;
+    }
+    return out;
+  };
+
+  const OPS = [
+    () => any().appendChild(make()),
+    () => { const p = any(); p.insertBefore(make(), p.childNodes[int(p.childNodes.length + 1)] || null); },
+    () => { const e = any(); if (e !== arena) e.remove(); },
+    () => { const e = any(); if (e !== arena) any().appendChild(e); },
+    () => { any().innerHTML = html(1 + int(3)); },
+    () => { any().textContent = pick(WORDS); },
+    () => { const e = any(); e.className = rnd() < 0.3 ? '' : pick(CLASSES) + (rnd() < 0.4 ? ' ' + pick(CLASSES) : ''); },
+    () => { const [p, vals] = pick(STYLE_PROPS); any().style[p] = pick(vals); },
+    () => { any().style.cssText = rnd() < 0.5 ? '' : 'display:none;position:absolute'; },
+    () => { const e = any(); e.setAttribute(pick(['id', 'title', 'hidden', 'dir', 'lang', 'contenteditable', 'open', 'checked', 'disabled', 'tabindex', 'slot']), pick(['', 'x', 'rtl', 'true', '0'])); },
+    () => { const e = any(); e.removeAttribute(pick(['class', 'style', 'id', 'hidden', 'open', 'checked'])); },
+    () => { const e = any(); if (e.replaceWith) e.replaceWith(make(), pick(WORDS)); },
+    () => { const e = any(); if (e.before) e.before(make()); if (e.after) e.after(pick(WORDS)); },
+    () => { const e = any(); const c = e.cloneNode(rnd() < 0.5); any().appendChild(c); },
+    () => { const e = any(); if (e.firstChild) e.firstChild.remove(); },
+    () => { any().replaceChildren(make(), make()); },
+    () => { const t = document.createTextNode(pick(WORDS)); any().appendChild(t); t.data = pick(WORDS); t.splitText(int(t.length + 1)); },
+    () => { const e = any(); if (e.attachShadow && !e.shadowRoot) try { e.attachShadow({ mode: 'open' }).innerHTML = '<slot></slot>' + html(1); } catch (_) {} },
+    () => { const e = any(); if (e.focus) e.focus(); },
+    () => { const e = any(); if (e.blur) e.blur(); },
+    () => { const e = any(); if ('checked' in e) e.checked = !e.checked; },
+    () => { const e = any(); if (e.tagName === 'DETAILS') e.open = !e.open; },
+    () => { const e = any(); e.scrollIntoView({ block: pick(['start', 'center', 'end', 'nearest']) }); },
+    () => { const e = any(); e.scrollTop = int(200); e.scrollLeft = int(50); },
+    () => { window.scrollTo(int(50), int(500)); },
+    () => { const r = document.createRange(); const a = any(), b = any(); try { r.setStart(a, 0); r.setEnd(b, 0); r.getClientRects(); r.getBoundingClientRect(); } catch (_) {} },
+    () => { const sel = getSelection(); const e = any(); try { sel.selectAllChildren(e); sel.toString(); } catch (_) {} },
+    () => { const e = any(); if (e.animate) e.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 50 + int(300) }); },
+    () => { const e = any(); if (e.insertAdjacentHTML) e.insertAdjacentHTML(pick(['beforebegin', 'afterbegin', 'beforeend', 'afterend']), html(2)); },
+    () => { const f = document.createDocumentFragment(); f.appendChild(make()); f.appendChild(make()); any().appendChild(f); },
+    () => { const e = any(); e.hidden = !e.hidden; },
+    () => { document.body.style.zoom = pick(['1', '1.5', '0.5']); },
+    () => { arena.style.width = pick(['600px', '100px', '0', 'auto', '3000px']); },
+  ];
+  const READS = [
+    () => any().getBoundingClientRect(),
+    () => any().getClientRects(),
+    () => any().offsetParent,
+    () => any().offsetTop + any().offsetLeft + any().offsetHeight,
+    () => any().scrollHeight + any().clientWidth,
+    () => getComputedStyle(any()).display,
+    () => getComputedStyle(any(), '::before').content,
+    () => { for (let i = 0; i < 8; i++) document.elementFromPoint(int(700), int(400)); },
+    () => document.elementsFromPoint(int(700), int(400)),
+    () => any().innerText,
+    () => any().matches(':hover, :focus, :checked, :empty, :has(*)'),
+    () => arena.querySelectorAll(':not(.hidden) > *:nth-child(2n+1)').length,
+    () => document.caretPositionFromPoint && document.caretPositionFromPoint(int(700), int(400)),
+    () => any().checkVisibility && any().checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }),
+  ];
+
+  const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  const errors = [];
+  window.__fuzz_progress = 0;
+  addEventListener('error', (e) => errors.push(`${e.message} @${e.filename}:${e.lineno}`));
+  for (let round = 0; round < rounds; round++) {
+    for (let i = 0; i < opsPerRound; i++) {
+      try { pick(OPS)(); } catch (_) {}
+      if (rnd() < 0.5) { try { pick(READS)(); } catch (_) {} }
+    }
+    if (all().length > 400) arena.innerHTML = html(2); // keep the tree small and fast
+    window.__fuzz_progress = round + 1;
+    await frame();
+  }
+  arena.innerHTML = '';
+  await frame();
+  window.__fuzz_done = { seed, rounds, errors: errors.slice(0, 10), nodes: all().length };
+})();
+</script>
