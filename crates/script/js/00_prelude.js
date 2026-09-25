@@ -78,13 +78,16 @@
   // Convert an exception thrown by a native function ("HierarchyRequestError: ...") into
   // a DOMException (or a proper TypeError/RangeError).
   const NATIVE_ERR_RE = /^([A-Za-z]+Error):\s?([\s\S]*)$/;
+  // DOMException names without a legacy code.
+  const MODERN_DOMEXC = ['EncodingError', 'NotReadableError', 'UnknownError', 'ConstraintError', 'DataError',
+    'TransactionInactiveError', 'ReadOnlyError', 'VersionError', 'OperationError', 'NotAllowedError'];
   L.fromNative = function (e) {
     if (e instanceof DOMException) return e;
     const msg = e && typeof e.message === 'string' ? e.message : null;
     if (msg !== null) {
       const m = NATIVE_ERR_RE.exec(msg);
       if (m) {
-        if (m[1] in DOMEXC_CODES) return new DOMException(m[2], m[1]);
+        if (m[1] in DOMEXC_CODES || MODERN_DOMEXC.includes(m[1])) return new DOMException(m[2], m[1]);
         if (m[1] === 'TypeError') return new TypeError(m[2]);
         if (m[1] === 'RangeError') return new RangeError(m[2]);
       }

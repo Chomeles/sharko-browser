@@ -75,6 +75,10 @@ struct Page {
     script_ms: f64,
     metrics_sent: bool,
     first_frame_costs: Option<(f64, f64)>,
+    /// The last frame sent (its geometry and commands): an identical repaint (an animation
+    /// that is off screen or clipped away, a timer that restyles nothing visible) is not
+    /// sent, so the browser process doesn't re-rasterize an unchanged page.
+    last_sent: Option<(FrameGeometry, Vec<common::display_list::Cmd>)>,
     /// `<!DOCTYPE>` of the document (for a JS runtime created later, see `ensure_runtime`).
     doctype: Option<(String, String, String)>,
 }
@@ -667,6 +671,7 @@ impl Renderer {
             script_ms: 0.0,
             metrics_sent: false,
             first_frame_costs: None,
+            last_sent: None,
             doctype: script::parse_doctype(html),
         };
         if self.config.javascript {
@@ -914,6 +919,30 @@ impl Renderer {
         }
 
         let scroll = page.doc.viewport_scroll();
+        let geometry = FrameGeometry {
+            width,
+            height,
+            scale: scale as f32,
+            content_width,
+            content_height,
+            scroll_x: scroll.x as f32,
+            scroll_y: scroll.y as f32,
+        };
+        let unchanged = capture.is_none()
+            && list.new_fonts.is_empty()
+            && list.new_images.is_empty()
+            && page
+                .last_sent
+                .as_ref()
+                .is_some_and(|(g, cmds)| *g == geometry && *cmds == list.cmds);
+        if unchanged {
+            return;
+        }
+        page.last_sent = if capture.is_none() {
+            Some((geometry, list.cmds.clone()))
+        } else {
+            None
+        };
         self.frame_seq += 1;
         let frame = Frame {
             seq: self.frame_seq,
@@ -948,6 +977,18 @@ impl Renderer {
             });
         }
     }
+}
+
+/// A frame's size, scale and scroll position (see `Page::last_sent`).
+#[derive(PartialEq)]
+struct FrameGeometry {
+    width: u32,
+    height: u32,
+    scale: f32,
+    content_width: f32,
+    content_height: f32,
+    scroll_x: f32,
+    scroll_y: f32,
 }
 
 /// Scrollable size of the document in CSS px: the root box or its overflowing content

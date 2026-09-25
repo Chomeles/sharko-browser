@@ -158,3 +158,6 @@ Patches so far:
     decoded images are no longer copied before the RGBA conversion.
 51. `blitz-dom/src/document.rs`: `getBoundingClientRect()` of an `<img>` (and other
     replaced elements) without data is its own box, not its line's fragment.
+52. `blitz-dom/src/resolve.rs`: transform resolution never skips anonymous blocks (their
+    damage isn't tracked): animated inline-blocks next to blocks kept the transform of
+    their first keyframe, so e.g. `scale(0)` spinners stayed invisible.

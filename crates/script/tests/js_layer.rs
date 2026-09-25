@@ -535,3 +535,34 @@ fn js_layer_import_maps() {
     assert!(e.host.errors().is_empty(), "{:#?}", e.host.errors());
     assert_eq!(e.eval("[d, u]"), r#"["dep+x","x"]"#);
 }
+
+/// Web Crypto on the aws-lc-rs natives: known answers (checked against Chromium) for
+/// AES-GCM, HMAC, PBKDF2 and SHA-256, and a failed authentication.
+#[test]
+fn js_layer_web_crypto() {
+    let mut e = js_env(PAGE);
+    e.eval(
+        r#"globalThis.cr = null; (async () => {
+      const S = crypto.subtle, enc = new TextEncoder();
+      const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+      const bytes = (n, s) => new Uint8Array(n).map((_, i) => (i * s + 7) & 255);
+      const msg = enc.encode('Hello, Sharko! The quick brown fox jumps over the lazy dog.');
+      const gcm = await S.importKey('raw', bytes(32, 3), 'AES-GCM', true, ['encrypt', 'decrypt']);
+      const params = { name: 'AES-GCM', iv: bytes(12, 5), additionalData: enc.encode('aad') };
+      const ct = await S.encrypt(params, gcm, msg);
+      const pt = new TextDecoder().decode(await S.decrypt(params, gcm, ct));
+      let tamper = 'none';
+      try { const c = new Uint8Array(ct).slice(); c[0] ^= 1; await S.decrypt(params, gcm, c); } catch (err) { tamper = err.name; }
+      const hm = await S.importKey('raw', bytes(32, 3), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const pb = await S.importKey('raw', enc.encode('password'), 'PBKDF2', false, ['deriveBits']);
+      const bits = await S.deriveBits({ name: 'PBKDF2', salt: enc.encode('salt'), iterations: 1000, hash: 'SHA-256' }, pb, 256);
+      cr = [hex(ct).slice(0, 32), pt.slice(0, 6), tamper, hex(await S.sign('HMAC', hm, msg)).slice(0, 16),
+        hex(bits).slice(0, 16), hex(await S.digest('SHA-256', msg)).slice(0, 16), String(gcm), gcm.algorithm.length];
+    })(); 1"#,
+    );
+    run_timers_for(&mut e, Duration::from_millis(10));
+    assert_eq!(
+        e.eval("cr"),
+        r#"["f5b251874e90c050b5106b700646beb4","Hello,","OperationError","a270d36291d79755","632c2812e46d4604","402e800b29584d63","[object CryptoKey]",256]"#
+    );
+}

@@ -1,5 +1,6 @@
 //! The `__native` object: function table, installation and the call trampoline.
 
+mod crypto;
 mod forms_natives;
 mod misc;
 mod tree;
@@ -248,6 +249,11 @@ natives_table! {
     "urlParse" => misc::n_url_parse,
     "urlSet" => misc::n_url_set,
     "randomBytes" => misc::n_random_bytes,
+    "cryptoDigest" => crypto::n_crypto_digest,
+    "cryptoHmac" => crypto::n_crypto_hmac,
+    "cryptoAes" => crypto::n_crypto_aes,
+    "cryptoPbkdf2" => crypto::n_crypto_pbkdf2,
+    "cryptoHkdf" => crypto::n_crypto_hkdf,
     "textEncode" => misc::n_text_encode,
     "textDecode" => misc::n_text_decode,
     "userAgent" => misc::n_user_agent,

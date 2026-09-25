@@ -166,10 +166,14 @@ impl BaseDocument {
             return Rect::ZERO;
         }
 
-        if !self.nodes[node_id]
-            .damage()
-            .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
-            .unwrap_or(false)
+        // PATCH: anonymous blocks carry no damage of their own (damage propagates along
+        // DOM children, which bypass them), so they are never skipped: animated
+        // inline-blocks next to blocks kept the transform of their first keyframe.
+        if !self.nodes[node_id].is_anonymous()
+            && !self.nodes[node_id]
+                .damage()
+                .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
+                .unwrap_or(false)
         {
             return *self.nodes[node_id].scrollable_overflow();
         }

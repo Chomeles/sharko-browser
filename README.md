@@ -168,6 +168,8 @@ and reports differences (for layout development).
 - iframes render but run no JavaScript; Shadow DOM is emulated (styles are scoped,
   declarative shadow roots work, but the shadow tree is part of the normal DOM);
   `position: sticky` only vertically
+- Web Crypto covers SHA, HMAC, AES (GCM/CBC/CTR/KW), PBKDF2 and HKDF; no ECDSA, ECDH,
+  RSA or Ed25519 yet
 - No downloads, bookmarks, extensions, password manager yet
 - Bot-protection pages (Cloudflare challenges etc.) may block the browser
 
