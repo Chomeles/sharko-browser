@@ -253,7 +253,8 @@ Patches so far:
     A `srcdoc` document records the `<iframe>`'s `load` event like a fetched one (the
     initial empty document records none).
 75. `blitz-dom/src/document.rs`: `remove_sub_document` keeps the removed iframe document
-    alive until the next `handle_messages()`. Script realms hold raw pointers to the
-    documents of their frames for the duration of a script entry; a frame removed during
-    that entry (a script removing its own `<iframe>`) must not free the document under a
-    realm that is still finishing its task.
+    alive until the host calls `drop_detached_sub_documents()` (the renderer does, between
+    tasks). Script realms hold raw pointers to the documents of their frames for the
+    duration of a script entry; a frame removed during that entry (a script removing an
+    `<iframe>` and then using its document's objects, or an iframe removing itself) must
+    not free the document under a realm that is still running.

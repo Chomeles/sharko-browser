@@ -24018,9 +24018,6 @@
    "Adopting a shadow host's ancestor will empty adoptedStyleSheets if adopting to a different document": "FAIL"
   }
  },
- "/css/cssom/CSSStyleSheet-modify-after-removal.html": {
-  "status": "CRASH"
- },
  "/css/cssom/CSSStyleSheet-replace-detach-old-rules.html": {
   "status": "OK",
   "subtests": {
@@ -24074,10 +24071,7 @@
   }
  },
  "/css/cssom/HTMLLinkElement-load-event-002.html": {
-  "status": "ERROR",
-  "subtests": {
-   "Load event doesn't fire on removed link": "FAIL"
-  }
+  "status": "ERROR"
  },
  "/css/cssom/HTMLLinkElement-load-event.html": {
   "status": "OK",
@@ -24155,10 +24149,7 @@
   }
  },
  "/css/cssom/border-shorthand-serialization.html": {
-  "status": "OK",
-  "subtests": {
-   "Border shorthand is serialized correctly if all border-image-* are set to their initial specified values.": "FAIL"
-  }
+  "status": "ERROR"
  },
  "/css/cssom/caretPositionFromPoint-audioVideo.html": {
   "status": "OK",

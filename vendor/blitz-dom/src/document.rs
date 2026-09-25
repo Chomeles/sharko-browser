@@ -324,8 +324,8 @@ pub struct BaseDocument {
     pub(crate) controls_to_form: HashMap<NodeId, NodeId>,
     /// Nodes that contain sub documents
     pub(crate) sub_document_nodes: HashSet<NodeId>,
-    /// PATCH: sub-documents removed since the last `handle_messages()` (kept alive until
-    /// then, see `remove_sub_document`).
+    /// PATCH: sub-documents removed since the last `drop_detached_sub_documents()` (kept
+    /// alive until then, see `remove_sub_document`).
     pub(crate) detached_sub_documents: Vec<Box<dyn Document>>,
     /// PATCH: inline roots whose line breaks a measurement overwrote after their final
     /// layout (see `relayout_stale_inline_roots`).
@@ -844,9 +844,9 @@ impl BaseDocument {
     }
 
     pub fn remove_sub_document(&mut self, node_id: NodeId) {
-        // PATCH: the document stays alive until the next `handle_messages()`: a script
-        // may be running in it (an iframe removing itself), and other realms may reach it
-        // during the current task.
+        // PATCH: the document stays alive until the host's next
+        // `drop_detached_sub_documents()`: a script may be running in it (an iframe
+        // removing itself), and other realms may reach it during the current task.
         if let Some(el) = self.nodes[node_id].element_data_mut()
             && let SpecialElementData::SubDocument(_) = &el.special_data
             && let SpecialElementData::SubDocument(doc) =
@@ -1606,9 +1606,14 @@ impl BaseDocument {
         }
     }
 
-    pub fn handle_messages(&mut self) {
-        // PATCH: sub-documents removed during the last task are gone now.
+    /// PATCH: free the sub-documents removed since the last call. Only for the host, at
+    /// a point where no script runs (`handle_messages()` also runs during a layout a
+    /// script forced, when a realm may still point at a document removed in that task).
+    pub fn drop_detached_sub_documents(&mut self) {
         self.detached_sub_documents.clear();
+    }
+
+    pub fn handle_messages(&mut self) {
         // Remove event Reciever from the Document so that we can process events
         // without holding a borrow to the Document
         let rx = self.rx.take().unwrap();

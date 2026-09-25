@@ -1112,6 +1112,14 @@ impl Renderer {
     /// documents that went away); adopt realms the runtime created on demand.
     fn sync_frames(&mut self) {
         let Some(page) = &mut self.page else { return };
+        // No script runs here: the documents of iframes removed during the last tasks can
+        // go (their realms are removed below).
+        page.doc.drop_detached_sub_documents();
+        for key in page.frames.keys() {
+            if let Some(sub) = subdoc_mut(&mut page.doc, key) {
+                sub.drop_detached_sub_documents();
+            }
+        }
         // Realms created on demand (a same-origin script reached into the frame).
         let on_demand: Vec<(Vec<u64>, Rc<RendererHost>)> =
             page.host.frame_hosts.borrow_mut().drain().collect();
