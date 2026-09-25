@@ -3272,6 +3272,18 @@
   class CSSLayerStatementRule extends CSSRule { get nameList() { return Object.freeze(rd(this).prelude.replace(/^@layer\s*/i, '').split(',').map((s) => s.trim())); } }
   class CSSPropertyRule extends CSSRule { get name() { return rd(this).prelude.replace(/^@property\s*/i, ''); } }
 
+  // At-rules browsers drop from the CSSOM: `@charset` and unknown ones.
+  const KNOWN_AT_RULES = /^@(-webkit-|-moz-)?(media|supports|container|layer|import|font-face|keyframes|namespace|page|counter-style|property|scope|font-feature-values|font-palette-values|starting-style|view-transition|position-try|document)\b/;
+  function keepsRule(item) {
+    const p = item.prelude;
+    if (p.charCodeAt(0) !== 64) return true;
+    return KNOWN_AT_RULES.test(p.toLowerCase());
+  }
+  function makeRules(items, sheet, parent) {
+    const out = [];
+    for (const item of items) if (keepsRule(item)) out.push(makeRule(item, sheet, parent));
+    return out;
+  }
   function makeRule(item, sheet, parent) {
     const prelude = item.prelude;
     const lower = prelude.toLowerCase();
@@ -3294,7 +3306,7 @@
     const d = { prelude, body: item.body, text: item.text, sheet, parent: parent || null, type, children: [], style: null, decls: null };
     ruleData.set(r, d);
     if (nested && item.body !== null) {
-      for (const sub of splitRules(item.body)) d.children.push(makeRule(sub, sheet, r));
+      d.children = makeRules(splitRules(item.body), sheet, r);
     }
     return r;
   }
@@ -3330,7 +3342,7 @@
     #get;
     constructor(token, get) { if (token !== INTERNAL) throw L.illegal(); this.#get = get; }
     static { L.crlItems = (o) => o.#get(); }
-    get length() { return L.crlItems(this).length; }
+    get length() { const n = L.crlItems(this).length; if (n > 256) L.ensureIndexed(CSSRuleList.prototype, n); return n; }
     item(i) { const v = L.crlItems(this)[Number(i) >>> 0]; return v === undefined ? null : v; }
     *[Symbol.iterator]() { yield* L.crlItems(this); }
   }
@@ -3424,7 +3436,7 @@
     replaceSync(text) {
       const d = sheetDataOf(this);
       if (!d.constructed) throw new DOMException("Failed to execute 'replaceSync' on 'CSSStyleSheet': Can't call replaceSync on non-constructed CSSStyleSheets.", 'NotAllowedError');
-      d.rules = splitRules(`${text}`).filter((i) => !/^@import/i.test(i.prelude)).map((i) => makeRule(i, this, null));
+      d.rules = makeRules(splitRules(`${text}`).filter((i) => !/^@import/i.test(i.prelude)), this, null);
       d.rewrite = true;
       markSheetDirty(this);
     }
@@ -3439,14 +3451,14 @@
       const text = N.linkSheetText(idOf(d.owner));
       if (text === null) return;
       d.text = text;
-      d.rules = splitRules(text).map((i) => makeRule(i, s, null));
+      d.rules = makeRules(splitRules(text), s, null);
       return;
     }
     if (d.pending !== '' || d.rewrite) return; // our own changes not flushed yet: JS state is authoritative
     const text = N.textContent(idOf(d.owner));
     if (text === d.text) return;
     d.text = text;
-    d.rules = splitRules(text).map((i) => makeRule(i, s, null));
+    d.rules = makeRules(splitRules(text), s, null);
   }
   // A linked sheet from another origin hides its rules (as in browsers).
   function checkSheetAccess(s, what) {
@@ -3501,7 +3513,7 @@
         return out;
       };
     }
-    get length() { return L.sslItems(this).length; }
+    get length() { const n = L.sslItems(this).length; if (n > 32) L.ensureIndexed(StyleSheetList.prototype, n); return n; }
     item(i) { const v = L.sslItems(this)[Number(i) >>> 0]; return v === undefined ? null : v; }
     *[Symbol.iterator]() { yield* L.sslItems(this); }
   }

@@ -3863,6 +3863,51 @@
     get saveData() { return false; }
   }
   L.defineEventHandlers(NetworkInformation.prototype, ['onchange']);
+  class DeprecatedStorageQuota {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    queryUsageAndQuota(success, error) {
+      if (typeof success !== 'function') throw new TypeError("Failed to execute 'queryUsageAndQuota' on 'DeprecatedStorageQuota': parameter 1 is not of type 'Function'.");
+      L.microtask(() => { try { success(0, 299977904946); } catch (e) { L.reportException(e); } });
+    }
+    requestQuota(bytes, success, error) {
+      L.microtask(() => { try { if (typeof success === 'function') success(Number(bytes) || 0); } catch (e) { L.reportException(e); } });
+    }
+  }
+  // Notifications: never granted (no permission prompt), like a denied site in Chrome.
+  class Notification extends EventTarget {
+    #title; #options;
+    constructor(title, options) {
+      super();
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'Notification': 1 argument required, but only 0 present.");
+      this.#title = `${title}`;
+      this.#options = options !== null && typeof options === 'object' ? options : {};
+      L.microtask(() => L.fire(this, 'error', {}));
+    }
+    static get permission() { return 'denied'; }
+    static get maxActions() { return 2; }
+    static requestPermission(callback) {
+      const p = L.resolvedPromise('denied');
+      if (typeof callback === 'function') L.promiseThen.call(p, (v) => { try { callback(v); } catch (e) { L.reportException(e); } });
+      return p;
+    }
+    get title() { return this.#title; }
+    get dir() { return this.#options.dir === undefined ? 'auto' : `${this.#options.dir}`; }
+    get lang() { return this.#options.lang === undefined ? '' : `${this.#options.lang}`; }
+    get body() { return this.#options.body === undefined ? '' : `${this.#options.body}`; }
+    get tag() { return this.#options.tag === undefined ? '' : `${this.#options.tag}`; }
+    get icon() { return this.#options.icon === undefined ? '' : `${this.#options.icon}`; }
+    get badge() { return this.#options.badge === undefined ? '' : `${this.#options.badge}`; }
+    get image() { return this.#options.image === undefined ? '' : `${this.#options.image}`; }
+    get data() { return this.#options.data === undefined ? null : this.#options.data; }
+    get silent() { return this.#options.silent === undefined ? null : !!this.#options.silent; }
+    get requireInteraction() { return !!this.#options.requireInteraction; }
+    get renotify() { return !!this.#options.renotify; }
+    get actions() { return Object.freeze([]); }
+    get timestamp() { return this.#options.timestamp === undefined ? Date.now() : Number(this.#options.timestamp); }
+    get vibrate() { return Object.freeze([]); }
+    close() { }
+  }
+  L.defineEventHandlers(Notification.prototype, ['onclick', 'onshow', 'onerror', 'onclose']);
   class StorageManager {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     estimate() { return L.resolvedPromise({ quota: 299977904946, usage: 0, usageDetails: {} }); }
@@ -3981,6 +4026,9 @@
     get userAgentData() { return lazy('uad', () => new NavigatorUAData(INTERNAL)); }
     get connection() { return lazy('connection', () => new NetworkInformation(INTERNAL)); }
     get storage() { return lazy('storage', () => new StorageManager(INTERNAL)); }
+    // Legacy quota API (still present in Chrome; feature-detected by some scripts).
+    get webkitTemporaryStorage() { return lazy('webkitTemporaryStorage', () => new DeprecatedStorageQuota(INTERNAL)); }
+    get webkitPersistentStorage() { return lazy('webkitPersistentStorage', () => new DeprecatedStorageQuota(INTERNAL)); }
     get geolocation() { return lazy('geolocation', () => new Geolocation(INTERNAL)); }
     get locks() { return lazy('locks', () => new LockManager(INTERNAL)); }
     // No `serviceWorker` / `mediaDevices` members (like Chrome in an insecure context):
@@ -5417,7 +5465,7 @@
     Crypto, SubtleCrypto, CryptoKey, Performance, PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
     PerformanceNavigationTiming, PerformanceTiming, PerformanceNavigation, PerformanceObserver, PerformanceObserverEntryList,
     Navigator, MimeType, MimeTypeArray, Plugin, PluginArray, Permissions, PermissionStatus, Clipboard, ClipboardItem,
-    NavigatorUAData, NetworkInformation, StorageManager, Geolocation, GeolocationPositionError, LockManager, Lock,
+    NavigatorUAData, NetworkInformation, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
     Screen, ScreenOrientation, VisualViewport, Location, History, DOMStringList, Storage, MediaQueryList,
     IntersectionObserver, IntersectionObserverEntry, ResizeObserver, ResizeObserverEntry, ResizeObserverSize,
     FontFace, FontFaceSet, DataTransfer, DataTransferItem, DataTransferItemList,
