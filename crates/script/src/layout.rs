@@ -113,6 +113,28 @@ pub(crate) fn n_get_client_rects(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.textRects(textId, start, end)` -> flat `[x, y, w, h, ...]` client rects of
+/// a text node's text between two UTF-16 offsets (one per line box; a zero-width rect for
+/// an empty range), or `null` when the text isn't laid out.
+pub(crate) fn n_text_rects(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    let start = cx.num(1).max(0.0) as usize;
+    let end = cx.num(2).max(0.0) as usize;
+    ensure_layout(cx.st, doc);
+    match doc.text_range_client_rects(id, start, end) {
+        Some(rects) => {
+            let mut out = Vec::with_capacity(rects.len() * 4);
+            for r in rects {
+                out.extend_from_slice(&[r.x, r.y, r.width, r.height]);
+            }
+            cx.ret_f64s(&out);
+        }
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
 pub(crate) fn n_offset_metrics(cx: &mut Cx) -> NResult {
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;
@@ -278,18 +300,37 @@ pub(crate) fn n_set_scroll(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// `N.scrollIntoView(id, block, inline, behavior)`; the strings are already normalized
+/// from the `scrollIntoView()` argument by the JS layer.
 pub(crate) fn n_scroll_into_view(cx: &mut Cx) -> NResult {
-    // Read the (optional) `block` argument first: converting it may run user code, and
-    // the document must not be borrowed across that.
-    let block = if cx.len() > 1 {
-        cx.with_str(1, |s| match s {
+    // Read the string arguments first: converting them may run user code, and the
+    // document must not be borrowed across that.
+    fn position(s: &str, default: ScrollLogicalPosition) -> ScrollLogicalPosition {
+        match s {
+            "start" => ScrollLogicalPosition::Start,
             "center" => ScrollLogicalPosition::Center,
             "end" => ScrollLogicalPosition::End,
             "nearest" => ScrollLogicalPosition::Nearest,
-            _ => ScrollLogicalPosition::Start,
-        })?
+            _ => default,
+        }
+    }
+    let block = if cx.len() > 1 {
+        cx.with_str(1, |s| position(s, ScrollLogicalPosition::Start))?
     } else {
         ScrollLogicalPosition::Start
+    };
+    let inline = if cx.len() > 2 {
+        cx.with_str(2, |s| position(s, ScrollLogicalPosition::Nearest))?
+    } else {
+        ScrollLogicalPosition::Nearest
+    };
+    let behavior = if cx.len() > 3 {
+        cx.with_str(3, |s| match s {
+            "smooth" => ScrollBehavior::Smooth,
+            _ => ScrollBehavior::Instant,
+        })?
+    } else {
+        ScrollBehavior::Instant
     };
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;
@@ -298,16 +339,14 @@ pub(crate) fn n_scroll_into_view(cx: &mut Cx) -> NResult {
         return Ok(());
     }
     let before = doc.viewport_scroll();
-    doc.scroll_into_view(
-        id,
-        ScrollBehavior::Instant,
-        block,
-        ScrollLogicalPosition::Nearest,
-    );
+    let scrolled = doc.scroll_into_view(id, behavior, block, inline);
+    for container in scrolled {
+        cx.st.queue_task(InternalTask::ElementScroll(container));
+    }
     if doc.viewport_scroll() != before {
         cx.st.queue_task(InternalTask::ViewportScroll);
-        cx.st.host.request_redraw();
     }
+    cx.st.host.request_redraw();
     Ok(())
 }
 
@@ -317,6 +356,8 @@ pub(crate) fn n_image_size(cx: &mut Cx) -> NResult {
     use blitz_dom::node::ImageData;
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;
+    // Density-corrected, like Chromium's naturalWidth for `srcset` candidates.
+    let density = doc.image_density(id) as f64;
     let size = doc
         .get_node(id)
         .and_then(|n| n.element_data())
@@ -329,7 +370,20 @@ pub(crate) fn n_image_size(cx: &mut Cx) -> NResult {
             ImageData::None => None,
         });
     match size {
-        Some((w, h)) => cx.ret_f64s(&[w, h]),
+        Some((w, h)) => cx.ret_f64s(&[(w / density).round(), (h / density).round()]),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.imageCurrentSrc(id)` -> the URL an `<img>` selected from
+/// `src`/`srcset`/`<picture>` and requested, else `null` (nothing to load, or a lazy
+/// image not requested yet).
+pub(crate) fn n_image_current_src(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    match doc.image_current_src(id).map(str::to_string) {
+        Some(url) => cx.ret_str(&url),
         None => cx.ret_null(),
     }
     Ok(())

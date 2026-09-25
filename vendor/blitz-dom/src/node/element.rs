@@ -60,6 +60,10 @@ pub struct ElementData {
     /// The element's parsed style attribute (used by stylo)
     pub style_attribute: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
 
+    /// PATCH: the values of script animations (`Element.animate`), cascaded at the
+    /// animation level after the element's CSS animations.
+    pub script_animation_declarations: Option<ServoArc<Locked<PropertyDeclarationBlock>>>,
+
     /// Heterogeneous data that depends on the element's type.
     /// For example:
     ///   - The image data for \<img\> elements.
@@ -248,6 +252,7 @@ impl Clone for ElementData {
             attrs: self.attrs.clone(),
             is_focussable: self.is_focussable,
             style_attribute: self.style_attribute.clone(),
+            script_animation_declarations: None,
             special_data: self.special_data.clone(),
             background_images: self.background_images.clone(),
             mask_images: self.mask_images.clone(),
@@ -361,6 +366,7 @@ impl ElementData {
             attrs: Attributes::new(attrs),
             is_focussable: false,
             style_attribute: Default::default(),
+            script_animation_declarations: None,
             inline_layout_data: None,
             list_item_data: None,
             special_data: SpecialElementData::None,

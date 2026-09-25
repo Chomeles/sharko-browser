@@ -8,6 +8,8 @@ a `// PATCH:` comment so it can be upstreamed or re-applied on upgrades.
 * `anyrender_vello` 0.14.0 — Vello GPU backend (DioxusLabs/anyrender).
 * `parley` 0.11.1 — text layout (linebender/parley).
 * `taffy` 0.14.0 — box layout: block/flex/grid (DioxusLabs/taffy).
+* `stylo_taffy` 0.3.0-beta.2 — Stylo→Taffy style conversion (DioxusLabs/blitz), unmodified
+  except for its dependency on Stylo 0.21.
 
 Patches so far:
 1. `blitz-dom/src/layout/table.rs`: anonymous table objects (non-table children of a
@@ -114,3 +116,145 @@ Patches so far:
 39. `blitz-dom/assets/default.css`, `layout/mod.rs`: form controls use the 13.33px control
     font and Chromium's box metrics; text inputs are sized by their `size` attribute
     (20 characters by default) instead of 300px.
+40. Stylo 0.21 with `:has()` and `:nth-child(An+B of S)` enabled (`document.rs`);
+    `blitz-dom/src/has_invalidation.rs` runs Stylo's relative-selector invalidation
+    (as Gecko's glue does) for attribute/class/id/state changes before each style pass
+    and for insertions/removals in `mutator.rs`, so `:has()` rules follow DOM changes.
+41. `blitz-dom/src/node/node.rs`, `stylo.rs`: nodes remember their index in the parent's
+    child list, so sibling lookups during selector matching (`+`, `~`, `:nth-*`) no longer
+    scan the whole child list at every step.
+42. `blitz-dom/src/scrolling.rs`: `scroll_into_view` scrolls every scrolling ancestor
+    (innermost first) before the viewport and honours `block`/`inline`, so carousels and
+    tab strips scroll themselves instead of the whole page jumping.
+43. `blitz-dom/src/layout/construct.rs`, `node/svg.rs`: SVG paint from CSS reaches usvg
+    as sRGB `rgb()`/`rgba()`, and `color(display-p3|srgb|srgb-linear …)` in SVG markup
+    and images is rewritten as `rgb()` (usvg painted wide-gamut colors black).
+44. `blitz-dom/src/stylo.rs`, `document.rs`: CSS animation and transition events
+    (`animationstart`/`iteration`/`end`, `transitionrun`/`start`/`end`) are recorded
+    while ticking Stylo's animations (`take_animation_events`) for the embedder to
+    dispatch; `each_custom_state` and `implicit_scope_for_sheet_in_shadow_root` no
+    longer `todo!()`-panic (reachable from `:has()` invalidation).
+45. `blitz-dom/src/node/svg.rs`, `layout/construct.rs`: SVG `currentcolor` in any spelling
+    resolves to the element's color, and paint that comes from `var()` in presentation
+    attributes is always forwarded from CSS (usvg knows neither).
+46. `taffy/src/style/mod.rs`, `compute/block.rs`, `stylo_taffy`: `position: fixed`
+    boxes no longer add to their container's scrollable overflow (a fixed `body`
+    made the page unscrollable).
+47. `blitz-dom/src/layout/inline.rs`: floats inside inline formatting contexts count
+    toward the scrollable overflow.
+48. `blitz-dom/src/node/node.rs`, `blitz-paint/src/render.rs`: absolute/fixed children
+    hoisted into an ancestor stacking context are painted and hit-tested at their real
+    position (including scroll offsets) and clipped by the overflow of the ancestors
+    between them and their containing block (carousels painted slides outside the box).
+49. `blitz-dom/src/image_source.rs` (new), `mutator.rs`, `document.rs`, `layout/mod.rs`,
+    `resolve.rs`: `<img>` source selection (`srcset` with `x`/`w` descriptors, `sizes`,
+    `<picture>`/`<source media type>`, Chromium's candidate choice), density-corrected
+    intrinsic sizes, re-selection on attribute and viewport changes, and
+    `loading="lazy"` (loads within 1250px of the viewport, never while
+    `display: none`). Before, only `src` loaded and every image of a page was fetched
+    and decoded up front (t-online.de: 1.4 GB).
+50. `blitz-dom/src/net.rs`, `layout/damage.rs`: image responses are keyed by the
+    requested URL, not the final URL after redirects (redirected images never showed);
+    decoded images are no longer copied before the RGBA conversion.
+51. `blitz-dom/src/document.rs`: `getBoundingClientRect()` of an `<img>` (and other
+    replaced elements) without data is its own box, not its line's fragment.
+52. `blitz-dom/src/resolve.rs`: transform resolution never skips anonymous blocks (their
+    damage isn't tracked): animated inline-blocks next to blocks kept the transform of
+    their first keyframe, so e.g. `scale(0)` spinners stayed invisible.
+53. `blitz-dom/src/layout/damage.rs`: children hoisted into a stacking context are
+    collected in (order-modified) tree order, so equal z-indexes paint in document
+    order; descendants used to come before direct children (a consent dialog's backdrop
+    covered the dialog).
+54. `blitz-dom/src/node/node.rs`: hit testing always tries a stacking context's hoisted
+    children; its `content_area` is computed before layout and was stale or empty, so
+    z-indexed boxes nested in another stacking context could not be clicked.
+55. `blitz-dom/src/document.rs`: `font_context()` and `set_canvas_pixels()` for the
+    embedder's canvas 2D implementation (the canvas' pixels are shown as its image).
+56. `taffy/src/compute/flexbox.rs`: a single-line row flex container sized under definite
+    available space is fit-content wide (max-content clamped to the space, at least its
+    items' minimum sizes), not max-content: text in a flex row inside a column with
+    `align-items: flex-start` didn't wrap (heise.de's consent dialog overflowed).
+57. `blitz-dom/src/layout/construct.rs`, `layout/damage.rs`: a removed `::before`/`::after`
+    is also dropped from its element's layout and paint children (not rebuilt for inline
+    elements), and damage traversals skip ids of dropped nodes; the dangling id panicked
+    and left welt.de blank.
+58. `blitz-dom/src/stylo.rs`: `frameborder` on `<iframe>`/`<frame>` that isn't a non-zero
+    integer ("0", "no") maps to zero border widths, as in Chrome (ad iframes showed 2px
+    inset borders).
+59. `taffy/src/compute/grid/mod.rs`: a grid container with an unknown width under a
+    definite available width is fit-content wide (its max-content width clamped to the
+    available space, not below its min-content width); `1fr` columns kept their
+    max-content size, so a grid in a column flex container with `align-items:
+    flex-start` overflowed it (focus.de consent dialog).
+60. `blitz-dom/src/layout/damage.rs`, `assets/default.css`: buttons are `box-sizing:
+    border-box` (as in Chrome), and `text-align: left/right/start/end` on a button whose
+    contents the UA centers (`justify-content: center`) aligns them to that side.
+61. `parley/src/shape/mod.rs`: a pictograph with the default text presentation (e.g.
+    ▶ ✔ ❤, Emoji_Presentation=No) and no U+FE0F is shaped with the text fonts and their
+    fallbacks instead of the emoji font first (its color bitmaps didn't render: blank).
+62. `parley/src/layout/line_break.rs`: the empty line after a trailing newline (kept for
+    the cursor with an empty run) doesn't count toward the layout's height: `text<br>`,
+    `<br>` and `<pre>a\n</pre>` are one line tall, as in browsers (every block ending in
+    a `<br>` had an extra blank line).
+63. `parley/src/builder.rs`, `blitz-dom/src/layout/construct.rs`, `node/text.rs`,
+    `document.rs`: inline layouts record the text byte range of each DOM text node
+    (`TextLayout::text_nodes`), and `text_range_client_rects()` returns the line rects of
+    part of a text node (Range geometry), without hanging trailing spaces.
+64. `blitz-dom/src/node/element.rs`, `stylo.rs`: `ElementData::script_animation_declarations`
+    holds the current values of script animations (`Element.animate`); `animation_rule`
+    cascades them after the element's CSS animations (at the animation level, so the
+    style attribute stays untouched) and `has_animations` accounts for them.
+65. `blitz-dom/src/mutator.rs`, `net.rs`, `document.rs`: `<link rel=preload>` fetches its
+    resource and fires `load`; changing a `<link>`'s `rel` loads or drops its stylesheet
+    (the async-CSS pattern `rel=preload as=style` + `rel='stylesheet'` from script left
+    welt.de unstyled).
+66. `blitz-dom/src/document.rs`, `mutator.rs`: `linked_stylesheet_source()` keeps the
+    source text of each `<link rel=stylesheet>`'s sheet (CSSOM `cssRules` of linked
+    sheets).
+67. `blitz-dom/src/node/node.rs`, `document.rs`: walks up `layout_parent` tolerate ids of
+    dropped nodes (`try_with`), instead of panicking in a native (a stale pointer to a
+    rebuilt anonymous box crashed getBoundingClientRect on welt.de once).
+68. `taffy/src/compute/grid/types/grid_item.rs`: a grid item's specified minimum size that
+    can't be resolved during track sizing (a percentage against the indefinite grid area)
+    counts as zero for its minimum contribution instead of falling back to the
+    content-based automatic minimum; `main { min-width: 100% }` in a `1fr` column full of
+    wide slider content stretched the column (n-tv.de grew to 10^35 px).
+69. `blitz-dom/src/net.rs`, `document.rs`: an `@import`ed stylesheet is handed to the
+    document as `Resource::NestedCss` and hooked into its import rule (and its fonts
+    fetched) on the document's thread; the network callback thread wrote the shared
+    style lock, which panicked while the page was styling (nytimes.com: 20 panics).
+70. `blitz-dom/src/layout/construct.rs`, `layout/mod.rs`: a replaced element (img, canvas,
+    video, iframe, embed) never builds boxes for its children, so `display: table` on it
+    no longer replaces its image/canvas data with a table context (the replaced layout
+    then panicked at `unreachable!()`; the fallback now uses the tag's intrinsic sizes).
+    Found by `tools/fuzz/run.js`.
+71. `blitz-dom/src/traversal.rs`: `node_layout_ancestors` stops at the first id that no
+    longer exists instead of indexing it. The hover/active node is retargeted when its
+    subtree is removed, but its `layout_parent` chain can still name an anonymous box
+    dropped by a later box rebuild, and a native click arriving between a DOM mutation
+    and the next resolve then panicked (`invalid SlotMap key`; `tools/fuzz/run.js
+    --clicks=30`, seeds 108 and 136).
+72. `taffy/src/compute/block.rs`, `flexbox.rs`, `grid/mod.rs`, `grid/alignment.rs`: scrollable
+    overflow per CSS Overflow 3 §2.2. A scroll container's end padding extends the overflow
+    region past the end edges of its in-flow children's margin boxes; it was added on top
+    of whatever overflow the descendants contributed, so a child overflowing by its border
+    box got the padding a second time and negative margins never pulled it back in
+    (`scrollWidth`/`scrollHeight` too large, phantom scrollbars). Flex and grid items'
+    margin boxes are part of the region. Zero-area boxes still contribute nothing.
+73. `blitz-dom/src/layout/inline.rs`: atomic inline boxes (inline-block, inline-flex, …)
+    and floats take the scrollable overflow rect of the layout pass that placed them (it
+    stayed stale from an earlier layout of the element as a block, so an inline-block's
+    `scrollWidth` reported the former block width), and where their `overflow` is visible
+    it escapes into the inline container's scrollable overflow.
+74. `blitz-dom/src/mutator.rs`, `iframe.rs`: an `<iframe>` without `src` (or with
+    `about:blank`) gets an empty document right away (the initial `about:blank` document
+    of the HTML spec, with the parent's base URL), so scripts can `contentDocument.write`
+    into it or fill it through `contentWindow.document` before it ever loads anything.
+    A `srcdoc` document records the `<iframe>`'s `load` event like a fetched one (the
+    initial empty document records none).
+75. `blitz-dom/src/document.rs`: `remove_sub_document` keeps the removed iframe document
+    alive until the host calls `drop_detached_sub_documents()` (the renderer does, between
+    tasks). Script realms hold raw pointers to the documents of their frames for the
+    duration of a script entry; a frame removed during that entry (a script removing an
+    `<iframe>` and then using its document's objects, or an iframe removing itself) must
+    not free the document under a realm that is still running.

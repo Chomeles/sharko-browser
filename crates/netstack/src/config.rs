@@ -74,7 +74,7 @@ impl NetConfig {
             h3_head_start: Duration::from_millis(300),
             h3_probe_timeout: Duration::from_secs(10),
             max_requests_per_host: 6,
-            extra_root_certificates_pem: Vec::new(),
+            extra_root_certificates_pem: extra_root_certificates_from_env(),
             persist_delay: Duration::from_secs(2),
             worker_threads: None,
         }
@@ -103,6 +103,25 @@ impl NetConfig {
         }
         self.profile_dir.as_ref().map(|d| d.join("cache"))
     }
+}
+
+/// `SHARKO_EXTRA_CA`: PEM bundle paths (separated by the platform's path separator) whose
+/// certificates are trusted in addition to the OS store, e.g. a test server's CA
+/// (web-platform-tests) or a corporate proxy. Unreadable files are reported and skipped.
+fn extra_root_certificates_from_env() -> Vec<Vec<u8>> {
+    let Some(paths) = std::env::var_os("SHARKO_EXTRA_CA") else {
+        return Vec::new();
+    };
+    std::env::split_paths(&paths)
+        .filter(|p| !p.as_os_str().is_empty())
+        .filter_map(|p| match std::fs::read(&p) {
+            Ok(pem) => Some(pem),
+            Err(e) => {
+                log::warn!("SHARKO_EXTRA_CA: cannot read {}: {e}", p.display());
+                None
+            }
+        })
+        .collect()
 }
 
 impl Default for NetConfig {

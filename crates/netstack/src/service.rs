@@ -40,6 +40,7 @@ use crate::config::NetConfig;
 use crate::core::{NetworkCore, error_response};
 use crate::error::NetError;
 use crate::util::{Response, status_text};
+use crate::websocket::{WsCommand, WsOpen};
 use crate::wire::{WireFromNetworkOut, WireResponseOut, WireToNetwork};
 
 const IDLE_GRACE: Duration = Duration::from_secs(2);
@@ -96,6 +97,8 @@ struct Client {
     /// Request id → (registration generation, task).
     inflight: Mutex<HashMap<u64, (u64, AbortHandle)>>,
     generation: AtomicU64,
+    /// WebSocket id → command channel of its task.
+    sockets: Mutex<HashMap<u64, tokio::sync::mpsc::UnboundedSender<WsCommand>>>,
     out: Sender<WireFromNetworkOut>,
 }
 
@@ -104,6 +107,8 @@ impl Client {
         for (_, (_, task)) in self.inflight.lock().drain() {
             task.abort();
         }
+        // Dropping the command channels makes each socket send a Close frame and end.
+        self.sockets.lock().clear();
     }
 }
 
@@ -249,6 +254,7 @@ fn serve_client(shared: &Arc<Shared>, connection: Connection, client_no: u64) {
     let client = Arc::new(Client {
         inflight: Mutex::new(HashMap::new()),
         generation: AtomicU64::new(0),
+        sockets: Mutex::new(HashMap::new()),
         out: out_tx,
     });
     let reader_shared = Arc::clone(shared);
@@ -269,9 +275,17 @@ fn serve_client(shared: &Arc<Shared>, connection: Connection, client_no: u64) {
         .spawn(move || {
             // Ends when the client is gone (all senders dropped) or the pipe breaks.
             for msg in out_rx {
-                if let Err(e) = sender.send(&msg) {
-                    log::debug!("network client {client_no} write failed: {e}");
-                    break;
+                match sender.send(&msg) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
+                        // Oversized (not sent; the connection is fine). A response that
+                        // big is capped by MAX_BODY_BYTES, so this is an event.
+                        log::warn!("network client {client_no}: dropped an oversized message");
+                    }
+                    Err(e) => {
+                        log::debug!("network client {client_no} write failed: {e}");
+                        break;
+                    }
                 }
             }
         });
@@ -290,10 +304,16 @@ fn handle_message(shared: &Arc<Shared>, client: &Arc<Client>, msg: WireToNetwork
             let task_client = Arc::clone(client);
             // Registered under the lock before the task can complete and unregister.
             let mut inflight = client.inflight.lock();
+            let progress = req.progress.then(|| {
+                let out = client.out.clone();
+                crate::fetch::Progress(Arc::new(move |loaded, total, upload| {
+                    let _ = out.send(WireFromNetworkOut::Progress { id, loaded, total, upload });
+                }))
+            });
             let task = shared.runtime.spawn(async move {
                 let started = Instant::now();
                 let url = req.url.clone();
-                let result = core.fetch_guarded(req).await;
+                let result = core.fetch_guarded_with(req, progress).await;
                 let response = wire_response(id, &url, result, started);
                 let wanted = {
                     let mut inflight = task_client.inflight.lock();
@@ -326,6 +346,33 @@ fn handle_message(shared: &Arc<Shared>, client: &Arc<Client>, msg: WireToNetwork
         WireToNetwork::SetCookie { url, cookie } => shared.core.set_script_cookie(&url, &cookie),
         WireToNetwork::Shutdown => {
             let _ = shared.events.send(Event::Shutdown);
+        }
+        WireToNetwork::WsOpen { id, url, protocols, origin } => {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let core = Arc::clone(&shared.core);
+            let task_client = Arc::clone(client);
+            let out = client.out.clone();
+            // Registered before the task can finish and unregister itself.
+            let mut sockets = client.sockets.lock();
+            shared.runtime.spawn(async move {
+                let open = WsOpen { url, protocols, origin };
+                core.websocket(open, rx, move |event| {
+                    let _ = out.send(WireFromNetworkOut::Ws { id, event });
+                })
+                .await;
+                task_client.sockets.lock().remove(&id);
+            });
+            sockets.insert(id, tx);
+        }
+        WireToNetwork::WsSend { id, data } => {
+            if let Some(tx) = client.sockets.lock().get(&id) {
+                let _ = tx.send(WsCommand::Send(data));
+            }
+        }
+        WireToNetwork::WsClose { id, code, reason } => {
+            if let Some(tx) = client.sockets.lock().get(&id) {
+                let _ = tx.send(WsCommand::Close { code, reason });
+            }
         }
     }
 }

@@ -89,6 +89,8 @@ impl BaseDocument {
         inputs: taffy::tree::LayoutInput,
         block_ctx: Option<&mut BlockContext<'_>>,
     ) -> taffy::tree::LayoutOutput {
+        // PATCH: images from `srcset` candidates are sized by their pixel density.
+        let image_density = self.image_density(dom_node_id(node_id));
         let node = &mut self.nodes[dom_node_id(node_id)];
 
         let font_styles = node.primary_styles().map(|style| {
@@ -236,7 +238,10 @@ impl BaseDocument {
                     let (intrinsic_sizes, default_object_size) = match &element_data.special_data {
                         SpecialElementData::Image(image_data) => match &**image_data {
                             ImageData::Raster(image) => {
-                                let (width, height) = (image.width as f32, image.height as f32);
+                                let (width, height) = (
+                                    image.width as f32 / image_density,
+                                    image.height as f32 / image_density,
+                                );
                                 (
                                     IntrinsicSizes {
                                         width: Some(width),
@@ -261,6 +266,8 @@ impl BaseDocument {
                                     width = Some(size.width());
                                     height = Some(size.height());
                                 }
+                                let width = width.map(|w| w / image_density);
+                                let height = height.map(|h| h / image_density);
                                 (
                                     IntrinsicSizes {
                                         width,
@@ -310,7 +317,9 @@ impl BaseDocument {
                                 default_object_size,
                             )
                         }
-                        _ => unreachable!(),
+                        // PATCH: never panic on unexpected element data (a stylesheet or
+                        // table context on a replaced tag); fall back to the tag's sizes.
+                        _ => tag_intrinsic_sizes(&element_data.name.local, attr_size),
                     };
 
                     let replaced_context = ReplacedContext {

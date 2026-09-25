@@ -64,6 +64,11 @@ pub enum Resource {
     Font(Bytes, FontFaceOverrides),
     /// HTML fetched for an `<iframe>` element's `src`
     DocumentSrc(String),
+    /// PATCH: a `<link rel=preload>` resource was fetched (its `load` event fires).
+    Preloaded,
+    /// PATCH: an `@import`ed stylesheet, hooked into its import rule by the document (on
+    /// its own thread: the network callback thread must not borrow the style lock).
+    NestedCss(ServoArc<Locked<ImportRule>>, ServoArc<Stylesheet>),
     None,
 }
 
@@ -227,7 +232,6 @@ impl ServoStylesheetLoader for StylesheetLoader {
                     lock: lock.clone(),
                     media,
                     import_rule: import.clone(),
-                    net_provider: self.net_provider.clone(),
                 },
             ),
         );
@@ -242,7 +246,6 @@ struct NestedStylesheetHandler {
     url: ServoArc<Url>,
     media: ServoArc<Locked<MediaList>>,
     import_rule: ServoArc<Locked<ImportRule>>,
-    net_provider: Arc<dyn NetProvider>,
 }
 
 impl NetHandler for ResourceHandler<NestedStylesheetHandler> {
@@ -266,23 +269,11 @@ impl NetHandler for ResourceHandler<NestedStylesheetHandler> {
             AllowImportRules::Yes,
         ));
 
-        // Fetch @font-face fonts
-        fetch_font_face(
-            self.tx.clone(),
-            self.doc_id,
-            self.node_id,
-            &sheet,
-            &self.data.net_provider,
-            &self.shell_provider,
-            &self.data.lock.read(),
-            self.data.loader.abort_signal.as_ref(),
-        );
-
-        let mut guard = self.data.lock.write();
-        self.data.import_rule.write_with(&mut guard).stylesheet = ImportSheet::Sheet(sheet);
-        drop(guard);
-
-        self.respond(resolved_url, Ok(Resource::None))
+        // PATCH: fonts and the import rule are handled by the document on its thread
+        // (`BaseDocument::load_resource`): reading or writing the shared style lock here
+        // raced with the page ("already immutably borrowed" panics on nytimes.com).
+        let import_rule = self.data.import_rule.clone();
+        self.respond(resolved_url, Ok(Resource::NestedCss(import_rule, sheet)))
     }
 }
 
@@ -544,6 +535,16 @@ fn stylo_to_fontique_style(style: &FontStyleRange) -> parley::fontique::FontStyl
     }
 }
 
+/// PATCH: fetches a `<link rel=preload>` resource (into the HTTP cache) for its `load`
+/// event.
+pub(crate) struct PreloadHandler;
+
+impl NetHandler for ResourceHandler<PreloadHandler> {
+    fn bytes(self: Box<Self>, resolved_url: String, _bytes: Bytes) {
+        self.respond(resolved_url, Ok(Resource::Preloaded));
+    }
+}
+
 /// Handles HTML fetched for an `<iframe>` element's `src`
 pub(crate) struct DocumentSrcHandler;
 
@@ -556,17 +557,21 @@ impl NetHandler for ResourceHandler<DocumentSrcHandler> {
 
 pub struct ImageHandler {
     kind: ImageType,
+    /// PATCH: the requested URL, which keys `pending_images` (the response carries the
+    /// final URL after redirects, so redirected images never reached their nodes).
+    url: String,
 }
 impl ImageHandler {
-    pub fn new(kind: ImageType) -> Self {
-        Self { kind }
+    pub fn new(kind: ImageType, url: String) -> Self {
+        Self { kind, url }
     }
 }
 
 impl NetHandler for ResourceHandler<ImageHandler> {
-    fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
+    fn bytes(self: Box<Self>, _resolved_url: String, bytes: Bytes) {
         let result = self.data.parse(bytes);
-        self.respond(resolved_url, result)
+        let url = self.data.url.clone();
+        self.respond(url, result)
     }
 }
 
@@ -578,11 +583,13 @@ impl ImageHandler {
             .decode()
         {
             Ok(image) => {
-                let raw_rgba8_data = image.clone().into_rgba8().into_raw();
+                let (width, height) = (image.width(), image.height());
+                // PATCH: no copy of the decoded image just to convert it.
+                let raw_rgba8_data = image.into_rgba8().into_raw();
                 return Ok(Resource::Image(
                     self.kind,
-                    image.width(),
-                    image.height(),
+                    width,
+                    height,
                     Arc::new(raw_rgba8_data),
                 ));
             }

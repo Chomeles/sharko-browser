@@ -2,17 +2,26 @@
 //!
 //! # Overview
 //!
-//! [`ScriptRuntime`] owns one V8 isolate and one context (whose global object is the
-//! page's `window`). At creation it installs a hidden object `__native` implementing the
-//! Rust <-> JS contract in `crates/script/js/NATIVE_API.md` and executes the JS DOM layer
-//! (`crates/script/js/*.js`, embedded at build time, sorted by file name) — or, normally,
-//! deserializes a startup snapshot of a context in which the layer already ran (built
-//! once per profile; see `snapshot.rs`).
+//! [`ScriptRuntime`] owns one V8 isolate per page and one context (realm) per document
+//! in it: the page's, whose global object is `window`, and one for each iframe document
+//! that runs script ([`ScriptRuntime::ensure_frame`], or created on demand when a
+//! same-origin script reaches into the frame, see [`ScriptHost::frame_host`]). Realms of
+//! one origin share a V8 security token, so `iframe.contentWindow.document`,
+//! `parent.foo()` and `frameElement` are the real objects of the other realm; every realm
+//! runs its own copy of the JS DOM layer against its own document (natives find the
+//! calling realm's state through the current context). At creation the runtime installs
+//! a hidden object `__native` implementing the Rust <-> JS contract in
+//! `crates/script/js/NATIVE_API.md` and executes the JS DOM layer (`crates/script/js/*.js`,
+//! embedded at build time, sorted by file name) — or, normally, deserializes a startup
+//! snapshot of a context in which the layer already ran (built once per profile; see
+//! `snapshot.rs`).
 //!
-//! The renderer owns the [`blitz_dom::BaseDocument`]. Every call into JS goes through a
-//! method that takes `&mut BaseDocument`; for the duration of that call the runtime keeps
-//! a raw pointer to the document which natives borrow transiently (see `state.rs` for the
-//! safety invariants).
+//! The renderer owns the [`blitz_dom::BaseDocument`] (iframe documents hang off it as
+//! subdocuments). Every call into JS goes through a method that takes `&mut BaseDocument`
+//! (the page's); for the duration of that call every realm keeps a raw pointer to its
+//! document which natives borrow transiently (see `state.rs` for the safety invariants).
+//! Frame documents are addressed by their *frame path*: the `<iframe>` node ids from the
+//! page down (`[]` is the page).
 //!
 //! # Integration (renderer)
 //!
@@ -22,7 +31,13 @@
 //!   [`ScriptRuntime::document_parsed`] once the initial HTML is in the document (the JS
 //!   layer then runs the page's scripts).
 //! * Route UI events through blitz's `EventDriver` with the runtime as handler:
-//!   `EventDriver::new(&mut doc, JsEventHandler { runtime: &mut rt }).handle_ui_event(ev)`.
+//!   `EventDriver::new(&mut doc, JsEventHandler::new(&mut rt)).handle_ui_event(ev)`; for an
+//!   event in an iframe document, drive that subdocument with
+//!   [`JsEventHandler::for_frame`].
+//! * Create a frame's realm with [`ScriptRuntime::ensure_frame`] once its document is
+//!   parsed (and drop it with [`ScriptRuntime::remove_frame`] when the frame goes away);
+//!   the `_in` variants of the delivery methods ([`ScriptRuntime::deliver_fetch_in`],
+//!   [`ScriptRuntime::eval_in`], ...) address a frame's realm.
 //! * Event loop: call [`ScriptRuntime::run_timers`] when [`ScriptRuntime::next_timer_deadline`]
 //!   passes, [`ScriptRuntime::run_frame`] before painting when
 //!   [`ScriptRuntime::wants_frame`], and [`ScriptRuntime::deliver_fetch`] for every
@@ -43,6 +58,8 @@
 
 mod activation;
 mod blob;
+mod canvas;
+mod compress;
 mod cx;
 mod dom;
 mod events;
@@ -65,6 +82,7 @@ pub use blob::{BlobData, resolve_blob_url};
 pub use cx::{node_id_from_js, node_id_to_js};
 pub use events::JsEventHandler;
 pub use runtime::{RuntimeOptions, ScriptRuntime, StartupStats};
+
 
 use std::sync::Arc;
 
@@ -124,6 +142,22 @@ pub trait ScriptHost {
         let _ = req;
         None
     }
+    /// Open a WebSocket for the page (`new WebSocket(url, protocols)`). Its events must
+    /// come back through [`ScriptRuntime::deliver_ws`] with the same `id`, ending with
+    /// exactly one `Closed`. Returns `false` if the host has no WebSocket support (the
+    /// default).
+    fn ws_open(&self, id: u64, url: &str, protocols: Vec<String>, origin: &str) -> bool {
+        let _ = (id, url, protocols, origin);
+        false
+    }
+    /// Send a message on a socket opened with [`ScriptHost::ws_open`].
+    fn ws_send(&self, id: u64, data: common::protocol::WsData) {
+        let _ = (id, data);
+    }
+    /// Close (or abort, while connecting) a socket opened with [`ScriptHost::ws_open`].
+    fn ws_close(&self, id: u64, code: Option<u16>, reason: &str) {
+        let _ = (id, code, reason);
+    }
     /// A same-document session history entry was added (`pushState`, fragment
     /// navigation) or, with `replace`, the current entry's URL was replaced
     /// (`replaceState`, `location.replace('#x')`). Followed by
@@ -143,9 +177,39 @@ pub trait ScriptHost {
     fn referrer(&self) -> String {
         String::new()
     }
+    /// The initial `window.name`: an iframe document's is its `<iframe name>` (default:
+    /// empty).
+    fn window_name(&self) -> String {
+        String::new()
+    }
     /// `navigator.clipboard.writeText(text)` (default: ignored).
     fn clipboard_write(&self, text: &str) {
         let _ = text;
+    }
+    /// `postMessage` to another frame's window. Frames are named by their path: the
+    /// `<iframe>` node ids (`NodeId::as_u64`, each in its parent's document) from the page
+    /// down; the page is `[]`. `target_origin` is `*` or the origin the receiver must
+    /// have; `data` is the message serialized with V8's ValueSerializer. Default: dropped.
+    fn post_message(&self, target: &[u64], target_origin: &str, data: Vec<u8>) {
+        let _ = (target, target_origin, data);
+    }
+    /// The frame path of this document (`[]`: the page, the default).
+    fn frame_path(&self) -> Vec<u64> {
+        Vec::new()
+    }
+    /// The frames of the document at `path` in tree order, as `(node id of the <iframe>,
+    /// its name)` (`parent.frames['x']`, `top.length`); `None` if unknown.
+    fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
+        let _ = path;
+        None
+    }
+    /// A host for the document of the frame at `path` (URL `url`), so the runtime can
+    /// create that frame's realm on demand when a script of a same-origin frame reaches
+    /// into it (`iframe.contentWindow.document`, `parent.foo()`). Default: `None` (the
+    /// frame's realm is only created by the host through `ScriptRuntime::ensure_frame`).
+    fn frame_host(&self, path: &[u64], url: &str) -> Option<std::rc::Rc<dyn ScriptHost>> {
+        let _ = (path, url);
+        None
     }
 }
 

@@ -44,6 +44,8 @@ class MockNative {
     this.defaultActions = [];
     this.titles = [];
     this.scrolledIntoView = [];
+    this.scrollIntoViewArgs = [];
+    this.ws = [];
     this.opened = [];
     this.storage = [new Map(), new Map()];
     this.cookies = new Map();
@@ -62,6 +64,7 @@ class MockNative {
     this.cloneInRealm = vm.runInContext(CLONE_SRC, this.ctx);
     this.templateContents = new Map();
     this.shadowHosts = new Set(); // ids passed to N.setShadowHost(id, true)
+    this.adoptedSheets = new Map(); // host id (0 = document) -> [[css, baseURL], ...] from N.setAdoptedSheets
     this.definedIds = new Set(); // ids passed to N.setDefined(id)
     this.docId = this.createNode({ type: 9 });
     this.verbose = !!process.env.VERBOSE;
@@ -503,6 +506,12 @@ class MockNative {
       },
       templateContent: (id) => (M.isTemplate(M.n(id)) ? M.templateContentOf(id) : 0),
       setShadowHost: (id, on) => { M.n(id); if (on) M.shadowHosts.add(id); else M.shadowHosts.delete(id); },
+      foreignNodeType: () => 0,
+      windowPostMessage: function (message, targetOrigin, transfer) {
+        if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+        return M.hooks.windowPostMessage(message, targetOrigin, transfer, null);
+      },
+      setAdoptedSheets: (hostId, sources, bases) => { if (hostId !== 0) M.n(hostId); M.adoptedSheets.set(hostId, sources.map((s, i) => [s, bases[i]])); },
       setDefined: (id) => { M.n(id); M.definedIds.add(id); },
       appendChild: (p, c) => nat.insertBefore(p, c, 0),
       insertBefore: (p, c, ref) => {
@@ -604,7 +613,7 @@ class MockNative {
         if (n.name === 'html' || n.name === 'body') { nat.scrollTo(l, t); return; }
         M.scroll.set(id, [l, t]);
       },
-      scrollIntoView: (id) => { M.scrolledIntoView.push(id); },
+      scrollIntoView: (id, block, inline, behavior) => { M.scrolledIntoView.push(id); M.scrollIntoViewArgs.push([block, inline, behavior]); },
       elementFromPoint: (x, y) => {
         let found = 0;
         for (const [id, r] of M.rects) {
@@ -720,6 +729,14 @@ class MockNative {
         const delay = spec && typeof spec === 'object' && spec.delay !== undefined ? spec.delay : 0;
         M.schedule(M.clock + delay, 'fetch', { reqId, spec, url: req.url });
       },
+      workerCreate: () => vm.createContext({}),
+      workerEval: (g, src, url) => {
+        try { vm.runInContext(src, g, { filename: url }); return null; } catch (err) { return M.arr([String(err && err.message), url, 1, 1, err]); }
+      },
+      cloneInto: (g, v) => require('v8').deserialize(require('v8').serialize(v)),
+      wsOpen: (id, url, protocols, origin) => { M.ws.push(['open', id, url, Array.from(protocols), origin]); return true; },
+      wsSend: (id, data) => { M.ws.push(['send', id, typeof data === 'string' ? data : Array.from(new Uint8Array(data))]); },
+      wsClose: (id, code, reason) => { M.ws.push(['close', id, code, reason]); },
       abortFetch: (reqId) => { M.events = M.events.filter((e) => !(e.kind === 'fetch' && e.reqId === reqId)); },
       getCookie: () => Array.from(M.cookies, ([k, v]) => (k === '' ? v : `${k}=${v}`)).join('; '),
       setCookie: (str) => {

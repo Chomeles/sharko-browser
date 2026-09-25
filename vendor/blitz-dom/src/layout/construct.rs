@@ -541,6 +541,18 @@ fn collect_layout_children_with_wrap(
         }
     }
 
+    // PATCH: a replaced element (img, canvas, video, iframe, embed) generates no boxes
+    // for its children whatever its `display` says (like Blink, the inner display type
+    // is ignored). In particular `display: table` must not turn it into a table root:
+    // that replaced its image/canvas data, and its replaced layout then hit
+    // `unreachable!()` (found by tools/fuzz).
+    if doc.nodes[container_node_id]
+        .element_data()
+        .is_some_and(|el| is_replaced_element(&el.name.local))
+    {
+        return;
+    }
+
     let container_display = doc.nodes[container_node_id].display_style().unwrap_or(
         match doc.nodes[container_node_id].data.kind() {
             NodeKind::AnonymousBlock => Display::Block,
@@ -726,6 +738,15 @@ fn flush_pseudo_elements(doc: &mut BaseDocument, node_id: NodeId) {
             let node = &mut doc.nodes[node_id];
             node.set_pe_by_index(idx, None);
             node.insert_damage(ALL_DAMAGE);
+            // PATCH: also forget it in the element's layout and paint children, which are
+            // not rebuilt for inline elements (the dangling id panicked a later traversal
+            // and left welt.de blank).
+            if let Some(children) = node.layout_children.get_mut().as_mut() {
+                children.retain(|id| *id != pe_node_id);
+            }
+            if let Some(children) = node.paint_children.get_mut().as_mut() {
+                children.retain(|id| *id != pe_node_id);
+            }
         }
 
         // Create pseudo element if it should exist but doesn't
@@ -1155,7 +1176,10 @@ fn write_svg_markup(doc: &BaseDocument, node_id: NodeId, out: &mut String) {
         NodeData::Element(el) => {
             out.push('<');
             out.push_str(&el.name.local);
-            let css = svg_css_paint(doc, node_id);
+            // PATCH: usvg cannot resolve `var()`: an element that uses it gets its
+            // computed paint as well (it comes last in `style`, so it wins).
+            let uses_var = el.attrs.iter().any(|a| a.value.contains("var("));
+            let css = svg_css_paint(doc, node_id, uses_var);
             let mut wrote_style = false;
             for attr in el.attrs.iter() {
                 out.push(' ');
@@ -1195,21 +1219,44 @@ fn write_svg_markup(doc: &BaseDocument, node_id: NodeId, out: &mut String) {
     }
 }
 
+/// PATCH: an SVG paint as CSS that usvg understands: colors are converted to sRGB
+/// (`color(display-p3 …)`, `oklch()`, … made usvg fall back to black).
+#[cfg(feature = "svg")]
+fn svg_paint_css(
+    paint: &style::values::computed::SVGPaint,
+    current_color: &style::color::AbsoluteColor,
+) -> String {
+    use style::values::generics::svg::SVGPaintKind;
+    use style_traits::ToCss as _;
+    match &paint.kind {
+        SVGPaintKind::Color(c) => srgb_css(&c.resolve_to_absolute(current_color)),
+        _ => paint.to_css_string(),
+    }
+}
+
+/// An absolute color as a legacy `rgb()`/`rgba()` string.
+#[cfg(feature = "svg")]
+fn srgb_css(color: &style::color::AbsoluteColor) -> String {
+    use style_traits::ToCss as _;
+    color.into_srgb_legacy().to_css_string()
+}
+
 /// `fill`/`stroke`/`stroke-width` declarations for SVG paint that differs from the
 /// parent's computed values (i.e. was set by a CSS rule on this element).
 #[cfg(feature = "svg")]
-fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
+fn svg_css_paint(doc: &BaseDocument, node_id: NodeId, force: bool) -> Option<String> {
     use style_traits::ToCss as _;
     let node = &doc.nodes[node_id];
     let styles = node.primary_styles()?;
     let parent_styles = node.parent.and_then(|p| doc.nodes[p].primary_styles())?;
     let (own, parent) = (styles.get_inherited_svg(), parent_styles.get_inherited_svg());
+    let current_color = styles.clone_color();
     let mut decls = String::new();
-    if own.fill != parent.fill {
-        decls.push_str(&format!("fill:{};", own.fill.to_css_string()));
+    if force || own.fill != parent.fill {
+        decls.push_str(&format!("fill:{};", svg_paint_css(&own.fill, &current_color)));
     }
-    if own.stroke != parent.stroke {
-        decls.push_str(&format!("stroke:{};", own.stroke.to_css_string()));
+    if force || own.stroke != parent.stroke {
+        decls.push_str(&format!("stroke:{};", svg_paint_css(&own.stroke, &current_color)));
     }
     if own.stroke_width != parent.stroke_width {
         decls.push_str(&format!("stroke-width:{};", own.stroke_width.to_css_string()));
@@ -1222,7 +1269,6 @@ fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
 #[cfg(feature = "svg")]
 fn add_svg_root_paint(doc: &BaseDocument, svg_id: NodeId, mut svg: String) -> String {
     use style::values::generics::svg::SVGPaintKind;
-    use style_traits::ToCss as _;
     let Some(styles) = doc.nodes[svg_id].primary_styles() else {
         return svg;
     };
@@ -1233,14 +1279,14 @@ fn add_svg_root_paint(doc: &BaseDocument, svg_id: NodeId, mut svg: String) -> St
             .any(|a| a.split('=').next() == Some(name))
     };
     let mut extra = String::new();
-    let color = styles.clone_color().to_css_string();
+    let color = srgb_css(&styles.clone_color());
     if !has_attr("color") {
         extra.push_str(&format!(" color=\"{color}\""));
     }
     let svg_style = styles.get_inherited_svg();
     let paint_css = |paint: &style::values::computed::SVGPaint| -> Option<String> {
         match &paint.kind {
-            SVGPaintKind::Color(c) => Some(c.resolve_to_absolute(&styles.clone_color()).to_css_string()),
+            SVGPaintKind::Color(c) => Some(srgb_css(&c.resolve_to_absolute(&styles.clone_color()))),
             SVGPaintKind::None => Some("none".to_string()),
             _ => None,
         }
@@ -1318,6 +1364,13 @@ fn push_spacer(builder: &mut TreeBuilder<TextBrush>, flag: u64, node_id: NodeId,
     }
 }
 
+thread_local! {
+    /// PATCH: the layout text byte range of each text node, collected while building an
+    /// inline layout (see `TextLayout::text_nodes`).
+    static TEXT_NODE_RANGES: std::cell::RefCell<Vec<(NodeId, usize, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 pub(crate) fn build_inline_layout_into(
     nodes: &crate::NodeTree,
     layout_ctx: &mut LayoutContext<TextBrush>,
@@ -1346,6 +1399,7 @@ pub(crate) fn build_inline_layout_into(
 
     // Create a parley tree builder
     let mut builder = layout_ctx.tree_builder(font_ctx, scale, true, &parley_style);
+    TEXT_NODE_RANGES.with(|r| r.borrow_mut().clear());
 
     // Set whitespace collapsing mode
     let collapse_mode = root_node_style
@@ -1422,6 +1476,13 @@ pub(crate) fn build_inline_layout_into(
     }
 
     text_layout.text = builder.build_into(&mut text_layout.layout);
+    let text_len = text_layout.text.len();
+    text_layout.text_nodes = TEXT_NODE_RANGES.with(|r| {
+        r.borrow_mut()
+            .drain(..)
+            .map(|(id, start, end)| (id, start.min(text_len), end.min(text_len)))
+            .collect()
+    });
     return;
 
     #[allow(clippy::too_many_arguments)]
@@ -1636,6 +1697,7 @@ pub(crate) fn build_inline_layout_into(
             NodeData::Text(data) => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                 // dbg!(&data.content);
+                let start = builder.committed_text_len();
 
                 // TODO: optimize case transforms to be non-allocating
                 match parent_text_transform {
@@ -1649,6 +1711,8 @@ pub(crate) fn build_inline_layout_into(
                         builder.push_text(&data.content);
                     }
                 }
+                let end = builder.committed_text_len();
+                TEXT_NODE_RANGES.with(|r| r.borrow_mut().push((node_id, start, end)));
             }
             NodeData::Comment { .. } => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);

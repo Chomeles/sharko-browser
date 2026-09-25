@@ -58,10 +58,23 @@ pub(crate) enum Hook {
     Error,
     PopState,
     ElementEvent,
+    WebSocket,
+    FetchProgress,
+    AnimationEvent,
+    Message,
+    /// `wrapNode(id)`: the JS wrapper of a node of this realm's document (used by another
+    /// realm, e.g. `frameElement`).
+    WrapNode,
+    /// `nodeTypeOf(o)`: the nodeType of a node wrapper of this realm (0 otherwise); used by
+    /// another realm that got the object as an argument.
+    NodeType,
+    /// `windowPostMessage(message, targetOrigin, transfer, source)`: `window.postMessage`
+    /// called with `source` (the caller's window, or `null` for this one).
+    PostMessage,
 }
 
 impl Hook {
-    pub(crate) const ALL: [Hook; 14] = [
+    pub(crate) const ALL: [Hook; 21] = [
         Hook::DocumentParsed,
         Hook::Event,
         Hook::Timer,
@@ -76,6 +89,13 @@ impl Hook {
         Hook::Error,
         Hook::PopState,
         Hook::ElementEvent,
+        Hook::WebSocket,
+        Hook::FetchProgress,
+        Hook::AnimationEvent,
+        Hook::Message,
+        Hook::WrapNode,
+        Hook::NodeType,
+        Hook::PostMessage,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -94,6 +114,13 @@ impl Hook {
             Hook::Error => "onError",
             Hook::PopState => "onPopState",
             Hook::ElementEvent => "onElementEvent",
+            Hook::WebSocket => "onWebSocket",
+            Hook::FetchProgress => "onFetchProgress",
+            Hook::AnimationEvent => "onAnimationEvent",
+            Hook::Message => "onMessage",
+            Hook::WrapNode => "wrapNode",
+            Hook::NodeType => "nodeTypeOf",
+            Hook::PostMessage => "windowPostMessage",
         }
     }
 }
@@ -101,7 +128,7 @@ impl Hook {
 #[derive(Default)]
 pub(crate) struct Hooks {
     pub(crate) obj: Option<v8::Global<v8::Object>>,
-    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 14],
+    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 21],
 }
 
 impl Hooks {
@@ -232,6 +259,10 @@ pub(crate) struct RuntimeState {
     pub(crate) snapshotting: Cell<bool>,
     /// First native called during snapshot creation that is not snapshot-safe.
     pub(crate) snapshot_taint: Cell<Option<&'static str>>,
+    /// Canvas 2D surfaces.
+    pub(crate) canvases: RefCell<crate::canvas::Canvases>,
+    /// Open (de)compression streams.
+    pub(crate) coders: RefCell<crate::compress::Coders>,
 }
 
 impl RuntimeState {
@@ -289,6 +320,8 @@ impl RuntimeState {
             in_checkpoint: Cell::new(false),
             snapshotting: Cell::new(false),
             snapshot_taint: Cell::new(None),
+            canvases: RefCell::new(Default::default()),
+            coders: RefCell::new(Default::default()),
         }
     }
 
@@ -304,6 +337,11 @@ impl RuntimeState {
 
     pub(crate) fn has_doc(&self) -> bool {
         !self.doc.get().is_null()
+    }
+
+    /// The current document pointer (null outside entries).
+    pub(crate) fn doc_ptr(&self) -> *mut BaseDocument {
+        self.doc.get()
     }
 
     /// The document of the current entry. See the module docs for the invariants every
@@ -368,16 +406,38 @@ impl RuntimeState {
     }
 }
 
-/// Stored in the isolate slot so V8 callbacks that only receive a context (module
-/// resolution, promise rejection, dynamic import, import.meta) can find the state.
+/// Stored in each context's slot (the realm's state) and in the isolate slot (the page's
+/// state, the fallback for callbacks without a context) so natives and V8 callbacks can
+/// find the state of the realm that is running.
 #[derive(Clone, Copy)]
 pub(crate) struct StatePtr(pub(crate) *const RuntimeState);
 
 impl StatePtr {
     /// # Safety
     /// The runtime owning the state outlives its isolate (the isolate is disposed first
-    /// in `ScriptRuntime::drop`), so the pointer is valid whenever V8 runs a callback.
+    /// in `ScriptRuntime::drop`; the states of dropped frame realms are kept until then),
+    /// so the pointer is valid whenever V8 runs a callback.
     pub(crate) fn get<'a>(self) -> &'a RuntimeState {
         unsafe { &*self.0 }
+    }
+}
+
+/// The state of the realm of `context` (its slot), else the page's (the isolate slot).
+pub(crate) fn state_of_context<'a>(
+    scope: &v8::PinScope,
+    context: Option<v8::Local<v8::Context>>,
+) -> Option<&'a RuntimeState> {
+    if let Some(ctx) = context
+        && let Some(p) = ctx.get_slot::<StatePtr>()
+    {
+        return Some(p.get());
+    }
+    scope.get_slot::<StatePtr>().copied().map(|p| p.get())
+}
+
+impl RuntimeState {
+    /// The document's origin (ASCII serialization; `null` for opaque origins).
+    pub(crate) fn origin(&self) -> String {
+        self.url.borrow().origin().ascii_serialization()
     }
 }

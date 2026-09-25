@@ -47,6 +47,10 @@ test('tree accessors and mutation methods', async () => {
   `);
   assert.strictEqual(e.run("main.firstChild.nodeValue"), 'pre');
   assert.strictEqual(e.run("main.children[0].tagName + main.children[1].tagName"), 'SPANEM');
+  // nodeName/tagName are the HTML-uppercased qualified name (prefix included); other
+  // namespaces keep their case.
+  assert.strictEqual(e.run("var xb = document.createElementNS('http://www.w3.org/1999/xhtml', 'x:b'); xb.nodeName + '|' + xb.tagName + '|' + xb.localName + '|' + xb.prefix"), 'X:B|X:B|b|x');
+  assert.strictEqual(e.run("var sv = document.createElementNS('http://www.w3.org/2000/svg', 'svg:linearGradient'); sv.nodeName + '|' + sv.tagName"), 'svg:linearGradient|svg:linearGradient');
   assert.strictEqual(e.run("d.innerHTML"), '<u></u>text<i></i>');
   assert.strictEqual(e.run("d.childNodes.length"), 3);
   e.run("var li = document.querySelector('.odd'); li.replaceWith(document.createElement('hr'), 'x');");
@@ -276,6 +280,8 @@ test('geometry, scrolling, elementFromPoint', async () => {
   assert.strictEqual(e.run("scrollY + pageYOffset + document.documentElement.scrollTop"), 300);
   e.run("p.scrollIntoView()");
   assert.deepStrictEqual(e.mock.scrolledIntoView, [id]);
+  e.run("p.scrollIntoView(false); p.scrollIntoView({block: 'nearest', inline: 'center', behavior: 'smooth'})");
+  assert.deepStrictEqual(e.mock.scrollIntoViewArgs, [['start', 'nearest', 'auto'], ['end', 'nearest', 'auto'], ['nearest', 'center', 'smooth']]);
   assert.strictEqual(e.run("document.elementFromPoint(50, 30).id"), 'p1');
   assert.strictEqual(e.run("document.createElement('div').getBoundingClientRect().width"), 0);
   assert.strictEqual(e.run("innerWidth + 'x' + innerHeight + ' ' + devicePixelRatio + ' ' + screen.width"), '1280x720 1 1920');

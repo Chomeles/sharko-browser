@@ -624,6 +624,12 @@ impl GridItem {
                     .maybe_add(box_sizing_adjustment)
                     .get(axis)
             })
+            // PATCH: a specified minimum size that can't be resolved yet (a percentage
+            // against the still indefinite grid area) is not `auto`: it counts as zero
+            // for the minimum contribution, like in browsers, instead of falling back to
+            // the content-based automatic minimum (a `min-width: 100%` item full of
+            // wide content stretched its `1fr` column to the content's width).
+            .or_else(|| (!self.min_size.get(axis).is_auto()).then_some(padding_border_size.get(axis)))
             .or_else(|| self.overflow.get(axis).maybe_into_automatic_min_size())
             .unwrap_or_else(|| {
                 // Automatic minimum size. See https://www.w3.org/TR/css-grid-1/#min-size-auto

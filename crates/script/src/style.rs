@@ -211,6 +211,42 @@ pub(crate) fn n_style_set(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.setAnimationStyle(id, pairs)`: the values of the element's script
+/// animations (`Element.animate`), cascaded at the animation level (not part of its style
+/// attribute). `pairs` is `name\0value\0name\0value...`; empty removes them.
+pub(crate) fn n_set_animation_style(cx: &mut Cx) -> NResult {
+    let pairs = cx.string(1)?;
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    element_ok(cx.st, doc, id)?;
+    let mut block = PropertyDeclarationBlock::new();
+    let parts: Vec<&str> = if pairs.is_empty() { Vec::new() } else { pairs.split('\0').collect() };
+    for pair in parts.chunks_exact(2) {
+        let (name, value) = (pair[0], pair[1]);
+        let Some(pid) = parse_property(doc, name) else { continue };
+        let Some(mut decls) = parse_value(doc, &pid, value) else { continue };
+        let mut updates = SourcePropertyDeclarationUpdate::default();
+        if block.prepare_for_update(&decls, Importance::Normal, &mut updates) {
+            block.update(decls.drain(), Importance::Normal, &mut updates);
+        }
+    }
+    let guard = doc.guard().clone();
+    let Some(node) = doc.get_node_mut(id) else { return Ok(()) };
+    let Some(el) = node.element_data_mut() else { return Ok(()) };
+    let had = el.script_animation_declarations.is_some();
+    el.script_animation_declarations = if block.is_empty() {
+        None
+    } else {
+        Some(ServoArc::new(guard.wrap(block)))
+    };
+    if had || el.script_animation_declarations.is_some() {
+        node.set_restyle_hint(blitz_dom::RestyleHint::RESTYLE_SELF);
+        node.set_dirty_descendants();
+        cx.st.invalidate_layout();
+    }
+    Ok(())
+}
+
 pub(crate) fn n_style_remove(cx: &mut Cx) -> NResult {
     let name = cx.string(1)?;
     let doc = cx.st.doc()?;
@@ -422,6 +458,9 @@ fn used_value(
     if display.is_none() || !node.has_boxes() {
         return None;
     }
+    if matches!(name, "top" | "right" | "bottom" | "left") {
+        return inset_used_value(doc, id, name, cv);
+    }
     let inline = doc.inline_fragment_rects(id).is_some();
     let l = node.final_layout();
     let border_box = cv.clone_box_sizing() == style::computed_values::box_sizing::T::BorderBox;
@@ -455,6 +494,184 @@ fn used_value(
     } else {
         0.0
     }) as f64))
+}
+
+/// A box in page coordinates (layout positions summed up the layout tree; scrolling and
+/// transforms do not move insets).
+#[derive(Clone, Copy)]
+struct PageRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+fn page_origin(doc: &BaseDocument, id: NodeId) -> (f64, f64) {
+    let (mut x, mut y) = (0.0, 0.0);
+    let mut cur = Some(id);
+    while let Some(i) = cur {
+        let Some(n) = doc.get_node(i) else { break };
+        let l = n.final_layout();
+        x += l.location.x as f64;
+        y += l.location.y as f64;
+        cur = n.layout_parent.get();
+    }
+    (x, y)
+}
+
+/// The border box of `id` in page coordinates (fragment union for a non-atomic inline).
+fn page_border_box(doc: &BaseDocument, id: NodeId) -> Option<PageRect> {
+    if doc.inline_fragment_rects(id).is_some() {
+        let r = doc.get_client_bounding_rect(id)?;
+        let scroll = doc.viewport_scroll();
+        return Some(PageRect { x: r.x + scroll.x, y: r.y + scroll.y, w: r.width, h: r.height });
+    }
+    let l = doc.get_node(id)?.final_layout();
+    let (x, y) = page_origin(doc, id);
+    Some(PageRect { x, y, w: l.size.width as f64, h: l.size.height as f64 })
+}
+
+/// The containing block of a positioned box `id` (CSS 2 §10.1): the padding box of the
+/// nearest positioned or transformed ancestor for `absolute`, the padding box of the
+/// nearest transformed ancestor or the initial containing block for `fixed`, and the
+/// content box of the nearest block container ancestor otherwise.
+fn containing_block(
+    doc: &BaseDocument,
+    id: NodeId,
+    pos: style::computed_values::position::T,
+) -> Option<PageRect> {
+    use style::computed_values::position::T as Position;
+    use style::values::specified::box_::{DisplayInside, DisplayOutside};
+    let out_of_flow = matches!(pos, Position::Absolute | Position::Fixed);
+    let mut cur = doc.get_node(id)?.layout_parent.get();
+    while let Some(a) = cur {
+        let n = doc.get_node(a)?;
+        let styles = n.primary_styles();
+        let establishes = match styles.as_deref() {
+            Some(s) if out_of_flow => {
+                !s.get_box().transform.0.is_empty()
+                    || (pos == Position::Absolute && s.clone_position() != Position::Static)
+            }
+            Some(s) => {
+                let d = s.clone_display();
+                !(d.outside() == DisplayOutside::Inline && d.inside() == DisplayInside::Flow)
+            }
+            // Anonymous block boxes are block containers.
+            None => !out_of_flow,
+        };
+        if establishes {
+            let r = page_border_box(doc, a)?;
+            let l = n.final_layout();
+            let (b, p) = (l.border, l.padding);
+            return Some(if out_of_flow {
+                PageRect {
+                    x: r.x + b.left as f64,
+                    y: r.y + b.top as f64,
+                    w: (r.w - (b.left + b.right) as f64).max(0.0),
+                    h: (r.h - (b.top + b.bottom) as f64).max(0.0),
+                }
+            } else {
+                PageRect {
+                    x: r.x + (b.left + p.left) as f64,
+                    y: r.y + (b.top + p.top) as f64,
+                    w: (r.w - (b.left + b.right + p.left + p.right) as f64).max(0.0),
+                    h: (r.h - (b.top + b.bottom + p.top + p.bottom) as f64).max(0.0),
+                }
+            });
+        }
+        cur = n.layout_parent.get();
+    }
+    let (w, h) = crate::layout::viewport_size(doc);
+    Some(PageRect { x: 0.0, y: 0.0, w, h })
+}
+
+/// Content box of the nearest scroll container ancestor (not the viewport), the basis of
+/// percentage insets of `position: sticky` boxes.
+fn scrollport_content_box(doc: &BaseDocument, id: NodeId) -> Option<PageRect> {
+    let root = doc.try_root_element().map(|n| n.id);
+    let mut cur = doc.get_node(id)?.layout_parent.get();
+    while let Some(a) = cur {
+        let n = doc.get_node(a)?;
+        if Some(a) == root {
+            return None;
+        }
+        if n.primary_styles().is_some_and(|s| {
+            let b = s.get_box();
+            b.overflow_x.is_scrollable() || b.overflow_y.is_scrollable()
+        }) {
+            let r = page_border_box(doc, a)?;
+            let l = n.final_layout();
+            let (b, p) = (l.border, l.padding);
+            return Some(PageRect {
+                x: r.x + (b.left + p.left) as f64,
+                y: r.y + (b.top + p.top) as f64,
+                w: (r.w - (b.left + b.right + p.left + p.right) as f64).max(0.0),
+                h: (r.h - (b.top + b.bottom + p.top + p.bottom) as f64).max(0.0),
+            });
+        }
+        cur = n.layout_parent.get();
+    }
+    None
+}
+
+/// CSSOM "resolved value special case property like `top`": for a positioned element
+/// with a box the resolved value is the used value, so percentages and `calc()` become
+/// pixels and `auto` becomes the offset the layout produced (the computed value for
+/// `position: static`, for boxes generated by nothing, and for `auto` on sticky boxes,
+/// where browsers keep `auto`).
+fn inset_used_value(
+    doc: &BaseDocument,
+    id: NodeId,
+    name: &str,
+    cv: &style::properties::ComputedValues,
+) -> Option<String> {
+    use style::computed_values::position::T as Position;
+    use style::values::computed::Length;
+    use style::values::generics::position::GenericInset as Inset;
+    let pos = cv.clone_position();
+    if pos == Position::Static {
+        return None;
+    }
+    let insets = cv.get_position();
+    let (value, opposite) = match name {
+        "top" => (&insets.top, &insets.bottom),
+        "bottom" => (&insets.bottom, &insets.top),
+        "left" => (&insets.left, &insets.right),
+        "right" => (&insets.right, &insets.left),
+        _ => return None,
+    };
+    let vertical = matches!(name, "top" | "bottom");
+    let cb = containing_block(doc, id, pos)?;
+    let basis_box = match pos {
+        Position::Sticky => scrollport_content_box(doc, id).unwrap_or(cb),
+        _ => cb,
+    };
+    let basis = Length::new(if vertical { basis_box.h } else { basis_box.w } as f32);
+    let px = |v: f64| format_px(if v == 0.0 { 0.0 } else { v });
+    match value {
+        Inset::LengthPercentage(lp) => Some(px(lp.resolve(basis).px() as f64)),
+        Inset::Auto => match pos {
+            Position::Sticky => None,
+            // Relative positioning: `auto` takes the negated opposite inset (CSS 2 §9.4.3).
+            Position::Relative => Some(match opposite {
+                Inset::LengthPercentage(lp) => px(-(lp.resolve(basis).px() as f64)),
+                _ => px(0.0),
+            }),
+            // Out-of-flow: the distance between the containing block's edge and the
+            // margin edge the layout placed the box at.
+            _ => {
+                let r = page_border_box(doc, id)?;
+                let m = doc.get_node(id)?.final_layout().margin;
+                Some(px(match name {
+                    "top" => r.y - m.top as f64 - cb.y,
+                    "left" => r.x - m.left as f64 - cb.x,
+                    "bottom" => cb.y + cb.h - (r.y + r.h + m.bottom as f64),
+                    _ => cb.x + cb.w - (r.x + r.w + m.right as f64),
+                }))
+            }
+        },
+        _ => None,
+    }
 }
 
 pub(crate) fn n_computed_style(cx: &mut Cx) -> NResult {
@@ -531,5 +748,32 @@ pub(crate) fn n_match_media(cx: &mut Cx) -> NResult {
     let doc = cx.st.doc()?;
     let r = match_media(doc, &q);
     cx.ret_bool(r);
+    Ok(())
+}
+
+/// Addition: `N.parseColor(css)` -> `[r, g, b, a]` (0-255, alpha 0-1) of a CSS color
+/// (`currentcolor` resolves to black), or `null` if it isn't one. For canvas styles.
+pub(crate) fn n_parse_color(cx: &mut Cx) -> NResult {
+    use style::color::AbsoluteColor;
+    use style::parser::Parse;
+    let s = cx.string(0)?;
+    let doc = cx.st.doc()?;
+    let color = with_context(doc, CssRuleType::Style, |ctx| {
+        let mut input = ParserInput::new(&s);
+        let mut parser = Parser::new(&mut input);
+        parser
+            .parse_entirely(|p| style::values::specified::Color::parse(ctx, p))
+            .ok()
+            .and_then(|c| c.to_computed_color(None).ok())
+            .map(|c| c.resolve_to_absolute(&AbsoluteColor::BLACK).into_srgb_legacy())
+    });
+    match color {
+        Some(c) => {
+            let [r, g, b, a] = *c.raw_components();
+            let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as f64;
+            cx.ret_f64s(&[byte(r), byte(g), byte(b), a.clamp(0.0, 1.0) as f64]);
+        }
+        None => cx.ret_null(),
+    }
     Ok(())
 }

@@ -92,6 +92,16 @@ impl SvgImageData {
         };
 
         let text = std::str::from_utf8(data).map_err(|_| usvg::Error::NotAnUtf8Str)?;
+        // PATCH: usvg paints `color(display-p3 …)` black; rewrite such colors as sRGB.
+        // PATCH: usvg only knows the exact spelling `currentColor` (CSS keywords are
+        // case-insensitive; Stylo serializes `currentcolor`).
+        let rewritten;
+        let text = if text.contains("color(") || has_lowercase_currentcolor(text) {
+            rewritten = fix_current_color(&rewrite_css_color_functions(text));
+            rewritten.as_str()
+        } else {
+            text
+        };
         let xml_options = roxmltree::ParsingOptions {
             allow_dtd: true,
             ..Default::default()
@@ -197,5 +207,146 @@ impl SvgImageData {
                 }
             }
         }
+    }
+}
+
+fn has_lowercase_currentcolor(text: &str) -> bool {
+    text.as_bytes()
+        .windows(12)
+        .any(|w| w.eq_ignore_ascii_case(b"currentcolor") && w != b"currentColor")
+}
+
+/// Every ASCII-case spelling of `currentcolor` becomes `currentColor`.
+fn fix_current_color(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    let mut copied = 0;
+    while i + 12 <= bytes.len() {
+        if bytes[i..i + 12].eq_ignore_ascii_case(b"currentcolor") {
+            out.push_str(&text[copied..i]);
+            out.push_str("currentColor");
+            i += 12;
+            copied = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+/// PATCH: replaces `color(display-p3 …)`, `color(srgb …)` and `color(srgb-linear …)` in
+/// SVG source with `rgb()`/`rgba()`, which usvg understands.
+fn rewrite_css_color_functions(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("color(") {
+        // Not part of a longer identifier (e.g. `lighting-color(`, which isn't CSS anyway).
+        let prefixed = rest[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        let Some(len) = rest[start..].find(')') else { break };
+        let inner = &rest[start + 6..start + len];
+        out.push_str(&rest[..start]);
+        match (!prefixed).then(|| color_function_to_rgb(inner)).flatten() {
+            Some(rgb) => out.push_str(&rgb),
+            None => out.push_str(&rest[start..=start + len]),
+        }
+        rest = &rest[start + len + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn color_function_to_rgb(inner: &str) -> Option<String> {
+    let (channels, alpha) = match inner.split_once('/') {
+        Some((c, a)) => (c, Some(a.trim())),
+        None => (inner, None),
+    };
+    let mut parts = channels.split_whitespace();
+    let space = parts.next()?.to_ascii_lowercase();
+    let value = |s: Option<&str>| -> Option<f64> {
+        let s = s?;
+        if s.eq_ignore_ascii_case("none") {
+            return Some(0.0);
+        }
+        match s.strip_suffix('%') {
+            Some(p) => p.parse::<f64>().ok().map(|v| v / 100.0),
+            None => s.parse::<f64>().ok(),
+        }
+    };
+    let c = [value(parts.next())?, value(parts.next())?, value(parts.next())?];
+    if parts.next().is_some() {
+        return None;
+    }
+    let alpha = match alpha {
+        Some(a) => value(Some(a))?.clamp(0.0, 1.0),
+        None => 1.0,
+    };
+    let decode = |v: f64| {
+        let a = v.abs();
+        let l = if a <= 0.04045 { a / 12.92 } else { ((a + 0.055) / 1.055).powf(2.4) };
+        l.copysign(v)
+    };
+    let linear_srgb = match space.as_str() {
+        "srgb" => c.map(decode),
+        "srgb-linear" => c,
+        "display-p3" => {
+            let [r, g, b] = c.map(decode);
+            // Linear Display P3 -> XYZ (D65) -> linear sRGB.
+            let x = 0.486_570_948_648_216_2 * r + 0.265_667_693_169_093_06 * g + 0.198_217_285_234_362_5 * b;
+            let y = 0.228_974_564_069_748_8 * r + 0.691_738_521_836_506_4 * g + 0.079_286_914_093_745 * b;
+            let z = 0.045_113_381_858_902_64 * g + 1.043_944_368_900_976 * b;
+            [
+                3.240_969_941_904_522_6 * x - 1.537_383_177_570_094 * y - 0.498_610_760_293_003_4 * z,
+                -0.969_243_636_280_879_6 * x + 1.875_967_501_507_720_2 * y + 0.041_555_057_407_175_59 * z,
+                0.055_630_079_696_993_66 * x - 0.203_976_958_888_976_52 * y + 1.056_971_514_242_878_6 * z,
+            ]
+        }
+        _ => return None,
+    };
+    let encode = |l: f64| {
+        let l = l.clamp(0.0, 1.0);
+        let v = if l <= 0.003_130_8 { 12.92 * l } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+        (v * 255.0).round() as u8
+    };
+    let [r, g, b] = linear_srgb.map(encode);
+    Some(if alpha >= 1.0 {
+        format!("rgb({r},{g},{b})")
+    } else {
+        format!("rgba({r},{g},{b},{alpha})")
+    })
+}
+
+#[cfg(test)]
+mod color_tests {
+    use super::rewrite_css_color_functions;
+
+    #[test]
+    fn wide_gamut_colors_become_srgb() {
+        assert_eq!(
+            rewrite_css_color_functions(r#"<path fill="color(display-p3 1 0 0)"/><g style="stroke:color(srgb 0 0.5 1 / 0.5)"/>"#),
+            r#"<path fill="rgb(255,0,0)"/><g style="stroke:rgba(0,128,255,0.5)"/>"#
+        );
+        // Display P3 green is outside sRGB: clamped.
+        assert_eq!(rewrite_css_color_functions("color(display-p3 0 1 0)"), "rgb(0,255,0)");
+        // Same as Chromium (canvas getImageData).
+        assert_eq!(rewrite_css_color_functions("color(display-p3 .1882 .6588 .2353)"), "rgb(0,171,37)");
+        // Unknown spaces and malformed input stay as they are.
+        assert_eq!(rewrite_css_color_functions("color(rec2020 1 0 0)"), "color(rec2020 1 0 0)");
+        assert_eq!(rewrite_css_color_functions("color(display-p3 1 0"), "color(display-p3 1 0");
+    }
+
+    #[test]
+    fn current_color_spellings() {
+        use super::{fix_current_color, has_lowercase_currentcolor};
+        assert!(has_lowercase_currentcolor(r#"<rect fill="currentcolor"/>"#));
+        assert!(!has_lowercase_currentcolor(r#"<rect fill="currentColor"/>"#));
+        assert_eq!(
+            fix_current_color(r#"<a fill="CurrentColor" stroke="currentcolor">ü</a>"#),
+            r#"<a fill="currentColor" stroke="currentColor">ü</a>"#
+        );
     }
 }

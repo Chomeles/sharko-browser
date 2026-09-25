@@ -29,6 +29,24 @@ use crate::state::{Hook, RuntimeState};
 /// action; `preventDefault()` in JS suppresses blitz's default action.
 pub struct JsEventHandler<'a> {
     pub runtime: &'a mut ScriptRuntime,
+    /// The frame whose document the driver runs on (`[]`: the page).
+    pub frame: Vec<u64>,
+    /// The page's document when `frame` is an iframe (the driver only has the iframe's
+    /// document; the runtime needs the page's to reach every realm's document).
+    pub root: *mut BaseDocument,
+}
+
+impl<'a> JsEventHandler<'a> {
+    /// A handler for events in the page's document.
+    pub fn new(runtime: &'a mut ScriptRuntime) -> Self {
+        JsEventHandler { runtime, frame: Vec::new(), root: std::ptr::null_mut() }
+    }
+
+    /// A handler for events in the document of the frame at `frame` (the driver runs on
+    /// that document; `root` is the page's, which owns it).
+    pub fn for_frame(runtime: &'a mut ScriptRuntime, root: *mut BaseDocument, frame: &[u64]) -> Self {
+        JsEventHandler { runtime, frame: frame.to_vec(), root }
+    }
 }
 
 impl EventHandler for JsEventHandler<'_> {
@@ -39,9 +57,17 @@ impl EventHandler for JsEventHandler<'_> {
         doc: &mut dyn Document,
         event_state: &mut EventState,
     ) {
+        let _ = chain;
         let mut guard = doc.inner_mut();
-        let base: &mut BaseDocument = &mut guard;
-        self.runtime.handle_event(base, chain, event, event_state);
+        let base: *mut BaseDocument = &mut *guard;
+        // A frame's events run with the page document (which owns the frame's) as the
+        // root; the page's with its own.
+        let (root, frame): (*mut BaseDocument, &[u64]) = if self.frame.is_empty() || self.root.is_null() {
+            (base, &[])
+        } else {
+            (self.root, &self.frame)
+        };
+        self.runtime.handle_event_at(root, frame, event, event_state);
     }
 }
 

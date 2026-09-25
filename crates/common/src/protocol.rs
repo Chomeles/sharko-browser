@@ -67,6 +67,8 @@ pub struct NetRequest {
     /// Follow redirects automatically (true for everything except `redirect: "manual"`).
     pub follow_redirects: bool,
     pub cache_mode: CacheMode,
+    /// Report `FromNetwork::Progress` while the body is uploaded / downloaded (XHR).
+    pub progress: bool,
 }
 
 impl NetRequest {
@@ -82,6 +84,7 @@ impl NetRequest {
             credentials: true,
             follow_redirects: true,
             cache_mode: CacheMode::Default,
+            progress: false,
         }
     }
 }
@@ -119,6 +122,8 @@ impl NetResponse {
 }
 
 /// Client -> network process.
+///
+/// New variants go at the end: postcard encodes the variant index.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ToNetwork {
     Fetch(NetRequest),
@@ -129,6 +134,12 @@ pub enum ToNetwork {
     SetCookie { url: String, cookie: String },
     /// Browser only: persist state and exit.
     Shutdown,
+    /// Open a WebSocket (`ws:`/`wss:` URL). Events come back as `FromNetwork::Ws`.
+    WsOpen { id: u64, url: String, protocols: Vec<String>, origin: String },
+    /// Send a message on an open WebSocket.
+    WsSend { id: u64, data: WsData },
+    /// Start the closing handshake (or abort a connection that is not open yet).
+    WsClose { id: u64, code: Option<u16>, reason: String },
 }
 
 /// Network process -> client.
@@ -136,6 +147,31 @@ pub enum ToNetwork {
 pub enum FromNetwork {
     Response(NetResponse),
     Cookies { id: u64, cookies: String },
+    Ws { id: u64, event: WsEvent },
+    /// Transfer progress of a request with `progress` set: bytes of the request body sent
+    /// (`upload`) or of the response body received so far. `total` is 0 when unknown.
+    /// At most every 50 ms per direction, and never after the `Response`.
+    Progress { id: u64, loaded: u64, total: u64, upload: bool },
+}
+
+/// A WebSocket message.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum WsData {
+    Text(String),
+    Binary(#[serde(with = "serde_bytes")] Vec<u8>),
+}
+
+/// What happened on a WebSocket, in order. Every socket ends with exactly one `Closed`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum WsEvent {
+    /// The opening handshake succeeded.
+    Open { protocol: String, extensions: String },
+    Message(WsData),
+    /// This many payload bytes of earlier `WsSend`s were written (for `bufferedAmount`).
+    Sent(u64),
+    /// The connection failed or broke; a `Closed` with `clean: false` follows.
+    Error(String),
+    Closed { code: u16, reason: String, clean: bool },
 }
 
 // ---------------------------------------------------------------------------

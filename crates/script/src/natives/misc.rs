@@ -7,7 +7,10 @@ use common::protocol::{CacheMode, Destination, NetRequest};
 use crate::activation;
 use crate::cx::{Cx, JsErr, NResult, array_buffer_from_vec, bytes_of, get_prop, v8_str};
 use crate::dom;
-use crate::runtime::{report_exception_ex, run_classic};
+use crate::runtime::{
+    RealmTable, call_hook, create_frame_realm, realm_document_parsed, report_exception_ex,
+    run_classic,
+};
 use crate::state::{Hook, Hooks, RuntimeState};
 use crate::storage::StorageError;
 
@@ -162,6 +165,59 @@ fn header_pairs(cx: &mut Cx, i: i32) -> Result<Vec<(String, String)>, JsErr> {
     Ok(headers)
 }
 
+fn socket_id(cx: &Cx) -> Result<u64, JsErr> {
+    let id = cx.num(0);
+    if !(1.0..9_007_199_254_740_992.0).contains(&id) {
+        return Err(JsErr::type_err("invalid socket id"));
+    }
+    Ok(id as u64)
+}
+
+/// Addition: `N.wsOpen(id, url, protocols, origin)` -> whether the host opened the
+/// socket. Its events come back through `hooks.onWebSocket(id, kind, ...)`.
+pub(crate) fn n_ws_open(cx: &mut Cx) -> NResult {
+    let id = socket_id(cx)?;
+    let url = cx.string(1)?;
+    let mut protocols = Vec::new();
+    let list = cx.arg(2);
+    if list.is_array() {
+        let arr: v8::Local<v8::Array> = list.try_into().unwrap();
+        for i in 0..arr.length() {
+            let v = arr.get_index(cx.scope, i).ok_or(JsErr::Thrown)?;
+            protocols.push(crate::cx::value_to_string(cx.scope, v).ok_or(JsErr::Thrown)?);
+        }
+    }
+    let origin = cx.string(3)?;
+    let ok = cx.st.host.ws_open(id, &url, protocols, &origin);
+    cx.ret_bool(ok);
+    Ok(())
+}
+
+/// Addition: `N.wsSend(id, stringOrArrayBuffer)`.
+pub(crate) fn n_ws_send(cx: &mut Cx) -> NResult {
+    let id = socket_id(cx)?;
+    let v = cx.arg(1);
+    let data = if v.is_string() {
+        common::protocol::WsData::Text(cx.string(1)?)
+    } else {
+        common::protocol::WsData::Binary(bytes_of(cx.scope, v).unwrap_or_default())
+    };
+    cx.st.host.ws_send(id, data);
+    cx.ret_undefined();
+    Ok(())
+}
+
+/// Addition: `N.wsClose(id, code (-1: none), reason)`.
+pub(crate) fn n_ws_close(cx: &mut Cx) -> NResult {
+    let id = socket_id(cx)?;
+    let code = cx.num(1);
+    let code = (0.0..=65535.0).contains(&code).then_some(code as u16);
+    let reason = cx.string(2)?;
+    cx.st.host.ws_close(id, code, &reason);
+    cx.ret_undefined();
+    Ok(())
+}
+
 /// Should a request with RequestCredentials `mode` to `url` carry cookies?
 fn send_credentials(cx: &Cx, mode: &str, url: &str) -> bool {
     match mode {
@@ -192,6 +248,8 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
     let credentials = cx.opt_string(6)?.unwrap_or_else(|| "same-origin".into());
     let cache = cx.opt_string(7)?.unwrap_or_default();
     let redirect = cx.opt_string(8)?.unwrap_or_default();
+    // Addition: report upload/download progress (XHR with progress listeners).
+    let progress = cx.len() > 9 && cx.arg(9).is_true();
     let destination = match mode.as_str() {
         "navigate" => Destination::Document,
         _ => Destination::Fetch,
@@ -217,6 +275,7 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
         // "manual" and "error": the layer sees the 3xx response.
         follow_redirects: redirect.is_empty() || redirect == "follow",
         cache_mode,
+        progress,
     };
     cx.st.pending_fetches.borrow_mut().insert(id);
     cx.st.host.fetch(req);
@@ -256,6 +315,7 @@ pub(crate) fn n_fetch_sync(cx: &mut Cx) -> NResult {
         credentials,
         follow_redirects: true,
         cache_mode: CacheMode::Default,
+        progress: false,
     };
     let resp = cx.st.host.fetch_sync(req);
     let scope = &mut *cx.scope;
@@ -547,6 +607,14 @@ pub(crate) fn n_referrer(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.initialWindowName()` -> the initial `window.name` (an iframe document's:
+/// its `<iframe name>`).
+pub(crate) fn n_initial_window_name(cx: &mut Cx) -> NResult {
+    let r = cx.st.host.window_name();
+    cx.ret_str(&r);
+    Ok(())
+}
+
 /// Addition: `N.openWindow(url, target, features)` (`window.open` with a new browsing
 /// context): opens a tab.
 pub(crate) fn n_open_window(cx: &mut Cx) -> NResult {
@@ -806,6 +874,514 @@ pub(crate) fn n_structured_clone(cx: &mut Cx) -> NResult {
         return Err(JsErr::dom("DataCloneError", "failed to deserialize"));
     }
     match de.read_value(context) {
+        Some(v) => {
+            cx.ret_value(v);
+            Ok(())
+        }
+        None => Err(JsErr::Thrown),
+    }
+}
+
+/// A frame path (JS node ids) from argument `i`.
+fn frame_path_arg(cx: &Cx, i: i32) -> Result<Vec<u64>, JsErr> {
+    let v = cx.arg(i);
+    let Ok(arr) = v8::Local::<v8::Array>::try_from(v) else {
+        return Err(JsErr::type_err("frame path expected"));
+    };
+    let mut path = Vec::with_capacity(arr.length() as usize);
+    for k in 0..arr.length() {
+        let n = arr
+            .get_index(cx.scope, k)
+            .and_then(|e| e.number_value(cx.scope))
+            .unwrap_or(0.0);
+        path.push(crate::cx::node_id_from_js(n).ok_or_else(JsErr::invalid_node)?.as_u64());
+    }
+    Ok(path)
+}
+
+/// JS array of the node ids of a frame path.
+pub(crate) fn frame_path_value<'s>(scope: &v8::PinScope<'s, '_>, path: &[u64]) -> v8::Local<'s, v8::Array> {
+    let elems: Vec<v8::Local<v8::Value>> = path
+        .iter()
+        .map(|id| {
+            crate::cx::num_value(
+                scope,
+                crate::cx::node_id_to_js(blitz_dom::NodeId::from_u64(*id)).unwrap_or(0.0),
+            )
+        })
+        .collect();
+    v8::Array::new_with_elements(scope, &elems)
+}
+
+/// Addition: `N.framePath()` -> this document's frame path: the `<iframe>` node ids from
+/// the page down (each in its parent's document); `[]` for the page.
+pub(crate) fn n_frame_path(cx: &mut Cx) -> NResult {
+    let path = cx.st.host.frame_path();
+    let arr = frame_path_value(cx.scope, &path);
+    cx.ret_value(arr.into());
+    Ok(())
+}
+
+/// Addition: `N.framePost(path, message, targetOrigin)`: `postMessage` to the window of
+/// the frame at `path` (see `N.framePath`); `targetOrigin` is `*` or a serialized origin.
+/// The message is serialized here (a `DataCloneError` is thrown synchronously, as in
+/// browsers) and delivered as a task.
+pub(crate) fn n_frame_post(cx: &mut Cx) -> NResult {
+    use v8::ValueSerializerHelper;
+    let target = frame_path_arg(cx, 0)?;
+    let value = cx.arg(1);
+    let target_origin = cx.string(2)?;
+    let context = cx.scope.get_current_context();
+    let bytes = {
+        let ser = v8::ValueSerializer::new(cx.scope, Box::new(CloneDelegate));
+        ser.write_header();
+        if ser.write_value(context, value) != Some(true) {
+            return Err(JsErr::Thrown);
+        }
+        ser.release()
+    };
+    cx.st.host.post_message(&target, &target_origin, bytes);
+    Ok(())
+}
+
+/// Addition: `N.frameList(path)` -> the frames of the document at `path` in tree order as
+/// `[id, name]` pairs, or `null` if the host doesn't know them.
+pub(crate) fn n_frame_list(cx: &mut Cx) -> NResult {
+    let path = frame_path_arg(cx, 0)?;
+    let Some(frames) = cx.st.host.frame_children(&path) else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let elems: Vec<v8::Local<v8::Value>> = frames
+        .iter()
+        .filter_map(|(id, name)| {
+            let js = crate::cx::node_id_to_js(blitz_dom::NodeId::from_u64(*id))?;
+            let parts: [v8::Local<v8::Value>; 2] =
+                [crate::cx::num_value(cx.scope, js), v8_str(cx.scope, name).into()];
+            Some(v8::Array::new_with_elements(cx.scope, &parts).into())
+        })
+        .collect();
+    let arr = v8::Array::new_with_elements(cx.scope, &elems);
+    cx.ret_value(arr.into());
+    Ok(())
+}
+
+/// The global object of the realm of the frame at `path`, if that frame's document is
+/// same-origin with the current one (its realm is created on demand, running its
+/// scripts); `None` otherwise (the JS layer then uses a remote window stand-in).
+fn realm_global<'s>(
+    cx: &mut Cx<'_, 's, '_>,
+    path: &[u64],
+) -> Result<Option<v8::Local<'s, v8::Value>>, JsErr> {
+    let own = cx.st.host.frame_path();
+    if own == path {
+        let ctx = cx.scope.get_current_context();
+        let g: v8::Local<v8::Value> = ctx.global(cx.scope).into();
+        return Ok(Some(g));
+    }
+    let Some(table) = cx.scope.get_slot::<RealmTable>().cloned() else {
+        return Ok(None);
+    };
+    let origin = cx.st.origin();
+    if path.is_empty() {
+        let main = table.0.borrow().main.clone();
+        let Some((ctx, st)) = main else { return Ok(None) };
+        if st.origin() != origin {
+            return Ok(None);
+        }
+        let context = v8::Local::new(cx.scope, &ctx);
+        return Ok(Some(context.global(cx.scope).into()));
+    }
+    let root = table
+        .0
+        .borrow()
+        .main
+        .as_ref()
+        .map(|(_, s)| s.doc_ptr())
+        .unwrap_or(std::ptr::null_mut());
+    if root.is_null() {
+        return Ok(None);
+    }
+    // The frame's document, walking down from the page document (the reference is not
+    // held across anything that runs JS).
+    let (sub, doc_id, url) = {
+        // SAFETY: `root` is the page document of the current entry (see
+        // `ScriptRuntime::enter_in`); every realm's document hangs off it.
+        let mut cur: &mut blitz_dom::BaseDocument = unsafe { &mut *root };
+        for &id in path {
+            let Some(sub) = cur
+                .get_node_mut(blitz_dom::NodeId::from_u64(id))
+                .and_then(|n| n.subdoc_mut())
+            else {
+                return Ok(None);
+            };
+            match sub.inner_mut() {
+                blitz_dom::DocGuardMut::Ref(d) => cur = d,
+                _ => return Ok(None),
+            }
+        }
+        let id = blitz_dom::Document::id(&*cur);
+        (cur as *mut blitz_dom::BaseDocument, id, cur.url().to_string())
+    };
+    let sub_origin = url::Url::parse(&url)
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_else(|_| "null".to_string());
+    if sub_origin != origin {
+        return Ok(None);
+    }
+    let existing = table
+        .0
+        .borrow()
+        .frames
+        .get(path)
+        .filter(|r| r.doc_id == doc_id)
+        .map(|r| r.context.clone());
+    let ctx = match existing {
+        Some(c) => c,
+        None => {
+            let Some(host) = cx.st.host.frame_host(path, &url) else {
+                return Ok(None);
+            };
+            let st = create_frame_realm(cx.scope, &table, path.to_vec(), host, &url, doc_id);
+            st.set_doc(sub);
+            let ctx = table
+                .0
+                .borrow()
+                .frames
+                .get(path)
+                .map(|r| r.context.clone())
+                .expect("the realm was just created");
+            {
+                let context = v8::Local::new(cx.scope, &ctx);
+                let scope = &mut v8::ContextScope::new(cx.scope, context);
+                realm_document_parsed(scope, &st);
+            }
+            ctx
+        }
+    };
+    let context = v8::Local::new(cx.scope, &ctx);
+    Ok(Some(context.global(cx.scope).into()))
+}
+
+/// Addition: `N.frameGlobal(iframeId)` -> the `window` of the document of this document's
+/// `<iframe>`/`<frame>` `iframeId` if it is same-origin (its realm is created on demand),
+/// else `null`.
+pub(crate) fn n_frame_global(cx: &mut Cx) -> NResult {
+    let (id, is_frame) = {
+        let doc = cx.st.doc()?;
+        let id = cx.node(doc, 0)?;
+        let is_frame = doc
+            .get_node(id)
+            .and_then(|n| n.element_data())
+            .is_some_and(|e| {
+                e.name.local == blitz_dom::local_name!("iframe")
+                    || e.name.local == blitz_dom::local_name!("frame")
+            });
+        (id, is_frame)
+    };
+    if !is_frame {
+        cx.ret_null();
+        return Ok(());
+    }
+    let mut path = cx.st.host.frame_path();
+    path.push(id.as_u64());
+    match realm_global(cx, &path)? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.realmGlobal(path)` -> the `window` of the frame at `path` (see
+/// `N.framePath`) if same-origin, else `null`.
+pub(crate) fn n_realm_global(cx: &mut Cx) -> NResult {
+    let path = frame_path_arg(cx, 0)?;
+    match realm_global(cx, &path)? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.parentGlobal()` -> the parent document's `window` if same-origin, else
+/// `null` (also for the page).
+pub(crate) fn n_parent_global(cx: &mut Cx) -> NResult {
+    let own = cx.st.host.frame_path();
+    let Some((_, parent)) = own.split_last() else {
+        cx.ret_null();
+        return Ok(());
+    };
+    match realm_global(cx, parent)? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.topGlobal()` -> the page's `window` if same-origin, else `null`.
+pub(crate) fn n_top_global(cx: &mut Cx) -> NResult {
+    match realm_global(cx, &[])? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.frameElement()` -> the `<iframe>` element (of the parent document) this
+/// document is in, if the parent is same-origin and has a realm, else `null`.
+pub(crate) fn n_frame_element(cx: &mut Cx) -> NResult {
+    let own = cx.st.host.frame_path();
+    let Some((&last, parent)) = own.split_last() else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let Some(table) = cx.scope.get_slot::<RealmTable>().cloned() else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let realm = {
+        let t = table.0.borrow();
+        if parent.is_empty() {
+            t.main.clone()
+        } else {
+            t.frames
+                .get(parent)
+                .map(|r| (r.context.clone(), r.state.clone()))
+        }
+    };
+    let Some((ctx, st)) = realm else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let node = blitz_dom::NodeId::from_u64(last);
+    if st.origin() != cx.st.origin() || !st.has_doc() {
+        cx.ret_null();
+        return Ok(());
+    }
+    if let Ok(doc) = st.doc() {
+        if doc.get_node(node).is_none() {
+            cx.ret_null();
+            return Ok(());
+        }
+        crate::dom::expose(doc, node);
+    }
+    let Some(js) = crate::cx::node_id_to_js(node) else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let r = {
+        let context = v8::Local::new(cx.scope, &ctx);
+        let scope = &mut v8::ContextScope::new(cx.scope, context);
+        let id = v8::Number::new(scope, js).into();
+        // (Not a complete task of the parent realm: no microtask checkpoint here.)
+        st.native_depth.set(st.native_depth.get() + 1);
+        let r = call_hook(scope, &st, Hook::WrapNode, &[id]);
+        st.native_depth.set(st.native_depth.get() - 1);
+        r
+    };
+    match r {
+        Some(v) => cx.ret_value(v),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+unsafe extern "C" {
+    /// `v8::Isolate::GetIncumbentContext()`, which the v8 crate doesn't bind: the context
+    /// of the most recently entered author function, i.e. the realm whose script called
+    /// the running native (V8 keeps API functions off that count). A `Local<Context>` is
+    /// one pointer, returned in a register.
+    #[link_name = "_ZN2v87Isolate19GetIncumbentContextEv"]
+    fn v8_isolate_get_incumbent_context(isolate: *mut std::ffi::c_void) -> *const v8::Context;
+}
+
+/// The global object of the realm whose script called the running native, when it is a
+/// realm of this page with the callee's origin (the only kind that can call it);
+/// `None` when it is the callee's own realm or unknown.
+fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Object>> {
+    let isolate: *mut std::ffi::c_void = {
+        let i: &mut v8::Isolate = cx.scope;
+        // SAFETY: `UnsafeRawIsolatePtr` is `repr(transparent)` around the C++ isolate pointer.
+        unsafe { std::mem::transmute::<v8::UnsafeRawIsolatePtr, *mut std::ffi::c_void>(i.as_raw_isolate_ptr()) }
+    };
+    // SAFETY: the isolate is live and entered, and a handle scope is open (natives run
+    // inside one); the C++ method only reads V8's stack and context state.
+    let raw = unsafe { v8_isolate_get_incumbent_context(isolate) };
+    let nn = std::ptr::NonNull::new(raw as *mut v8::Context)?;
+    // SAFETY: `Local` is `repr(C)` around a `NonNull` handle, the representation V8's
+    // `Local<Context>` shares; the handle lives in the current handle scope.
+    let ctx: v8::Local<'s, v8::Context> = unsafe { std::mem::transmute(nn) };
+    let st = crate::state::state_of_context(cx.scope, Some(ctx))?;
+    if std::ptr::eq(st, cx.st) || st.origin() != cx.st.origin() {
+        return None;
+    }
+    Some(ctx.global(cx.scope))
+}
+
+/// Addition: `window.postMessage` itself (an API function, so V8 can tell which realm
+/// called it): runs hook `windowPostMessage(message, targetOrigin, transfer, source)`
+/// of the window's realm with the caller's window as `source` (`null`: itself).
+/// Exceptions of the hook (invalid target origin, uncloneable data) reach the caller.
+pub(crate) fn n_window_post_message(cx: &mut Cx) -> NResult {
+    if cx.args.length() == 0 {
+        return Err(JsErr::Type(
+            "Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.".into(),
+        ));
+    }
+    let (message, target_origin, transfer) = (cx.arg(0), cx.arg(1), cx.arg(2));
+    let source: v8::Local<v8::Value> = match incumbent_global(cx) {
+        Some(g) => g.into(),
+        None => v8::null(cx.scope).into(),
+    };
+    let st = cx.st;
+    if st.hooks.borrow().get(Hook::PostMessage).is_none() {
+        return Ok(());
+    }
+    let r = crate::runtime::call_hook_raw(cx.scope, st, Hook::PostMessage, &[message, target_origin, transfer, source]);
+    // `None`: the hook threw; the exception is pending for the JS caller.
+    if r.is_none() {
+        return Err(JsErr::Thrown);
+    }
+    Ok(())
+}
+
+/// `foreignNodeType(o)`: the nodeType of `o` when it is a node wrapper of another realm
+/// of this page (0 otherwise: no object, this realm's, not a node).
+pub(crate) fn n_foreign_node_type(cx: &mut Cx) -> NResult {
+    let Ok(obj) = v8::Local::<v8::Object>::try_from(cx.arg(0)) else {
+        cx.ret_i32(0);
+        return Ok(());
+    };
+    let Some(ctx) = obj.get_creation_context(cx.scope) else {
+        cx.ret_i32(0);
+        return Ok(());
+    };
+    let Some(st) = crate::state::state_of_context(cx.scope, Some(ctx)) else {
+        cx.ret_i32(0);
+        return Ok(());
+    };
+    if std::ptr::eq(st, cx.st) || st.origin() != cx.st.origin() {
+        cx.ret_i32(0);
+        return Ok(());
+    }
+    let r = {
+        let scope = &mut v8::ContextScope::new(cx.scope, ctx);
+        st.native_depth.set(st.native_depth.get() + 1);
+        let r = call_hook(scope, st, Hook::NodeType, &[obj.into()]);
+        st.native_depth.set(st.native_depth.get() - 1);
+        r.and_then(|v| v.int32_value(scope))
+    };
+    cx.ret_i32(r.unwrap_or(0));
+    Ok(())
+}
+
+/// A message serialized by `N.framePost` (in another isolate), as a value of this one.
+pub(crate) fn deserialize_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: &[u8],
+) -> Option<v8::Local<'s, v8::Value>> {
+    use v8::ValueDeserializerHelper;
+    let context = scope.get_current_context();
+    let de = v8::ValueDeserializer::new(scope, Box::new(CloneDelegate), data);
+    if de.read_header(context) != Some(true) {
+        return None;
+    }
+    de.read_value(context)
+}
+
+/// Addition: `N.workerCreate()` -> the global object of a new JS realm (a separate V8
+/// context with only the ECMAScript builtins) for a dedicated worker. The JS layer installs
+/// the worker API on it. The context lives as long as its global object is referenced.
+pub(crate) fn n_worker_create(cx: &mut Cx) -> NResult {
+    let page = cx.scope.get_current_context();
+    let token = page.get_security_token(cx.scope);
+    let context = v8::Context::new(cx.scope, Default::default());
+    // Same token: the page and the worker realm may touch each other's objects.
+    context.set_security_token(token);
+    let global = context.global(cx.scope);
+    cx.ret_value(global.into());
+    Ok(())
+}
+
+fn realm_of<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    global: v8::Local<'s, v8::Value>,
+) -> Result<v8::Local<'s, v8::Context>, JsErr> {
+    let obj: v8::Local<v8::Object> = global
+        .try_into()
+        .map_err(|_| JsErr::type_err("not a realm's global object"))?;
+    obj.get_creation_context(scope)
+        .ok_or_else(|| JsErr::type_err("not a realm's global object"))
+}
+
+/// Addition: `N.workerEval(global, source, url)`: run a classic script in the realm of
+/// `global` (from `N.workerCreate`). Returns `null`, or `[message, url, line, column,
+/// error]` for an uncaught exception.
+pub(crate) fn n_worker_eval(cx: &mut Cx) -> NResult {
+    let target = realm_of(cx.scope, cx.arg(0))?;
+    let source = cx.string(1)?;
+    let url = cx.string(2)?;
+    let failure = {
+        let scope = &mut v8::ContextScope::new(cx.scope, target);
+        match run_classic(scope, &source, &url) {
+            Ok(_) => None,
+            Err(caught) => {
+                let (Some(exception), message) = (caught.exception, caught.message) else {
+                    // Terminated by the watchdog: keep unwinding.
+                    return Err(JsErr::Thrown);
+                };
+                let text = match message {
+                    Some(m) => m.get(scope).to_rust_string_lossy(scope),
+                    None => exception.to_rust_string_lossy(scope),
+                };
+                let line = message.and_then(|m| m.get_line_number(scope)).unwrap_or(0);
+                let column = message.map(|m| m.get_start_column()).unwrap_or(0);
+                Some((text, line, column, exception))
+            }
+        }
+    };
+    match failure {
+        None => cx.ret_null(),
+        Some((text, line, column, exception)) => {
+            let items = [
+                v8_str(cx.scope, &text).into(),
+                v8_str(cx.scope, &url).into(),
+                v8::Integer::new(cx.scope, line as i32).into(),
+                v8::Integer::new(cx.scope, column as i32 + 1).into(),
+                exception,
+            ];
+            let arr = v8::Array::new_with_elements(cx.scope, &items);
+            cx.ret_value(arr.into());
+        }
+    }
+    Ok(())
+}
+
+/// Addition: `N.cloneInto(global, value)`: structured clone of `value` whose result
+/// belongs to the realm of `global` (worker messages must be objects of the receiving
+/// realm, so `instanceof Array` etc. work there).
+pub(crate) fn n_clone_into(cx: &mut Cx) -> NResult {
+    use v8::{ValueDeserializerHelper, ValueSerializerHelper};
+    let target = realm_of(cx.scope, cx.arg(0))?;
+    let value = cx.arg(1);
+    let context = cx.scope.get_current_context();
+    let bytes = {
+        let ser = v8::ValueSerializer::new(cx.scope, Box::new(CloneDelegate));
+        ser.write_header();
+        if ser.write_value(context, value) != Some(true) {
+            return Err(JsErr::Thrown);
+        }
+        ser.release()
+    };
+    let cloned = {
+        let scope = &mut v8::ContextScope::new(cx.scope, target);
+        let de = v8::ValueDeserializer::new(scope, Box::new(CloneDelegate), &bytes);
+        if de.read_header(target) != Some(true) {
+            return Err(JsErr::dom("DataCloneError", "failed to deserialize"));
+        }
+        de.read_value(target)
+    };
+    match cloned {
         Some(v) => {
             cx.ret_value(v);
             Ok(())

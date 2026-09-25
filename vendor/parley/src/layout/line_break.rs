@@ -1131,8 +1131,13 @@ impl<B: Brush> Drop for BreakLines<'_, B> {
         }
 
         // Don't include the last line's line_height in the layout's height if the last line is empty
+        // PATCH: also when it only holds the empty run committed for the cursor after a
+        // trailing newline (above): `text<br>` is one line tall, as in browsers.
         if let Some(last_line) = self.lines.lines.last() {
-            if last_line.item_range.is_empty() {
+            let only_empty_runs = self.lines.line_items[last_line.item_range.clone()]
+                .iter()
+                .all(|item| item.is_text_run() && item.text_range.is_empty());
+            if last_line.item_range.is_empty() || only_empty_runs {
                 height -= last_line.metrics.line_height as f64;
             }
         }

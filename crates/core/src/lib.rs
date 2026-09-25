@@ -47,7 +47,13 @@ Headless options:
   --scale=F                 device pixel ratio (default 1)
   --dump-dom                print the serialized DOM after load
   --eval=JS                 evaluate JS after load and print the result (repeatable)
+  --wait-for=JS             before --eval, poll until JS is truthy (gives up after --timeout, exit 4)
+  --wait-poll=MS            poll interval for --wait-for (default 50)
+  --batch                   read URL[<TAB>TIMEOUT_MS] lines from stdin, load each in one
+                            tab (--wait-for, --eval) and print a JSON line per URL
   --click=X,Y               click at viewport position after load (repeatable)
+  --click-text=REGEX        click the first button/link whose text matches, also in iframes (repeatable)
+  --click-wait=MS           time to let the page react after each click (default 300)
   --scroll=PX               scroll down by PX before the screenshot
   --timeout=MS              max wait for the load event (default 30000)
   --settle=MS               extra wait after load (default 300)
@@ -234,13 +240,25 @@ pub fn run() -> i32 {
         if let Some(t) = get("settle") {
             o.settle = Duration::from_millis(t.parse().unwrap_or(300));
         }
+        if let Some(t) = get("click-wait") {
+            o.click_wait = Duration::from_millis(t.parse().unwrap_or(300));
+        }
         if let Some(s) = get("scroll") {
             o.scroll_y = s.parse().unwrap_or(0.0);
+        }
+        o.wait_for = get("wait-for").map(String::from);
+        o.batch = has("batch");
+        if let Some(t) = get("wait-poll") {
+            o.wait_poll = Duration::from_millis(t.parse().unwrap_or(50));
         }
         let prefix_eval = "--eval=";
         o.eval = args
             .iter()
             .filter_map(|a| a.strip_prefix(prefix_eval).map(|s| s.to_string()))
+            .collect();
+        o.click_text = args
+            .iter()
+            .filter_map(|a| a.strip_prefix("--click-text=").map(String::from))
             .collect();
         o.clicks = args
             .iter()

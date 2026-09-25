@@ -63,7 +63,7 @@ use style::{
     media_queries::MediaList,
     selector_parser::SnapshotMap,
     shared_lock::{SharedRwLock, StylesheetGuards},
-    stylesheets::{AllowImportRules, DocumentStyleSheet, Origin, Stylesheet},
+    stylesheets::{AllowImportRules, DocumentStyleSheet, Origin, Stylesheet, StylesheetInDocument, UrlExtraData},
     stylist::Stylist,
 };
 use style_dom::ElementState;
@@ -191,6 +191,21 @@ pub enum DocumentEvent {
     },
 }
 
+/// PATCH: a CSS animation or transition event (`animationstart`, `animationiteration`,
+/// `animationend`, `transitionrun`, `transitionstart`, `transitionend`) for the embedder to
+/// dispatch to the page.
+#[derive(Debug, Clone)]
+pub struct AnimationEvent {
+    pub node: NodeId,
+    pub kind: &'static str,
+    /// The animation name, or the transitioned property.
+    pub name: String,
+    /// `elapsedTime` in seconds.
+    pub elapsed: f64,
+    /// `::before`, `::after`, `::marker` or empty.
+    pub pseudo: &'static str,
+}
+
 pub struct BaseDocument {
     /// ID of the document
     id: usize,
@@ -297,6 +312,11 @@ pub struct BaseDocument {
     pub(crate) nodes_to_id: HashMap<String, SmallVec<[NodeId; 1]>>,
     /// Map of `<style>` and `<link>` node IDs to their associated stylesheet
     pub(crate) nodes_to_stylesheet: BTreeMap<NodeId, DocumentStyleSheet>,
+    /// PATCH: `adoptedStyleSheets` of the document (`None`) and of emulated shadow roots
+    /// (their host), in the cascade after every `<style>`/`<link>` sheet.
+    pub(crate) adopted_stylesheets: Vec<(Option<NodeId>, Vec<DocumentStyleSheet>)>,
+    /// PATCH: the source text of each `<link rel=stylesheet>`'s sheet (CSSOM `cssRules`).
+    pub(crate) linked_sheet_sources: HashMap<NodeId, std::sync::Arc<str>>,
     /// Stylesheets added by the useragent
     /// where the key is the hashed CSS
     pub(crate) ua_stylesheets: HashMap<String, DocumentStyleSheet>,
@@ -304,9 +324,20 @@ pub struct BaseDocument {
     pub(crate) controls_to_form: HashMap<NodeId, NodeId>,
     /// Nodes that contain sub documents
     pub(crate) sub_document_nodes: HashSet<NodeId>,
+    /// PATCH: sub-documents removed since the last `drop_detached_sub_documents()` (kept
+    /// alive until then, see `remove_sub_document`).
+    pub(crate) detached_sub_documents: Vec<Box<dyn Document>>,
     /// PATCH: inline roots whose line breaks a measurement overwrote after their final
     /// layout (see `relayout_stale_inline_roots`).
     pub(crate) stale_inline_roots: Vec<NodeId>,
+    /// PATCH: the URL each `<img>` last loaded (a `load` event fires once per source).
+    pub(crate) image_loaded_src: HashMap<NodeId, String>,
+    /// PATCH: the source each `<img>` selected from `src`/`srcset`/`<picture>`.
+    pub(crate) image_sources: HashMap<NodeId, crate::image_source::ImageSource>,
+    /// PATCH: `loading="lazy"` images waiting to come near the viewport.
+    pub(crate) lazy_images: HashSet<NodeId>,
+    /// PATCH: the viewport changed; responsive image sources are re-selected.
+    pub(crate) image_sources_viewport_dirty: bool,
     /// PATCH: nodes whose unrounded layout changed and whose layout ancestors are not yet
     /// flagged, and all nodes carrying layout-dirty flags (cleared after rounding).
     pub(crate) layout_dirty_pending: Vec<NodeId>,
@@ -340,6 +371,9 @@ pub struct BaseDocument {
     /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
     /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
     pub(crate) element_load_events: Vec<(NodeId, bool)>,
+    /// PATCH: CSS animation/transition events since the last
+    /// [`BaseDocument::take_animation_events`].
+    pub(crate) animation_events: Vec<AnimationEvent>,
     /// PATCH: set once the parser is done: stylesheets inserted later (by scripts) are
     /// not render-blocking, as in other browsers.
     pub(crate) parser_done: bool,
@@ -435,6 +469,9 @@ impl BaseDocument {
         style_config::set_pref!("layout.unimplemented", true);
         style_config::set_pref!("layout.columns.enabled", true);
         style_config::set_pref!("layout.css.basic-shape-shape.enabled", true);
+        // PATCH: `:has()` and `:nth-child(An+B of S)` (see has_invalidation.rs).
+        style_config::set_pref!("layout.css.has-selector.enabled", true);
+        style_config::set_pref!("layout.css.nth-child-of.enabled", true);
         style_config::set_pref!("layout.threads", -1);
 
         let viewport = config.viewport.unwrap_or_default();
@@ -488,6 +525,8 @@ impl BaseDocument {
             url: base_url,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
+            adopted_stylesheets: Vec::new(),
+            linked_sheet_sources: HashMap::new(),
             font_ctx,
             #[cfg(feature = "parallel-construct")]
             thread_font_contexts: ThreadLocal::new(),
@@ -504,7 +543,12 @@ impl BaseDocument {
             subdoc_is_animating: false,
             has_canvas: false,
             sub_document_nodes: HashSet::new(),
+            detached_sub_documents: Vec::new(),
             stale_inline_roots: Vec::new(),
+            image_loaded_src: HashMap::new(),
+            image_sources: HashMap::new(),
+            lazy_images: HashSet::new(),
+            image_sources_viewport_dirty: false,
             layout_dirty_pending: Vec::new(),
             layout_dirty_touched: Vec::new(),
             abspos_viewport: None,
@@ -520,6 +564,7 @@ impl BaseDocument {
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
             element_load_events: Vec::new(),
+            animation_events: Vec::new(),
             parser_done: false,
             pending_style_image_nodes: Vec::new(),
             pending_critical_resources: HashSet::new(),
@@ -799,10 +844,16 @@ impl BaseDocument {
     }
 
     pub fn remove_sub_document(&mut self, node_id: NodeId) {
-        self.nodes[node_id]
-            .element_data_mut()
-            .unwrap()
-            .remove_sub_document();
+        // PATCH: the document stays alive until the host's next
+        // `drop_detached_sub_documents()`: a script may be running in it (an iframe
+        // removing itself), and other realms may reach it during the current task.
+        if let Some(el) = self.nodes[node_id].element_data_mut()
+            && let SpecialElementData::SubDocument(_) = &el.special_data
+            && let SpecialElementData::SubDocument(doc) =
+                std::mem::replace(&mut el.special_data, SpecialElementData::None)
+        {
+            self.detached_sub_documents.push(doc);
+        }
         self.sub_document_nodes.remove(&node_id);
         if let Some(load) = self.iframe_loads.remove(&node_id) {
             load.abort_controller.abort();
@@ -898,6 +949,10 @@ impl BaseDocument {
     /// it so that stale NodeIds are never dereferenced after the slot is freed.
     pub(crate) fn remove_node_from_tree(&mut self, node_id: NodeId) -> Option<Node> {
         self.clear_interaction_state_for_removed_node(node_id);
+        // PATCH: per-image state of a freed slot must not leak to its next occupant.
+        self.image_sources.remove(&node_id);
+        self.image_loaded_src.remove(&node_id);
+        self.lazy_images.remove(&node_id);
         self.nodes.remove(node_id)
     }
 
@@ -1361,6 +1416,7 @@ impl BaseDocument {
     }
 
     fn remove_stylesheet_for_node(&mut self, node_id: NodeId) {
+        self.linked_sheet_sources.remove(&node_id);
         if let Some(old) = self.nodes_to_stylesheet.remove(&node_id) {
             self.stylist.remove_stylesheet(old, &self.guard.read());
             self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
@@ -1411,9 +1467,20 @@ impl BaseDocument {
         origin: Origin,
         media: MediaList,
     ) -> DocumentStyleSheet {
+        self.make_stylesheet_at(css, origin, media, self.url.url_extra_data())
+    }
+
+    /// PATCH: a stylesheet whose relative URLs resolve against `url_data`.
+    pub(crate) fn make_stylesheet_at(
+        &self,
+        css: impl AsRef<str>,
+        origin: Origin,
+        media: MediaList,
+        url_data: UrlExtraData,
+    ) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
             css.as_ref(),
-            self.url.url_extra_data(),
+            url_data,
             origin,
             ServoArc::new(self.guard.wrap(media)),
             self.guard.clone(),
@@ -1468,6 +1535,8 @@ impl BaseDocument {
             .next()
             .map(|(_, sheet)| sheet);
 
+        // PATCH: adopted stylesheets stay behind every node's sheet.
+        let insertion_point = insertion_point.or_else(|| self.first_adopted_stylesheet());
         if let Some(insertion_point) = insertion_point {
             self.stylist.insert_stylesheet_before(
                 stylesheet,
@@ -1478,6 +1547,70 @@ impl BaseDocument {
             self.stylist
                 .append_stylesheet(stylesheet, &self.guard.read())
         }
+    }
+
+    fn first_adopted_stylesheet(&self) -> Option<&DocumentStyleSheet> {
+        self.adopted_stylesheets
+            .iter()
+            .flat_map(|(_, sheets)| sheets.iter())
+            .next()
+    }
+
+    /// PATCH: replace the `adoptedStyleSheets` of the document (`host` = `None`) or of the
+    /// emulated shadow tree of `host` with the given sheet sources and base URLs (in
+    /// cascade order; a shadow root's sheets are scoped to its host like its `<style>`
+    /// elements). Adopted sheets come after all `<style>`/`<link>` sheets, the document's
+    /// before the shadow roots'.
+    pub fn set_adopted_stylesheets(
+        &mut self,
+        host: Option<NodeId>,
+        sources: &[(String, Option<String>)],
+    ) {
+        for (_, sheets) in &self.adopted_stylesheets {
+            for sheet in sheets {
+                self.stylist.remove_stylesheet(sheet.clone(), &self.guard.read());
+            }
+        }
+        self.adopted_stylesheets.retain(|(h, _)| *h != host);
+        if !sources.is_empty() {
+            let sheets = sources
+                .iter()
+                .map(|(css, base)| {
+                    let url_data = base
+                        .as_deref()
+                        .and_then(|b| url::Url::parse(b).ok())
+                        .map(|u| UrlExtraData(ServoArc::new(u)))
+                        .unwrap_or_else(|| self.url.url_extra_data());
+                    let css = match host {
+                        Some(host) => crate::shadow_css::scope_shadow_css(css, &host.to_string()),
+                        None => css.clone(),
+                    };
+                    self.make_stylesheet_at(css, Origin::Author, MediaList::empty(), url_data)
+                })
+                .collect();
+            let at = if host.is_none() {
+                0
+            } else {
+                self.adopted_stylesheets.len()
+            };
+            self.adopted_stylesheets.insert(at, (host, sheets));
+        }
+        for (_, sheets) in &self.adopted_stylesheets {
+            for sheet in sheets {
+                self.stylist.append_stylesheet(sheet.clone(), &self.guard.read());
+            }
+        }
+        self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+        if let Some(root) = self.try_root_element().map(|n| n.id) {
+            self.nodes[root].set_restyle_hint(crate::RestyleHint::restyle_subtree());
+        }
+    }
+
+    /// PATCH: free the sub-documents removed since the last call. Only for the host, at
+    /// a point where no script runs (`handle_messages()` also runs during a layout a
+    /// script forced, when a realm may still point at a document removed in that task).
+    pub fn drop_detached_sub_documents(&mut self) {
+        self.detached_sub_documents.clear();
     }
 
     pub fn handle_messages(&mut self) {
@@ -1512,11 +1645,19 @@ impl BaseDocument {
     }
 
     /// PATCH: take the element resource loads/failures since the last call.
+    pub fn has_animation_events(&self) -> bool {
+        !self.animation_events.is_empty()
+    }
+
+    pub fn take_animation_events(&mut self) -> Vec<AnimationEvent> {
+        std::mem::take(&mut self.animation_events)
+    }
+
     pub fn take_element_load_events(&mut self) -> Vec<(NodeId, bool)> {
         std::mem::take(&mut self.element_load_events)
     }
 
-    fn push_element_load_event(&mut self, node_id: NodeId, ok: bool) {
+    pub(crate) fn push_element_load_event(&mut self, node_id: NodeId, ok: bool) {
         let fires = self.nodes.get(node_id).is_some_and(|n| {
             n.data.is_element_with_tag_name(&local_name!("img"))
                 || n.data.is_element_with_tag_name(&local_name!("link"))
@@ -1537,7 +1678,9 @@ impl BaseDocument {
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting = self.pending_images.get(url).cloned().unwrap_or_default();
                     for (node_id, image_type) in waiting {
-                        if matches!(image_type, ImageType::Image) {
+                        if matches!(image_type, ImageType::Image)
+                            && !self.image_sources.get(&node_id).is_some_and(|s| &s.url != url)
+                        {
                             self.push_element_load_event(node_id, false);
                         }
                     }
@@ -1573,6 +1716,7 @@ impl BaseDocument {
         match resource {
             Resource::Css(css, source) => {
                 let node_id = res.node_id.unwrap();
+                self.linked_sheet_sources.insert(node_id, source.clone());
                 // PATCH: linked stylesheets follow the same scoping as `<style>`.
                 match self.style_scope(node_id) {
                     StyleScope::Document => self.add_stylesheet_for_node(css, node_id),
@@ -1580,7 +1724,17 @@ impl BaseDocument {
                     StyleScope::ShadowHost(host) => {
                         let scoped =
                             crate::shadow_css::scope_shadow_css(&source, &host.to_string());
-                        let sheet = self.make_stylesheet(&scoped, Origin::Author);
+                        // Keep the linked sheet's URL (relative `url()`s, `@import`s)
+                        // and its `media` attribute.
+                        let (url_data, media) = {
+                            let guard = self.guard.read();
+                            (
+                                css.0.contents(&guard).url_data.clone(),
+                                css.0.media.read_with(&guard).clone(),
+                            )
+                        };
+                        let sheet =
+                            self.make_stylesheet_at(&scoped, Origin::Author, media, url_data);
                         self.add_stylesheet_for_node(sheet, node_id);
                     }
                 }
@@ -1653,10 +1807,68 @@ impl BaseDocument {
                 // TODO: see if we can only invalidate if resolved fonts may have changed
                 self.invalidate_inline_contexts();
             }
+            Resource::Preloaded => {
+                if let Some(node_id) = res.node_id {
+                    self.push_element_load_event(node_id, true);
+                }
+            }
+            Resource::NestedCss(import_rule, sheet) => {
+                crate::net::fetch_font_face(
+                    self.tx.clone(),
+                    self.id,
+                    res.node_id,
+                    &sheet,
+                    &self.net_provider,
+                    &self.shell_provider,
+                    &self.guard.read(),
+                    self.abort_signal.as_ref(),
+                );
+                {
+                    let mut guard = self.guard.write();
+                    import_rule.write_with(&mut guard).stylesheet =
+                        style::stylesheets::import_rule::ImportSheet::Sheet(sheet);
+                }
+                self.stylist
+                    .force_stylesheet_origins_dirty(OriginSet::all());
+                self.shell_provider.request_redraw();
+            }
             Resource::None => {
                 // Do nothing
             }
         }
+    }
+
+    /// PATCH: the document's font context (shared with the embedder, e.g. for canvas text).
+    pub fn font_context(&self) -> Arc<Mutex<parley::FontContext>> {
+        self.font_ctx.clone()
+    }
+
+    /// PATCH: show `rgba` (straight RGBA, `width`×`height`) as the content of a `<canvas>`
+    /// (the pixels of its 2D context); painted like an image.
+    pub fn set_canvas_pixels(&mut self, node_id: NodeId, width: u32, height: u32, rgba: Vec<u8>) {
+        let Some(node) = self.nodes.get_mut(node_id) else {
+            return;
+        };
+        let Some(el) = node.element_data_mut() else {
+            return;
+        };
+        let same_size = el
+            .raster_image_data()
+            .is_some_and(|r| r.width == width && r.height == height);
+        el.special_data = if width == 0 || height == 0 || rgba.len() != (width * height * 4) as usize {
+            SpecialElementData::None
+        } else {
+            SpecialElementData::Image(Box::new(ImageData::Raster(RasterImageData::new(
+                width,
+                height,
+                Arc::new(rgba),
+            ))))
+        };
+        if !same_size {
+            node.cache_mut().clear();
+            node.insert_damage(ALL_DAMAGE);
+        }
+        self.shell_provider.request_redraw();
     }
 
     /// Cache a loaded image and apply it to all nodes waiting on it
@@ -1682,12 +1894,20 @@ impl BaseDocument {
 
             match image_type {
                 ImageType::Image => {
+                    // PATCH: the `<img>` switched to another source meanwhile.
+                    if self.image_sources.get(&node_id).is_some_and(|s| s.url != url) {
+                        continue;
+                    }
+                    let Some(node) = self.get_node_mut(node_id) else {
+                        continue;
+                    };
                     node.element_data_mut().unwrap().special_data =
                         SpecialElementData::Image(Box::new(image.clone()));
 
                     // Clear layout cache
                     node.cache_mut().clear();
                     node.insert_damage(ALL_DAMAGE);
+                    self.image_loaded_src.insert(node_id, url.to_string());
                     self.push_element_load_event(node_id, true);
                 }
                 ImageType::Background(idx) | ImageType::Mask(idx) => {
@@ -1744,75 +1964,74 @@ impl BaseDocument {
         // semantics): state is captured at most once, and attributes are captured at most
         // once, but a state-only snapshot is upgraded to also capture attributes if an
         // attribute mutation follows.
-        let needs_attrs = capture_attrs
-            && self
-                .snapshots
-                .get_mut(&opaque_node_id)
-                .is_none_or(|snapshot| snapshot.attrs.is_none());
+        // PATCH: every snapshot carries the attributes. Stylo's stylesheet invalidation
+        // reads the snapshot's classes whenever an element has one, also for state-only
+        // snapshots (hover), and unwrapped `attrs: None` (renderer panic when a <style>
+        // was inserted after a hover).
+        let copy_attrs = self
+            .snapshots
+            .get_mut(&opaque_node_id)
+            .is_none_or(|snapshot| snapshot.attrs.is_none());
 
-        let (attrs, changed_attrs) = if needs_attrs {
+        let attrs = if copy_attrs {
             let node = &self.nodes[node_id];
-            let attrs: Option<Vec<_>> = node.attrs().map(|attrs| {
-                attrs
-                    .iter()
-                    .map(|attr| {
-                        let ident = AttrIdentifier {
-                            local_name: GenericAtomIdent(attr.name.local.clone()),
-                            name: GenericAtomIdent(attr.name.local.clone()),
-                            namespace: GenericAtomIdent(attr.name.ns.clone()),
-                            prefix: None,
-                        };
+            Some(
+                node.attrs()
+                    .map(|attrs| {
+                        attrs
+                            .iter()
+                            .map(|attr| {
+                                let ident = AttrIdentifier {
+                                    local_name: GenericAtomIdent(attr.name.local.clone()),
+                                    name: GenericAtomIdent(attr.name.local.clone()),
+                                    namespace: GenericAtomIdent(attr.name.ns.clone()),
+                                    prefix: None,
+                                };
 
-                        let value = if attr.name.local == local_name!("id") {
-                            AttrValue::Atom(Atom::from(&*attr.value))
-                        } else if attr.name.local == local_name!("class") {
-                            let classes = attr
-                                .value
-                                .split_ascii_whitespace()
-                                .map(Atom::from)
-                                .collect();
-                            AttrValue::TokenList(OnceLock::from(attr.value.clone()), classes)
-                        } else {
-                            AttrValue::String(attr.value.clone())
-                        };
+                                let value = if attr.name.local == local_name!("id") {
+                                    AttrValue::Atom(Atom::from(&*attr.value))
+                                } else if attr.name.local == local_name!("class") {
+                                    let classes = attr
+                                        .value
+                                        .split_ascii_whitespace()
+                                        .map(Atom::from)
+                                        .collect();
+                                    AttrValue::TokenList(OnceLock::from(attr.value.clone()), classes)
+                                } else {
+                                    AttrValue::String(attr.value.clone())
+                                };
 
-                        (ident, value)
+                                (ident, value)
+                            })
+                            .collect()
                     })
-                    .collect()
-            });
+                    .unwrap_or_default(),
+            )
+        } else {
+            None
+        };
 
-            let changed_attrs: Vec<_> = attrs
+        let snapshot = self
+            .snapshots
+            .entry(opaque_node_id)
+            .or_insert_with(|| ServoElementSnapshot {
+                // The state before the *first* change since the last style flush.
+                state: Some(*self.nodes[node_id].element_state()),
+                ..Default::default()
+            });
+        if let Some(attrs) = attrs {
+            snapshot.attrs = Some(attrs);
+        }
+        if capture_attrs && !snapshot.other_attributes_changed {
+            // An attribute mutation follows: every attribute may have changed.
+            snapshot.changed_attrs = snapshot
+                .attrs
                 .as_ref()
                 .map(|attrs| attrs.iter().map(|attr| attr.0.name.clone()).collect())
                 .unwrap_or_default();
-
-            (attrs, changed_attrs)
-        } else {
-            (None, Vec::new())
-        };
-
-        if let Some(snapshot) = self.snapshots.get_mut(&opaque_node_id) {
-            // The existing snapshot's state is preserved: it records the state before
-            // the *first* change since the last style flush.
-            if needs_attrs {
-                snapshot.attrs = attrs;
-                snapshot.changed_attrs = changed_attrs;
-                snapshot.class_changed = true;
-                snapshot.id_changed = true;
-                snapshot.other_attributes_changed = true;
-            }
-        } else {
-            self.snapshots.insert(
-                opaque_node_id,
-                ServoElementSnapshot {
-                    state: Some(*self.nodes[node_id].element_state()),
-                    attrs,
-                    changed_attrs,
-                    class_changed: needs_attrs,
-                    id_changed: needs_attrs,
-                    other_attributes_changed: needs_attrs,
-                },
-            );
+            snapshot.class_changed = true;
+            snapshot.id_changed = true;
+            snapshot.other_attributes_changed = true;
         }
     }
 
@@ -2237,6 +2456,9 @@ impl BaseDocument {
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
         let scale_has_changed = viewport.scale_f64() != self.viewport.scale_f64();
+        if scale_has_changed || viewport.window_size != self.viewport.window_size {
+            self.image_sources_viewport_dirty = true;
+        }
         self.viewport = viewport;
         self.set_stylist_device(make_device(
             &self.viewport,
@@ -2419,7 +2641,7 @@ impl BaseDocument {
                 return Some(CursorIcon::Pointer);
             }
 
-            maybe_node = node.layout_parent.get().map(|node_id| node.with(node_id));
+            maybe_node = node.layout_parent.get().and_then(|node_id| node.try_with(node_id));
         }
 
         // Return text cursor for text nodes
@@ -2501,7 +2723,7 @@ impl BaseDocument {
         ];
         let mut cur = Some(node_id);
         while let Some(id) = cur {
-            let n = &self.nodes[id];
+            let Some(n) = self.nodes.get(id) else { break };
             if id != node_id {
                 let scroll = n.scroll_offset();
                 for p in &mut corners {
@@ -2555,7 +2777,7 @@ impl BaseDocument {
         let node = &self.nodes[node_id];
         let mut cur = node.layout_parent.get().or(node.parent);
         while let Some(id) = cur {
-            let n = &self.nodes[id];
+            let Some(n) = self.nodes.get(id) else { break };
             if n.primary_styles().is_some_and(|s| {
                 s.clone_position() == style::computed_values::position::T::Fixed
                     || !s.get_box().transform.0.is_empty()
@@ -2589,6 +2811,14 @@ impl BaseDocument {
         // Only non-atomic inline elements lack their own layout box: they are
         // flattened into the containing inline root's text layout as style spans.
         if !node.is_element() || node.flags.is_inline_root() {
+            return None;
+        }
+        // PATCH: replaced elements (`<img>` etc.) are atomic even as `display: inline`
+        // (an image without data reported its line's height).
+        if node
+            .element_data()
+            .is_some_and(|el| crate::layout::replaced::is_replaced_element(&el.name.local))
+        {
             return None;
         }
         let display = node.primary_styles()?.clone_display();
@@ -2700,6 +2930,107 @@ impl BaseDocument {
             }
         }
 
+        Some(rects)
+    }
+
+    /// PATCH: the source text of the stylesheet a `<link rel=stylesheet>` loaded (`None`
+    /// until it has).
+    pub fn linked_stylesheet_source(&self, node_id: NodeId) -> Option<std::sync::Arc<str>> {
+        self.linked_sheet_sources.get(&node_id).cloned()
+    }
+
+    /// PATCH: the client rects of the text of text node `node_id` between the UTF-16
+    /// offsets `start` and `end` (CSSOM `Range.getClientRects()` for text): one rect per
+    /// line box the text is on, or a zero-width caret rect for an empty range. `None` when
+    /// the text isn't laid out (hidden, or not in an inline formatting context).
+    pub fn text_range_client_rects(
+        &self,
+        node_id: NodeId,
+        start: usize,
+        end: usize,
+    ) -> Option<Vec<BoundingRect>> {
+        use parley::{Affinity, Cursor, Selection};
+
+        let node = self.get_node(node_id)?;
+        let content = match &node.data {
+            NodeData::Text(t) => t.content.as_str(),
+            _ => return None,
+        };
+        let inline_root = node.inline_root_ancestor()?;
+        let inline_layout = inline_root.element_data()?.inline_layout_data.as_ref()?;
+        let &(_, lstart, lend) = inline_layout.text_nodes.iter().find(|(id, _, _)| *id == node_id)?;
+        let layout_text = inline_layout.text.get(lstart..lend)?;
+
+        // Map UTF-16 offsets in the DOM text to byte offsets in the layout text, which
+        // may have lost collapsed white space (or changed case).
+        let map = |offset: usize| -> usize {
+            let mut units = 0;
+            let mut li = 0;
+            let mut layout_chars = layout_text.char_indices().peekable();
+            let mut prev_ws = false;
+            for ch in content.chars() {
+                if units >= offset {
+                    break;
+                }
+                units += ch.len_utf16();
+                let ws = ch.is_ascii_whitespace();
+                match layout_chars.peek().copied() {
+                    Some((i, lc)) if ws && lc == ' ' && !prev_ws => {
+                        layout_chars.next();
+                        li = i + lc.len_utf8();
+                    }
+                    Some(_) if ws => {}
+                    Some((i, lc)) => {
+                        layout_chars.next();
+                        li = i + lc.len_utf8();
+                    }
+                    None => {}
+                }
+                prev_ws = ws;
+            }
+            lstart + li
+        };
+        let (a, b) = (map(start.min(end)), map(end.max(start)));
+
+        let layout = &inline_layout.layout;
+        let scale = layout.scale() as f64;
+        let root_layout = inline_root.final_layout();
+        let root_pos = inline_root.absolute_position(0.0, 0.0);
+        let origin_x = root_pos.x as f64
+            + (root_layout.padding.left + root_layout.border.left) as f64
+            - self.viewport_scroll.x;
+        let origin_y = root_pos.y as f64
+            + (root_layout.padding.top + root_layout.border.top) as f64
+            - self.viewport_scroll.y;
+        let to_rect = |x0: f64, y0: f64, x1: f64, y1: f64| BoundingRect {
+            x: origin_x + x0 / scale,
+            y: origin_y + y0 / scale,
+            width: (x1 - x0) / scale,
+            height: (y1 - y0) / scale,
+        };
+
+        let mut rects = Vec::new();
+        if a == b {
+            let cursor = Cursor::from_byte_index(layout, a, Affinity::Downstream);
+            let r = cursor.geometry(layout, 0.0);
+            rects.push(to_rect(r.x0, r.y0, r.x0, r.y1));
+        } else {
+            let selection = Selection::new(
+                Cursor::from_byte_index(layout, a, Affinity::Downstream),
+                Cursor::from_byte_index(layout, b, Affinity::Upstream),
+            );
+            selection.geometry_with(layout, |r, line| {
+                // White space hanging at the end of a wrapped line takes no room.
+                let mut x1 = r.x1;
+                if let Some(m) = layout.get(line).map(|l| *l.metrics()) {
+                    let line_end = (m.offset + m.advance) as f64;
+                    if m.trailing_whitespace > 0.0 && x1 >= line_end - 0.5 {
+                        x1 = (line_end - m.trailing_whitespace as f64).max(r.x0);
+                    }
+                }
+                rects.push(to_rect(r.x0, r.y0, x1, r.y1));
+            });
+        }
         Some(rects)
     }
 

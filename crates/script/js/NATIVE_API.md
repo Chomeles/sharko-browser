@@ -85,6 +85,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.getText(id)` | data of a Text or Comment node |
 | `N.setText(id, data)` | – |
 | `N.textContent(id)` | concatenated text of descendants (element/fragment/document) |
+| `N.linkSheetText(id)` | Source text of the stylesheet a `<link>` loaded, or `null` (CSSOM `cssRules` of linked sheets) |
 | `N.setTextContent(id, text)` | replaces all children with one text node (or none if `""`) |
 | `N.innerHTML(id)` | serialized children |
 | `N.setInnerHTML(id, html)` | parses as fragment in context of element and replaces children. Scripts inside are NOT executed (spec behaviour) |
@@ -105,6 +106,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 |---|---|
 | `N.getBoundingClientRect(id)` | `[x, y, width, height]` viewport-relative CSS px |
 | `N.getClientRects(id)` | flat array `[x,y,w,h, x,y,w,h, ...]` |
+| `N.textRects(textId, start, end)` | Client rects `[x, y, w, h, ...]` of a text node's text between UTF-16 offsets (one per line box; zero width for an empty range), or `null` when not laid out |
 | `N.offsetMetrics(id)` | `[offsetLeft, offsetTop, offsetWidth, offsetHeight, offsetParentId]` |
 | `N.clientMetrics(id)` | `[clientLeft, clientTop, clientWidth, clientHeight]` |
 | `N.scrollMetrics(id)` | `[scrollLeft, scrollTop, scrollWidth, scrollHeight]` |
@@ -120,6 +122,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.styleGet(id, cssPropName)` | value string (`""` if not set). Property names are CSS names (`background-color`, `--custom`) |
 | `N.styleGetPriority(id, cssPropName)` | `"important"` or `""` |
 | `N.styleSet(id, cssPropName, value, priority)` | – (`value === ""` removes) |
+| `N.setAnimationStyle(id, pairs)` | Values of the element's script animations (`name\0value\0...`), cascaded at the animation level, not in the style attribute; `''` removes them |
 | `N.styleRemove(id, cssPropName)` | previous value string |
 | `N.styleCssText(id)` | serialized declaration block |
 | `N.styleSetCssText(id, text)` | – |
@@ -188,6 +191,26 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.textDecode(arrayBufferOrView, label, fatal)` | string (throws on unknown label or on invalid data if fatal) |
 | `N.userAgent()` | UA string |
 | `N.structuredClone(value)` | deep clone using V8's ValueSerializer |
+| `N.initialWindowName()` | The initial `window.name` (an iframe document's: its `<iframe name>`) |
+| `N.framePath()` | This document's frame path: the `<iframe>` node ids from the page down (each in its parent's document); `[]` for the page |
+| `N.framePost(path, message, targetOrigin)` | `postMessage` to the window of the frame at `path`; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
+| `N.frameList(path)` | The frames of the document at `path` in tree order as `[id, name]` pairs (`parent.frames[name]`, `top.length`), or `null` if unknown |
+| `N.realmGlobal(path)` | The real `window` (global object) of the frame at `path` if it is same-origin and part of this page (its realm is created on demand, running that document's scripts), else `null` |
+| `N.frameGlobal(id)`, `N.parentGlobal()`, `N.topGlobal()` | `realmGlobal` for this document's `<iframe id>`, the parent frame and the page |
+| `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null` |
+| `N.foreignNodeType(o)` | `o`'s nodeType if it is a node wrapper of another realm of this page, else `0` (this realm's wrappers, non-nodes) |
+| `N.windowPostMessage(message, targetOrigin, transfer)` | `window.postMessage` itself (installed as the method, so V8 knows the calling realm): runs hook `windowPostMessage` of this realm with the caller's window as `source` |
+| `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
+| `N.cryptoAes(mode, encrypt, key, iv, aad, tagBits, data)` | ArrayBuffer; `mode` is `GCM`, `CBC`, `CTR` or `KW`; throws `OperationError` (e.g. failed authentication) |
+| `N.cryptoPbkdf2(hash, password, salt, iterations, bits)`, `N.cryptoHkdf(hash, ikm, salt, info, bits)` | ArrayBuffer |
+| `N.parseColor(css)` | `[r, g, b, a]` (0-255, alpha 0-1) or `null` |
+| `N.canvasReset(id, w, h)` | (re)create the 2D surface of a `<canvas>` |
+| `N.canvasFill(id, path, evenOdd, paint, alpha, op, ctm, pattern)`, `N.canvasStroke(id, path, paint, lineWidth, cap, join, miterLimit, dash, dashOffset, ctm, alpha, op, pattern)` | draw a device-space path (`Float64Array` of commands `0 x y` move, `1 x y` line, `2 cx cy x y` quad, `3 ...` cubic, `4` close); `paint` is `[0, r, g, b, a]`, `[1, x0, y0, x1, y1, stops...]` or `[2, x0, y0, r0, x1, y1, r1, stops...]` |
+| `N.canvasClip(id, [path, evenOdd, ...])`, `N.canvasClearRect(id, x, y, w, h, ctm)` | clip (intersection; empty = none), clear |
+| `N.canvasDrawImage(id, kind, source, srcW, srcH, sx, sy, sw, sh, dx, dy, dw, dh, ctm, alpha, op, smoothing)` | `kind` 0: element id, 1: RGBA bytes |
+| `N.canvasGetImageData(id, x, y, w, h)`, `N.canvasPutImageData(id, bytes, w, h, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH)` | straight RGBA |
+| `N.canvasText(id, text, [family, size, weight, italic], x, y, align, baseline, maxWidth, fill, paint, stroke, ctm, alpha, op, pattern)`, `N.canvasMeasureText(font, text)` | text via the document's fonts; metrics `[width, inkLeft, inkRight, inkAscent, inkDescent, fontAscent, fontDescent, emAscent, emDescent]` |
+| `N.canvasToDataURL(id, w, h)` | PNG `data:` URL |
 | `N.pendingResourceCount()` | number of subresources (stylesheets/images/fonts) still loading – used to decide when to fire `window.load` |
 
 ## Hooks (JS → registered once with `N.setHooks(obj)`)
@@ -204,6 +227,10 @@ Rust calls these; exceptions thrown inside hooks are reported to the console.
 | `onViewportChanged()` | viewport resized → JS dispatches `resize` on window | – |
 | `onScroll()` | viewport scrolled → JS dispatches `scroll` on document (bubbling to window) | – |
 | `onPageHide()` | before navigating away → `pagehide`, `beforeunload` (ignore result), `unload` | – |
+| `onMessage(sourceOrNull, origin, data)` | (addition) a `postMessage` from another frame: `null` = from the parent window, else from the document of the `<iframe>` with that id; `data` is already deserialized | – |
+| `wrapNode(id)` | (addition) the wrapper of node `id` of this realm's document, for another realm (`frameElement`) | the wrapper |
+| `nodeTypeOf(o)` | (addition) `o`'s nodeType if it is a node wrapper of this realm, else `0` (asked by another realm's `N.foreignNodeType`) | number |
+| `windowPostMessage(message, targetOrigin, transfer, source)` | (addition) `window.postMessage` with `source` = the caller's window (`null`: this one); exceptions propagate to the caller | – |
 
 ## Script execution model (implemented in JS)
 After `onDocumentParsed`:
@@ -251,6 +278,8 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `N.setDefined(id)` | (Rust addition) the custom element `id` was upgraded or created from its definition: CSS `:defined` matches it (built-in elements always match). |
 | `N.setIndeterminate(id, bool)` | (Rust addition) mirrors `input.indeterminate` for `:indeterminate` matching. |
 | `N.urlSet(href, field, value)` | (Rust addition) urlParse-style components after applying a WHATWG URL setter; used by `URL`/`Location`/`<a>` setters. (JS approximation) |
+| `N.workerCreate()` / `N.workerEval(global, source, url)` / `N.cloneInto(global, value)` | (Rust addition) dedicated workers: a new JS realm (V8 context with only the ECMAScript builtins, same security token) whose global JS fills with the worker API; `workerEval` runs a classic script there and returns `null` or `[message, url, line, column, error]`; `cloneInto` structured-clones `value` into that realm. Worker code runs on the page's thread. (`Worker` throws `NotSupportedError`) |
+| `N.wsOpen(id, url, protocols, origin)` / `N.wsSend(id, stringOrArrayBuffer)` / `N.wsClose(id, code, reason)` | (Rust addition) the `WebSocket` connection, opened in the network process. `url` is an absolute `ws:`/`wss:` URL, `code` is `-1` for none. `wsOpen` returns `false` when the host has no WebSocket support (JS then fires `error` and `close`). Events come back through `onWebSocket`. |
 
 ### Hooks (registered through `N.setHooks`, called by Rust)
 | hook | when / what JS does |
@@ -260,6 +289,7 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `onUnhandledRejection(promise, reason)` | end of a task, after the microtask checkpoint. JS fires the cancelable `unhandledrejection` and logs `Uncaught (in promise) …` unless it was canceled. Rust does not log when this hook is registered. |
 | `onRejectionHandled(promise, reason)` | queued as a task. JS fires `rejectionhandled`. |
 | `onError(msg, file, line, col, error)` | an uncaught exception reached Rust, which already logged it. JS dispatches the window `ErrorEvent` (`window.onerror`) and does not log. Not used for `N.evalScript`: JS catches the rethrown exception and dispatches the event itself. |
+| `onWebSocket(id, kind, ...)` | an event of a socket opened with `N.wsOpen`, in order: `open` (protocol, extensions), `message` (string or ArrayBuffer), `sent` (bytes written, for `bufferedAmount`), `error` (message) and finally `close` (code, reason, wasClean). |
 
 ### `onEvent`: return flag 4 and the default-action split
 Return value: `1` = canceled, `2` = propagation stopped, **`4` = the JS layer performed the

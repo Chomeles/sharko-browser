@@ -127,6 +127,7 @@
   L.onFrame = function (ts) {
     frameRequested = false;
     const t = Number(ts);
+    try { L.tickAnimations(); } catch (e) { L.reportException(e); }
     const maxId = rafId;
     for (const [id, cb] of rafCallbacks) {
       if (id > maxId) break;
@@ -259,7 +260,176 @@
     static { L.bcClosed = (c) => c.#closed; }
   }
   L.defineEventHandlers(BroadcastChannel.prototype, ['onmessage', 'onmessageerror']);
-  L.windowPostMessage = function (message, targetOrigin, transfer) {
+  // Windows of other frames. The documents of a page and its frames run in one isolate,
+  // each in its own realm (context): a same-origin frame's window is its real global
+  // object (`N.realmGlobal`), so its document and functions are reachable. A cross-origin
+  // frame gets a stand-in for its WindowProxy (only postMessage reaches it). A window is
+  // named by its frame path: the <iframe> node ids from the page down (the page is []).
+  const REMOTE = new WeakMap(); // RemoteWindow -> frame path
+  const remoteByPath = new Map(); // path key -> RemoteWindow
+  const pathKey = (p) => p.join(',');
+  let ownPath = null;
+  function selfPath() {
+    if (ownPath === null) ownPath = typeof N.framePath === 'function' ? N.framePath() : [];
+    return ownPath;
+  }
+  function remoteTarget(w) {
+    if (!REMOTE.has(w)) throw L.illegal();
+    return REMOTE.get(w);
+  }
+  // The real window of a same-origin frame (its realm is created on demand), else null.
+  function realmGlobal(path) {
+    if (typeof N.realmGlobal !== 'function') return null;
+    try { return N.realmGlobal(path); } catch (_) { return null; }
+  }
+  // The real window of this document's same-origin <iframe> `id`, else null.
+  L.frameGlobal = function (id) {
+    if (typeof N.frameGlobal !== 'function' || !N.isConnected(id)) return null;
+    try { return N.frameGlobal(id); } catch (_) { return null; }
+  };
+  // The window of the frame at `path`: this window, the real one of a same-origin frame,
+  // or a remote stand-in (one object per frame).
+  L.windowAt = function (path) {
+    const key = pathKey(path);
+    if (key === pathKey(selfPath())) return L.window;
+    const g = realmGlobal(path);
+    if (g !== null) return g;
+    let w = remoteByPath.get(key);
+    if (w === undefined) {
+      w = new Proxy(new RemoteWindow(INTERNAL, path), remoteHandler);
+      REMOTE.set(w, path);
+      remoteByPath.set(key, w);
+    }
+    return w;
+  };
+  // Child frames of the document at `path` in tree order ([id, name] pairs): live for
+  // this document, a snapshot kept by the host for the others.
+  function framesOf(path) {
+    if (pathKey(path) === pathKey(selfPath())) {
+      return L.childFrames().map((id) => [id, N.getAttr(id, 'name') || '']);
+    }
+    let list = null;
+    try { list = typeof N.frameList === 'function' ? N.frameList(path) : null; } catch (_) { list = null; }
+    return list || [];
+  }
+  const INDEX_RE = /^(0|[1-9][0-9]{0,8})$/;
+  function childWindow(path, name) {
+    const list = framesOf(path);
+    const e = INDEX_RE.test(name) ? list[+name] : (name === '' ? undefined : list.find((f) => f[1] === name));
+    return e === undefined ? undefined : L.windowAt([...path, e[0]]);
+  }
+  const crossOriginErr = (what) => new DOMException(`Failed to read a named property '${what}' from 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+  const remoteLocation = Object.freeze({ replace() { }, set href(v) { }, toString() { return ''; } });
+  class RemoteWindow {
+    constructor(token, path) {
+      if (token !== INTERNAL) throw L.illegal();
+      REMOTE.set(this, path);
+    }
+    postMessage(message, targetOrigin, transfer) {
+      const path = remoteTarget(this);
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+      let t = targetOrigin !== null && typeof targetOrigin === 'object'
+        ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
+        : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
+      if (t === '/') t = L.location.origin;
+      else if (t !== '*') {
+        const p = N.urlParse(t, null);
+        if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
+        t = p[10];
+      }
+      N.framePost(path, message, t);
+    }
+    get window() { remoteTarget(this); return this; }
+    get self() { remoteTarget(this); return this; }
+    get frames() { remoteTarget(this); return this; }
+    get parent() { const p = remoteTarget(this); return p.length === 0 ? this : L.windowAt(p.slice(0, -1)); }
+    get top() { remoteTarget(this); return L.windowAt([]); }
+    get opener() { remoteTarget(this); return null; }
+    get closed() { remoteTarget(this); return false; }
+    get length() { return framesOf(remoteTarget(this)).length; }
+    get location() { remoteTarget(this); return remoteLocation; }
+    set location(v) { remoteTarget(this); }
+    get document() {
+      const p = remoteTarget(this);
+      // A child frame of this document that isn't cross-origin: not scriptable from here
+      // yet (null rather than a SecurityError).
+      const own = selfPath();
+      if (p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(p[p.length - 1])) return null;
+      throw crossOriginErr('document');
+    }
+    focus() { remoteTarget(this); }
+    blur() { remoteTarget(this); }
+    close() { remoteTarget(this); }
+    // Listeners on a same-origin child window (its document isn't scriptable from here, so
+    // they never fire); a cross-origin window blocks them, as in browsers.
+    addEventListener(type, listener, options) { remoteEventTarget(this, 'addEventListener').addEventListener(type, listener, options); }
+    removeEventListener(type, listener, options) { remoteEventTarget(this, 'removeEventListener').removeEventListener(type, listener, options); }
+    dispatchEvent(event) { return remoteEventTarget(this, 'dispatchEvent').dispatchEvent(event); }
+  }
+  const REMOTE_TARGETS = new WeakMap();
+  function remoteEventTarget(w, what) {
+    const p = remoteTarget(w);
+    const own = selfPath();
+    const child = p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own);
+    if (!child || frameIsCrossOrigin(p[p.length - 1])) throw new DOMException(`Failed to execute '${what}' on 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+    let t = REMOTE_TARGETS.get(w);
+    if (t === undefined) { t = new EventTarget(); REMOTE_TARGETS.set(w, t); }
+    return t;
+  }
+  Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
+  // Named and indexed access to a remote window's child frames (`parent.frames['__tcfapiLocator']`, `top[0]`).
+  const remoteHandler = {
+    get(t, p, r) {
+      if (typeof p === 'string' && !(p in t)) {
+        const w = childWindow(REMOTE.get(t), p);
+        if (w !== undefined) return w;
+      }
+      return Reflect.get(t, p, r);
+    },
+    has(t, p) {
+      return Reflect.has(t, p) || (typeof p === 'string' && childWindow(REMOTE.get(t), p) !== undefined);
+    },
+  };
+  // The window of this document's <iframe> `id`.
+  L.remoteWindowFor = (id) => L.windowAt([...selfPath(), id]);
+  L.parentWindow = function () {
+    const own = selfPath();
+    if (own.length === 0) return L.window;
+    if (typeof N.parentGlobal === 'function') {
+      let g = null;
+      try { g = N.parentGlobal(); } catch (_) { g = null; }
+      if (g !== null) return g;
+    }
+    return L.windowAt(own.slice(0, -1));
+  };
+  L.windowTop = () => {
+    if (selfPath().length === 0) return L.window;
+    if (typeof N.topGlobal === 'function') {
+      let g = null;
+      try { g = N.topGlobal(); } catch (_) { g = null; }
+      if (g !== null) return g;
+    }
+    return L.windowAt([]);
+  };
+  L.iframeWindow = function (el, id) {
+    if (!N.isConnected(id)) return null;
+    return L.remoteWindowFor(id);
+  };
+  function frameIsCrossOrigin(id) {
+    const src = N.getAttr(id, 'src');
+    if (src === null || src.trim() === '' || N.getAttr(id, 'srcdoc') !== null) return false;
+    const p = N.urlParse(src.trim(), L.baseURL());
+    return p !== null && (p[1] === 'https:' || p[1] === 'http:') && p[10] !== L.location.origin;
+  }
+  // Child frames of this document in tree order (window.length, window[i]).
+  L.childFrames = function () {
+    try { return N.querySelectorAll(L.documentId, 'iframe,frame'); } catch (_) { return []; }
+  };
+  L.onMessage = function (source, origin, data) {
+    L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports: [], lastEventId: '' }, L.MessageEvent);
+  };
+  // `source`: the caller's window (another realm of this page), null for this one.
+  L.windowPostMessage = function (message, targetOrigin, transfer, source) {
     let target = '/';
     let list = [];
     if (targetOrigin !== null && typeof targetOrigin === 'object') {
@@ -277,7 +447,10 @@
     }
     const data = cloneValue(message);
     const ports = list.filter((x) => x instanceof MessagePort);
-    L.postTask(() => L.fire(L.window, 'message', { data, origin, source: L.window, ports }, L.MessageEvent));
+    const src = source !== null && source !== undefined ? source : L.window;
+    let srcOrigin = origin;
+    if (src !== L.window) { try { srcOrigin = src.location.origin; } catch (_) { /* keep ours */ } }
+    L.postTask(() => L.fire(L.window, 'message', { data, origin: srcOrigin, source: src, ports }, L.MessageEvent));
   };
 
   // =======================================================================================
@@ -300,6 +473,11 @@
     return new Uint8Array(out);
   }
   function utf8Decode(bytes) {
+    // The native decoder is ~200x faster (and far lighter) than the loop below, which
+    // builds the string one code point at a time (responseText of a 20 MB body: 5.7 s).
+    if (bytes.length > 256) {
+      try { return N.textDecode(bytes, 'utf-8', false); } catch (_) { /* fall back */ }
+    }
     let out = '';
     const n = bytes.length;
     let i = 0;
@@ -1758,23 +1936,46 @@
   const pendingFetches = new Map(); // reqId -> fn(status, statusText, finalUrl, headersFlat, body, error)
   // `credentials` ('omit' | 'same-origin' | 'include'), `cache` and `redirect` ('follow' |
   // 'error' | 'manual') are optional trailing arguments of N.fetch (see NATIVE_API.md Additions).
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect) {
+  const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
+  // `initiator` ('fetch', 'xmlhttprequest'): record a PerformanceResourceTiming entry. The
+  // first downloaded bytes (a progress report) stand in for responseStart.
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator) {
     const reqId = nextReqId++;
+    if (initiator !== undefined) {
+      const timing = { start: N.now(), firstByte: 0 };
+      const userDone = done, userProgress = progress;
+      done = (status, statusText, finalUrl, rflat, rbody, error) => {
+        L.addResourceTiming(url, initiator, timing, status, rbody, error);
+        userDone(status, statusText, finalUrl, rflat, rbody, error);
+      };
+      progress = (loaded, total, upload) => {
+        if (!upload && loaded > 0 && timing.firstByte === 0) timing.firstByte = N.now();
+        if (typeof userProgress === 'function') userProgress(loaded, total, upload);
+      };
+    }
     pendingFetches.set(reqId, done);
+    if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
-      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow');
+      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function');
     } catch (e) {
       pendingFetches.delete(reqId);
+      fetchProgress.delete(reqId);
       const err = e;
       L.microtask(() => done(0, '', url, [], null, err && err.message ? err.message : 'fetch failed'));
     }
     return reqId;
   };
   L.cancelNativeFetch = function (reqId) {
+    fetchProgress.delete(reqId);
     if (pendingFetches.delete(reqId)) N.abortFetch(reqId);
+  };
+  L.onFetchProgress = function (reqId, loaded, total, upload) {
+    const fn = fetchProgress.get(reqId);
+    if (fn !== undefined) fn(Number(loaded), Number(total), !!upload);
   };
   L.onFetch = function (reqId, status, statusText, finalUrl, flat, body, error) {
     const done = pendingFetches.get(reqId);
+    fetchProgress.delete(reqId);
     if (done === undefined) return;
     pendingFetches.delete(reqId);
     done(status, statusText, finalUrl, flat, body, error);
@@ -1887,7 +2088,7 @@
           }
           fields = { type, url: fu, status, statusText: `${statusText || ''}`, headers: headersFromFlat(hflat, 'immutable'), redirected };
           resolve(makeResponse(fields, bodyBytes));
-        }, d.credentials, d.cache, d.redirect);
+        }, d.credentials, d.cache, d.redirect, undefined, 'fetch');
         L.addAbortAlgorithm(signal, () => {
           if (finished) return;
           L.cancelNativeFetch(reqId);
@@ -2016,7 +2217,13 @@
       } else {
         s.reqId = L.startNativeFetch(s.method, s.url, flat, bytes === null ? null : copyToArrayBuffer(bytes), mode,
           (status, statusText, finalUrl, rflat, rbody, error) => this.#complete(gen, uploadListeners, bytes, status, statusText, finalUrl, rflat, rbody, error),
-          s.withCredentials ? 'include' : 'same-origin');
+          s.withCredentials ? 'include' : 'same-origin', undefined, undefined,
+          (loaded, total, upload) => {
+            if (gen !== s.gen || !s.send) return;
+            const init = { loaded, total, lengthComputable: total > 0 };
+            if (upload) { if (uploadListeners) L.fire(s.upload, 'progress', init, L.ProgressEvent); }
+            else L.fire(this, 'progress', init, L.ProgressEvent);
+          }, 'xmlhttprequest');
       }
       if (s.timeout > 0) {
         s.timer = L.internalTimeout(() => {
@@ -2218,6 +2425,425 @@
   L.defineConstants([XMLHttpRequest, XMLHttpRequest.prototype], { UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4 });
   L.defineEventHandlers(XMLHttpRequest.prototype, ['onreadystatechange']);
 
+  // =======================================================================================
+  // TextEncoderStream / TextDecoderStream
+  // =======================================================================================
+  class TextEncoderStream {
+    #ts; #enc = new TextEncoder(); #pendingHigh = '';
+    constructor() {
+      this.#ts = new TransformStream({
+        transform: (chunk, c) => {
+          let s = this.#pendingHigh + `${chunk}`;
+          this.#pendingHigh = '';
+          // A lone high surrogate at the end may pair with the next chunk.
+          const last = s.charCodeAt(s.length - 1);
+          if (last >= 0xd800 && last <= 0xdbff) { this.#pendingHigh = s.slice(-1); s = s.slice(0, -1); }
+          if (s.length) c.enqueue(this.#enc.encode(s));
+        },
+        flush: (c) => { if (this.#pendingHigh) c.enqueue(new Uint8Array([0xef, 0xbf, 0xbd])); },
+      });
+    }
+    get encoding() { return 'utf-8'; }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  class TextDecoderStream {
+    #ts; #dec;
+    constructor(label = 'utf-8', options) {
+      this.#dec = new TextDecoder(label, options);
+      this.#ts = new TransformStream({
+        transform: (chunk, c) => {
+          const bytes = toBytes(chunk);
+          if (bytes === null) throw new TypeError("Failed to execute 'transform' on 'TextDecoderStream': The provided value is not of type '(ArrayBuffer or ArrayBufferView)'.");
+          const s = this.#dec.decode(bytes, { stream: true });
+          if (s.length) c.enqueue(s);
+        },
+        flush: (c) => { const s = this.#dec.decode(); if (s.length) c.enqueue(s); },
+      });
+    }
+    get encoding() { return this.#dec.encoding; }
+    get fatal() { return this.#dec.fatal; }
+    get ignoreBOM() { return this.#dec.ignoreBOM; }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  L.expose('TextEncoderStream', TextEncoderStream);
+  L.expose('TextDecoderStream', TextDecoderStream);
+
+  // CompressionStream / DecompressionStream (natives on flate2).
+  function zFormat(format, what) {
+    const f = `${format}`;
+    if (f !== 'gzip' && f !== 'deflate' && f !== 'deflate-raw') {
+      throw new TypeError(`Failed to construct '${what}': The provided value '${f}' is not a valid enum value of type CompressionFormat.`);
+    }
+    return f;
+  }
+  function zStream(format, compress, what) {
+    const h = N.zCreate(zFormat(format, what), compress);
+    return new TransformStream({
+      transform(chunk, c) {
+        const bytes = toBytes(chunk);
+        if (bytes === null) throw new TypeError(`Failed to execute 'transform' on '${what}': The provided value is not of type '(ArrayBuffer or ArrayBufferView)'.`);
+        const out = N.zWrite(h, bytes);
+        if (out.byteLength) c.enqueue(new Uint8Array(out));
+      },
+      flush(c) {
+        const out = N.zFinish(h);
+        if (out.byteLength) c.enqueue(new Uint8Array(out));
+      },
+      cancel() { N.zDrop(h); },
+    });
+  }
+  class CompressionStream {
+    #ts;
+    constructor(format) {
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'CompressionStream': 1 argument required, but only 0 present.");
+      this.#ts = zStream(format, true, 'CompressionStream');
+    }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  class DecompressionStream {
+    #ts;
+    constructor(format) {
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'DecompressionStream': 1 argument required, but only 0 present.");
+      this.#ts = zStream(format, false, 'DecompressionStream');
+    }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  L.expose('CompressionStream', CompressionStream);
+  L.expose('DecompressionStream', DecompressionStream);
+
+  // =======================================================================================
+  // WebSocket (the connection itself lives in the network process: N.wsOpen/wsSend/wsClose,
+  // events come back through hooks.onWebSocket)
+  // =======================================================================================
+  let nextSocketId = 1;
+  const liveSockets = new Map(); // id -> WebSocket (keeps open sockets alive)
+  const WS_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+  class WebSocket extends EventTarget {
+    #id = 0; #url = ''; #origin = ''; #state = 0; #protocol = ''; #extensions = '';
+    #buffered = 0; #binaryType = 'blob'; #failed = false;
+    constructor(url, protocols) {
+      super();
+      const fail = (msg, name) => new DOMException(`Failed to construct 'WebSocket': ${msg}`, name || 'SyntaxError');
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'WebSocket': 1 argument required, but only 0 present.");
+      const base = L.location ? L.location.href : null;
+      const p = N.urlParse(`${url}`, base);
+      if (p === null) throw fail(`The URL '${url}' is invalid.`);
+      let href = p[0];
+      let scheme = href.slice(0, href.indexOf(':')).toLowerCase();
+      if (scheme === 'http' || scheme === 'https') { href = (scheme === 'http' ? 'ws' : 'wss') + href.slice(scheme.length); scheme = scheme === 'http' ? 'ws' : 'wss'; }
+      if (scheme !== 'ws' && scheme !== 'wss') throw fail(`The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '${scheme}' is not allowed.`);
+      if (href.includes('#')) throw fail(`The URL contains a fragment identifier ('${href.slice(href.indexOf('#') + 1)}'). Fragment identifiers are not allowed in WebSocket URLs.`);
+      if (scheme === 'ws' && L.location && L.location.protocol === 'https:') {
+        const host = N.urlParse(href, null);
+        const h = host === null ? '' : host[5];
+        if (h !== 'localhost' && h !== '127.0.0.1' && h !== '[::1]') {
+          throw fail(`An insecure WebSocket connection may not be initiated from a page loaded over HTTPS.`, 'SecurityError');
+        }
+      }
+      let list = [];
+      if (protocols !== undefined) list = typeof protocols === 'string' ? [protocols] : Array.from(protocols, (x) => `${x}`);
+      const seen = new Set();
+      for (const proto of list) {
+        if (!WS_TOKEN.test(proto)) throw fail(`The subprotocol '${proto}' is invalid.`);
+        if (seen.has(proto)) throw fail(`The subprotocol '${proto}' is duplicated.`);
+        seen.add(proto);
+      }
+      this.#url = href;
+      this.#origin = (N.urlParse(href, null) || [])[10] || 'null';
+      this.#id = nextSocketId++;
+      liveSockets.set(this.#id, this);
+      let ok = false;
+      try { ok = N.wsOpen(this.#id, href, list, L.location ? L.location.origin : 'null'); } catch (_) { ok = false; }
+      if (!ok) {
+        const id = this.#id;
+        L.postTask(() => { L.onWebSocket(id, 'error', 'WebSocket is not supported here'); L.onWebSocket(id, 'close', 1006, '', false); });
+      }
+    }
+    get url() { return this.#url; }
+    get readyState() { return this.#state; }
+    get bufferedAmount() { return this.#buffered; }
+    get protocol() { return this.#protocol; }
+    get extensions() { return this.#extensions; }
+    get binaryType() { return this.#binaryType; }
+    set binaryType(v) { v = `${v}`; if (v === 'blob' || v === 'arraybuffer') this.#binaryType = v; }
+    send(data) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'send' on 'WebSocket': 1 argument required, but only 0 present.");
+      if (this.#state === 0) throw new DOMException("Failed to execute 'send' on 'WebSocket': Still in CONNECTING state.", 'InvalidStateError');
+      let payload, size;
+      if (data instanceof L.Blob) { const b = L.blobBytes(data); payload = copyToArrayBuffer(b); size = b.byteLength; }
+      else {
+        const bytes = toBytes(data);
+        if (bytes !== null) { payload = copyToArrayBuffer(bytes); size = bytes.byteLength; }
+        else { payload = `${data}`; size = utf8Encode(payload).byteLength; }
+      }
+      this.#buffered += size;
+      if (this.#state !== 1) return;
+      N.wsSend(this.#id, payload);
+    }
+    close(code, reason) {
+      if (code !== undefined) {
+        code = Number(code) & 0xffff;
+        if (code !== 1000 && (code < 3000 || code > 4999)) {
+          throw new DOMException(`Failed to execute 'close' on 'WebSocket': The close code must be either 1000, or between 3000 and 4999. ${code} is neither.`, 'InvalidAccessError');
+        }
+      }
+      reason = reason === undefined ? '' : `${reason}`;
+      if (utf8Encode(reason).byteLength > 123) {
+        throw new DOMException("Failed to execute 'close' on 'WebSocket': The close reason must not be greater than 123 UTF-8 bytes.", 'SyntaxError');
+      }
+      if (this.#state >= 2) return;
+      if (this.#state === 0) this.#failed = true;
+      this.#state = 2;
+      N.wsClose(this.#id, code === undefined ? -1 : code, reason);
+    }
+    static {
+      L.onWebSocket = function (id, kind, a, b, c) {
+        const ws = liveSockets.get(id);
+        if (ws === undefined) return;
+        switch (kind) {
+          case 'open':
+            if (ws.#state !== 0) return;
+            ws.#state = 1; ws.#protocol = `${a}`; ws.#extensions = `${b}`;
+            L.fire(ws, 'open', {});
+            break;
+          case 'message': {
+            if (ws.#state !== 1) return;
+            let data = a;
+            if (typeof a !== 'string') data = ws.#binaryType === 'arraybuffer' ? a : new L.Blob([a]);
+            L.fire(ws, 'message', { data, origin: ws.#origin }, L.MessageEvent);
+            break;
+          }
+          case 'sent':
+            ws.#buffered = Math.max(0, ws.#buffered - Number(a));
+            break;
+          case 'error':
+            ws.#failed = true;
+            if (L.console && typeof a === 'string' && a) L.console.error(`WebSocket connection to '${ws.#url}' failed: ${a}`);
+            break;
+          case 'close': {
+            liveSockets.delete(id);
+            ws.#state = 3;
+            if (ws.#failed || a === 1006) L.fire(ws, 'error', {});
+            L.fire(ws, 'close', { wasClean: !!c, code: Number(a), reason: `${b}` }, L.CloseEvent);
+            break;
+          }
+        }
+      };
+    }
+  }
+  L.defineConstants([WebSocket, WebSocket.prototype], { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+  L.defineEventHandlers(WebSocket.prototype, ['onopen', 'onmessage', 'onerror', 'onclose']);
+  L.expose('WebSocket', WebSocket);
+  L.WebSocket = WebSocket;
+
+  // =======================================================================================
+  // Worker (dedicated). Each worker gets its own JS realm (N.workerCreate) with the worker
+  // API installed on its global; its code runs on the page's thread (no parallelism yet),
+  // in tasks like the page's.
+  // =======================================================================================
+  const WORKER_SHARED = ['Request', 'Response', 'Headers', 'XMLHttpRequest', 'XMLHttpRequestUpload',
+    'XMLHttpRequestEventTarget', 'WebSocket', 'CloseEvent', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder',
+    'Blob', 'File', 'FileReader', 'FormData', 'AbortController', 'AbortSignal', 'Event', 'EventTarget', 'CustomEvent',
+    'MessageEvent', 'ErrorEvent', 'ProgressEvent', 'PromiseRejectionEvent', 'MessageChannel', 'MessagePort',
+    'BroadcastChannel', 'DOMException', 'crypto', 'Crypto', 'CryptoKey', 'SubtleCrypto', 'performance', 'console',
+    'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'ReadableStream', 'ReadableStreamDefaultReader',
+    'ReadableStreamDefaultController', 'WritableStream', 'TransformStream', 'TextEncoderStream', 'TextDecoderStream',
+    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBKeyRange', 'caches', 'isSecureContext', 'origin',
+    'requestAnimationFrame', 'cancelAnimationFrame', 'ImageData', 'createImageBitmap', 'OffscreenCanvas'];
+  const WORKER_BRAND = Symbol('WorkerGlobalScope');
+  class WorkerScopeTarget extends EventTarget { }
+  L.defineEventHandlers(WorkerScopeTarget.prototype, ['onmessage', 'onmessageerror', 'onerror']);
+  function syncLoadScript(url) {
+    const clean = stripFragment(url);
+    const blob = blobURLs.get(clean);
+    if (blob !== undefined) return utf8Decode(L.blobBytes(blob));
+    if (/^data:/i.test(url)) {
+      const d = parseDataURL(url);
+      if (d === null) throw new DOMException(`Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '${url}' failed to load.`, 'NetworkError');
+      return utf8Decode(d.bytes);
+    }
+    let r = null;
+    try { r = typeof N.fetchSync === 'function' ? N.fetchSync('GET', url, [], null, 'same-origin') : null; } catch (_) { r = null; }
+    if (r === null || !(r[0] >= 200 && r[0] < 300) || r[4] === null) {
+      throw new DOMException(`Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '${url}' failed to load.`, 'NetworkError');
+    }
+    return utf8Decode(new Uint8Array(r[4]));
+  }
+  class Worker extends EventTarget {
+    #global = null; #scope = null; #url = ''; #name = ''; #ready = false; #queue = [];
+    #terminated = false; #closing = false; #timers = new Map();
+    constructor(url, options) {
+      super();
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'Worker': 1 argument required, but only 0 present.");
+      if (typeof N.workerCreate !== 'function') throw new DOMException("Failed to construct 'Worker': Workers are not supported.", 'NotSupportedError');
+      const p = N.urlParse(`${url}`, L.location ? L.location.href : null);
+      if (p === null) throw new DOMException(`Failed to construct 'Worker': The URL '${url}' is invalid.`, 'SyntaxError');
+      const href = p[0];
+      const pageOrigin = L.location ? L.location.origin : 'null';
+      if (p[1] !== 'blob:' && p[1] !== 'data:' && p[10] !== pageOrigin) {
+        throw new DOMException(`Failed to construct 'Worker': Script at '${href}' cannot be accessed from origin '${pageOrigin}'.`, 'SecurityError');
+      }
+      const opts = options === undefined || options === null ? {} : options;
+      this.#url = href;
+      this.#name = opts.name === undefined ? '' : `${opts.name}`;
+      const module = opts.type === 'module';
+      fetch(href).then((res) => {
+        if (!res.ok) throw new Error(`Failed to load worker script '${href}' (${res.status}).`);
+        return res.text();
+      }).then((src) => this.#start(src, module), (e) => {
+        if (this.#terminated) return;
+        L.console.error(e && e.message ? e.message : `Failed to load worker script '${href}'.`);
+        L.fire(this, 'error', { cancelable: true }, L.ErrorEvent);
+      });
+    }
+    #start(src, module) {
+      if (this.#terminated) return;
+      if (module && /^\s*(import|export)\b/m.test(src)) {
+        L.console.error(`Module workers are not supported yet ('${this.#url}').`);
+        L.fire(this, 'error', { cancelable: true }, L.ErrorEvent);
+        return;
+      }
+      const g = N.workerCreate();
+      this.#global = g;
+      this.#scope = new WorkerScopeTarget();
+      this.#install(g);
+      this.#run(() => N.workerEval(g, src, this.#url));
+      this.#ready = true;
+      const queued = this.#queue;
+      this.#queue = [];
+      for (const data of queued) this.#deliver(N.cloneInto(g, data));
+    }
+    // Runs worker code: an uncaught exception goes to the worker's error handlers, not the page's.
+    #run(fn) {
+      const prev = L.report;
+      L.report = (e) => this.#uncaught(e, null);
+      try {
+        const err = fn();
+        if (Array.isArray(err)) this.#uncaught(err[4], err);
+      } catch (e) {
+        this.#uncaught(e, null);
+      } finally {
+        L.report = prev;
+      }
+    }
+    #uncaught(error, info) {
+      let text;
+      try { text = error !== null && typeof error === 'object' && 'message' in error ? `${error.name || 'Error'}: ${error.message}` : String(error); } catch (_) { text = 'exception'; }
+      const message = info ? info[0] : `Uncaught ${text}`;
+      const init = { message, filename: info ? info[1] : this.#url, lineno: info ? info[2] : 0, colno: info ? info[3] : 0, error, cancelable: true };
+      const prev = L.report;
+      L.report = L.reportException;
+      try {
+        if (this.#scope !== null && !L.fire(this.#scope, 'error', init, L.ErrorEvent)) return;
+        const initOuter = Object.assign({}, init, { error: null });
+        if (L.fire(this, 'error', initOuter, L.ErrorEvent)) L.console.error(message);
+      } finally {
+        L.report = prev;
+      }
+    }
+    #deliver(data) {
+      L.postTask(() => {
+        if (this.#terminated || this.#closing) return;
+        this.#run(() => { L.fire(this.#scope, 'message', { data }, L.MessageEvent); });
+      });
+    }
+    #install(g) {
+      const worker = this, scope = this.#scope, base = this.#url;
+      const define = (k, v) => Object.defineProperty(g, k, { value: v, writable: true, configurable: true, enumerable: false });
+      const win = L.window;
+      for (const k of WORKER_SHARED) {
+        if (k in g) continue;
+        let v;
+        try { v = win[k]; } catch (_) { v = undefined; }
+        if (v !== undefined) define(k, v);
+      }
+      const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.location ? L.location.href : null)); return q === null ? `${u}` : q[0]; };
+      define('self', g);
+      define('name', this.#name);
+      define('navigator', win.navigator);
+      define('location', Object.freeze(Object.assign(Object.create(null), (() => {
+        const q = N.urlParse(base, null) || [base, '', '', '', '', '', '', '', '', '', 'null'];
+        return { href: q[0], protocol: q[1], host: q[4], hostname: q[5], port: q[6], pathname: q[7], search: q[8], hash: q[9], origin: q[10], toString() { return q[0]; } };
+      })())));
+      define('fetch', (input, init) => fetch(typeof input === 'string' || input instanceof URL ? resolve(input) : input, init));
+      const track = (repeat) => (handler, timeout, ...args) => {
+        let id = 0;
+        const fn = typeof handler === 'function' ? handler : null;
+        const code = fn === null ? `${handler}` : '';
+        id = (repeat ? setInterval : setTimeout)(() => {
+          if (!repeat) worker.#timers.delete(id);
+          if (worker.#terminated || worker.#closing) return;
+          worker.#run(() => (fn !== null ? Reflect.apply(fn, g, args) : N.workerEval(g, code, base)));
+        }, timeout);
+        worker.#timers.set(id, repeat);
+        return id;
+      };
+      const untrack = (id) => {
+        const n = Number(id);
+        if (!worker.#timers.has(n)) return;
+        worker.#timers.delete(n);
+        clearTimeout(n);
+      };
+      define('setTimeout', track(false));
+      define('setInterval', track(true));
+      define('clearTimeout', untrack);
+      define('clearInterval', untrack);
+      define('postMessage', (message) => {
+        if (worker.#terminated || worker.#closing) return;
+        const data = cloneValue(message);
+        L.postTask(() => { if (!worker.#terminated) L.fire(worker, 'message', { data }, L.MessageEvent); });
+      });
+      define('close', () => { worker.#closing = true; worker.#stopTimers(); });
+      define('importScripts', function importScripts(...urls) {
+        for (const u of urls) {
+          const abs = resolve(u);
+          const err = N.workerEval(g, syncLoadScript(abs), abs);
+          if (Array.isArray(err)) throw err[4];
+        }
+      });
+      define('addEventListener', function addEventListener(type, fn, opts) { scope.addEventListener(type, fn, opts); });
+      define('removeEventListener', function removeEventListener(type, fn, opts) { scope.removeEventListener(type, fn, opts); });
+      define('dispatchEvent', function dispatchEvent(ev) { return scope.dispatchEvent(ev); });
+      for (const h of ['onmessage', 'onmessageerror', 'onerror']) {
+        Object.defineProperty(g, h, { get() { return scope[h]; }, set(v) { scope[h] = v; }, configurable: true, enumerable: true });
+      }
+      define(WORKER_BRAND, true);
+      const brand = (name) => {
+        const C = { [name]: function () { throw new TypeError('Illegal constructor'); } }[name];
+        Object.defineProperty(C, Symbol.hasInstance, { value: (x) => x !== null && typeof x === 'object' && x[WORKER_BRAND] === true });
+        define(name, C);
+      };
+      brand('WorkerGlobalScope');
+      brand('DedicatedWorkerGlobalScope');
+      Object.defineProperty(g, Symbol.toStringTag, { value: 'DedicatedWorkerGlobalScope', configurable: true });
+    }
+    #stopTimers() {
+      for (const id of this.#timers.keys()) clearTimeout(id);
+      this.#timers.clear();
+    }
+    postMessage(message, transfer) {
+      if (this.#terminated) return;
+      if (!this.#ready) { this.#queue.push(cloneValue(message)); return; }
+      if (this.#closing) return;
+      this.#deliver(N.cloneInto(this.#global, message));
+    }
+    terminate() {
+      if (this.#terminated) return;
+      this.#terminated = true;
+      this.#stopTimers();
+      this.#queue = [];
+      this.#global = null;
+      this.#scope = null;
+    }
+  }
+  L.defineEventHandlers(Worker.prototype, ['onmessage', 'onmessageerror', 'onerror']);
+  L.expose('Worker', Worker);
+  L.Worker = Worker;
+
   L.part1 = { setTimeout, setInterval, clearTimeout, clearInterval, queueMicrotask, requestAnimationFrame,
     cancelAnimationFrame, requestIdleCallback, cancelIdleCallback, structuredClone, btoa, atob, fetch, randomUUIDRef: null };
   Object.assign(L, { MessagePort, MessageChannel, BroadcastChannel, URLSearchParams, TextEncoder, TextDecoder, Blob, File, FileList,
@@ -2350,28 +2976,333 @@
     for (let i = 0; i < n; i++) odv.setBigUint64(i * 8, H[i]);
     return out;
   }
+  // Web Crypto: key material lives in a WeakMap (never on the object); the primitives are
+  // natives (aws-lc-rs). Supported: SHA-*, HMAC, AES-GCM/CBC/CTR/KW, PBKDF2, HKDF.
+  const KEYS = new WeakMap();
+  const ALG_NAMES = ['AES-GCM', 'AES-CBC', 'AES-CTR', 'AES-KW', 'HMAC', 'PBKDF2', 'HKDF', 'SHA-1', 'SHA-256', 'SHA-384',
+    'SHA-512', 'ECDSA', 'ECDH', 'RSA-OAEP', 'RSASSA-PKCS1-v1_5', 'RSA-PSS', 'Ed25519', 'X25519'];
+  const SUPPORTED_KEY_ALGS = ['AES-GCM', 'AES-CBC', 'AES-CTR', 'AES-KW', 'HMAC', 'PBKDF2', 'HKDF'];
+  const AES_NAMES = ['AES-GCM', 'AES-CBC', 'AES-CTR', 'AES-KW'];
+  const KEY_USAGES = {
+    'AES-GCM': ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey'], 'AES-CBC': ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey'],
+    'AES-CTR': ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey'], 'AES-KW': ['wrapKey', 'unwrapKey'],
+    HMAC: ['sign', 'verify'], PBKDF2: ['deriveKey', 'deriveBits'], HKDF: ['deriveKey', 'deriveBits'],
+  };
+  const ALL_USAGES = ['encrypt', 'decrypt', 'sign', 'verify', 'deriveKey', 'deriveBits', 'wrapKey', 'unwrapKey'];
+  const HASH_BLOCK_BITS = { 'SHA-1': 512, 'SHA-256': 512, 'SHA-384': 1024, 'SHA-512': 1024 };
+  const cryptoErr = (name, msg) => new DOMException(msg, name);
+  const notSupported = () => cryptoErr('NotSupportedError', 'Algorithm: Unrecognized name');
+  function normAlg(alg, what) {
+    if (typeof alg === 'string') alg = { name: alg };
+    else if (typeof alg !== 'object' || alg === null) throw new TypeError(`${what}: Algorithm: Not an object`);
+    if (alg.name === undefined) throw new TypeError(`${what}: Algorithm: name: Missing or not a string`);
+    const upper = `${alg.name}`.toUpperCase();
+    const name = ALG_NAMES.find((n) => n.toUpperCase() === upper);
+    if (name === undefined) throw notSupported();
+    const out = { name };
+    for (const k in alg) if (k !== 'name') out[k] = alg[k];
+    return out;
+  }
+  function hashOf(a, what) {
+    if (a.hash === undefined) throw new TypeError(`${what}: Algorithm: hash: Missing or not an AlgorithmIdentifier`);
+    const h = normAlg(a.hash, what).name;
+    if (!(h in HASH_BLOCK_BITS)) throw notSupported();
+    return h;
+  }
+  function bufferArg(x, what, member) {
+    const b = toBytes(x);
+    if (b === null) throw new TypeError(`${what}: ${member ? member + ': ' : ''}Not a BufferSource`);
+    return b;
+  }
+  function checkUsages(name, usages, what) {
+    if (usages === null || typeof usages !== 'object' || typeof usages[Symbol.iterator] !== 'function') {
+      throw new TypeError(`${what}: The provided value cannot be converted to a sequence.`);
+    }
+    const list = [...usages].map((u) => `${u}`);
+    for (const u of list) {
+      if (!ALL_USAGES.includes(u)) throw new TypeError(`${what}: The provided value '${u}' is not a valid enum value of type KeyUsage.`);
+      if (!KEY_USAGES[name].includes(u)) throw cryptoErr('SyntaxError', 'Cannot create a key using the specified key usages.');
+    }
+    if (list.length === 0) throw cryptoErr('SyntaxError', 'Usages cannot be empty when creating a key.');
+    return ALL_USAGES.filter((u) => list.includes(u));
+  }
+  function keyOf(k, what) {
+    const info = k !== null && typeof k === 'object' ? KEYS.get(k) : undefined;
+    if (info === undefined) throw new TypeError(`${what}: parameter is not of type 'CryptoKey'.`);
+    return info;
+  }
+  function useKey(k, name, usage, what) {
+    const info = keyOf(k, what);
+    if (info.algorithm.name !== name) throw cryptoErr('InvalidAccessError', 'The requested operation is not valid for the provided key');
+    if (!info.usages.includes(usage)) throw cryptoErr('InvalidAccessError', 'key.usages does not permit this operation');
+    return info;
+  }
+  class CryptoKey {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    get type() { return keyOf(this, 'type').type; }
+    get extractable() { return keyOf(this, 'extractable').extractable; }
+    get algorithm() { return keyOf(this, 'algorithm').algorithm; }
+    get usages() { return keyOf(this, 'usages').usagesArray; }
+  }
+  Object.defineProperty(CryptoKey.prototype, Symbol.toStringTag, { value: 'CryptoKey', configurable: true });
+  function makeKey(algorithm, extractable, usages, bytes) {
+    const k = new CryptoKey(INTERNAL);
+    KEYS.set(k, { type: 'secret', extractable: !!extractable, algorithm, usages, usagesArray: [...usages], bytes: new Uint8Array(bytes) });
+    return k;
+  }
+  function b64urlEncode(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64urlDecode(s) {
+    if (typeof s !== 'string' || !/^[A-Za-z0-9_-]*$/.test(s)) throw cryptoErr('DataError', 'The JWK member is not valid base64url');
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function jwkAlgName(algorithm, bits) {
+    if (algorithm.name === 'HMAC') return 'HS' + algorithm.hash.name.slice(4);
+    return 'A' + bits + { 'AES-GCM': 'GCM', 'AES-CBC': 'CBC', 'AES-CTR': 'CTR', 'AES-KW': 'KW' }[algorithm.name];
+  }
+  function importSecret(format, keyData, a, extractable, keyUsages, what) {
+    const name = a.name;
+    if (!SUPPORTED_KEY_ALGS.includes(name)) throw notSupported();
+    let bytes;
+    if (format === 'raw') bytes = new Uint8Array(bufferArg(keyData, what, 'keyData'));
+    else if (format === 'jwk') {
+      if (keyData === null || typeof keyData !== 'object' || ArrayBuffer.isView(keyData) || keyData instanceof ArrayBuffer) {
+        throw new TypeError(`${what}: Key data must be an object for JWK import`);
+      }
+      if (name === 'PBKDF2' || name === 'HKDF') throw notSupported();
+      if (keyData.kty !== 'oct') throw cryptoErr('DataError', 'The JWK "kty" member was not "oct"');
+      bytes = b64urlDecode(keyData.k);
+      if (keyData.ext === false && extractable) throw cryptoErr('DataError', 'The JWK "ext" member was inconsistent with that specified by the Web Crypto call');
+    } else if (format === 'spki' || format === 'pkcs8') {
+      throw cryptoErr('NotSupportedError', 'Unsupported import key format for algorithm');
+    } else throw new TypeError(`${what}: The provided value '${format}' is not a valid enum value of type KeyFormat.`);
+    const usages = checkUsages(name, keyUsages, what);
+    let algorithm;
+    if (name === 'HMAC') {
+      const hash = hashOf(a, what);
+      if (bytes.length === 0) throw cryptoErr('DataError', 'HMAC key data must not be empty');
+      let length = bytes.length * 8;
+      if (a.length !== undefined) {
+        length = Number(a.length);
+        if (!(length <= bytes.length * 8 && length > (bytes.length - 1) * 8)) throw cryptoErr('DataError', 'The optional HMAC key length must be shorter than the key data, and by less than 8 bits.');
+      }
+      algorithm = { name, hash: { name: hash }, length };
+    } else if (name === 'PBKDF2' || name === 'HKDF') {
+      if (extractable) throw cryptoErr('SyntaxError', `${name} keys are not extractable`);
+      algorithm = { name };
+    } else {
+      if (bytes.length === 24) throw cryptoErr('OperationError', '192-bit AES keys are not supported');
+      if (bytes.length !== 16 && bytes.length !== 32) throw cryptoErr('DataError', 'AES key data must be 128 or 256 bits');
+      algorithm = { name, length: bytes.length * 8 };
+    }
+    return makeKey(algorithm, extractable, usages, bytes);
+  }
+  function exportSecret(format, key, what) {
+    const info = keyOf(key, what);
+    if (!['raw', 'jwk', 'spki', 'pkcs8'].includes(format)) throw new TypeError(`${what}: The provided value '${format}' is not a valid enum value of type KeyFormat.`);
+    if (!info.extractable) throw cryptoErr('InvalidAccessError', 'key is not extractable');
+    if (format === 'raw') return copyToArrayBuffer(info.bytes);
+    if (format === 'jwk') {
+      return { alg: jwkAlgName(info.algorithm, info.bytes.length * 8), ext: true, k: b64urlEncode(info.bytes), key_ops: [...info.usages], kty: 'oct' };
+    }
+    throw cryptoErr('InvalidAccessError', 'The key is not of the expected type');
+  }
+  function aesParams(a, what) {
+    const n = a.name;
+    if (n === 'AES-GCM') {
+      if (a.iv === undefined) throw new TypeError(`${what}: AesGcmParams: iv: Missing required property`);
+      const iv = bufferArg(a.iv, what, 'iv');
+      const aad = a.additionalData === undefined ? null : bufferArg(a.additionalData, what, 'additionalData');
+      const tag = a.tagLength === undefined ? 128 : Number(a.tagLength);
+      if (![32, 64, 96, 104, 112, 120, 128].includes(tag)) throw cryptoErr('OperationError', 'The tag length is invalid: Must be 32, 64, 96, 104, 112, 120, or 128 bits');
+      return ['GCM', iv, aad, tag];
+    }
+    if (n === 'AES-CBC') {
+      if (a.iv === undefined) throw new TypeError(`${what}: AesCbcParams: iv: Missing required property`);
+      const iv = bufferArg(a.iv, what, 'iv');
+      if (iv.length !== 16) throw cryptoErr('OperationError', 'The "iv" has an unexpected length -- must be 16 bytes');
+      return ['CBC', iv, null, 0];
+    }
+    if (n === 'AES-CTR') {
+      if (a.counter === undefined) throw new TypeError(`${what}: AesCtrParams: counter: Missing required property`);
+      const ctr = bufferArg(a.counter, what, 'counter');
+      if (ctr.length !== 16) throw cryptoErr('OperationError', 'The "counter" has an unexpected length -- must be 16 bytes');
+      const len = Number(a.length);
+      if (!(len >= 1 && len <= 128)) throw cryptoErr('OperationError', 'The "length" must be >= 1 and <= 128');
+      return ['CTR', ctr, null, 0];
+    }
+    throw notSupported();
+  }
+  function cipher(a, key, data, encrypt, usage, what) {
+    if (!AES_NAMES.includes(a.name)) throw notSupported();
+    const info = useKey(key, a.name, usage, what);
+    if (a.name === 'AES-KW') return N.cryptoAes('KW', encrypt, info.bytes, null, null, 0, data);
+    const [mode, iv, aad, tag] = aesParams(a, what);
+    return N.cryptoAes(mode, encrypt, info.bytes, iv, aad, tag, data);
+  }
+  function deriveBitsImpl(a, info, length, what) {
+    if (length === null || length === undefined) throw cryptoErr('OperationError', 'length cannot be null');
+    length = Number(length);
+    if (length % 8 !== 0) throw cryptoErr('OperationError', 'The length provided must be a multiple of 8');
+    const hash = hashOf(a, what);
+    if (a.name === 'PBKDF2') {
+      if (a.salt === undefined) throw new TypeError(`${what}: Pbkdf2Params: salt: Missing required property`);
+      const salt = bufferArg(a.salt, what, 'salt');
+      const it = Number(a.iterations);
+      if (!(it >= 1)) throw cryptoErr('OperationError', 'PBKDF2 requires iterations > 0');
+      if (length === 0) throw cryptoErr('OperationError', 'The length provided must be greater than 0');
+      return N.cryptoPbkdf2(hash, info.bytes, salt, it, length);
+    }
+    if (a.salt === undefined) throw new TypeError(`${what}: HkdfParams: salt: Missing required property`);
+    if (a.info === undefined) throw new TypeError(`${what}: HkdfParams: info: Missing required property`);
+    return N.cryptoHkdf(hash, info.bytes, bufferArg(a.salt, what, 'salt'), bufferArg(a.info, what, 'info'), length);
+  }
+  function derivedKeyLength(d, what) {
+    if (d.name === 'HMAC') {
+      const hash = hashOf(d, what);
+      return d.length === undefined ? HASH_BLOCK_BITS[hash] : Number(d.length);
+    }
+    if (AES_NAMES.includes(d.name)) {
+      const len = Number(d.length);
+      if (len === 192) throw cryptoErr('OperationError', '192-bit AES keys are not supported');
+      if (len !== 128 && len !== 256) throw cryptoErr('OperationError', 'AES key length must be 128 or 256 bits');
+      return len;
+    }
+    throw notSupported();
+  }
+  function run(what, fn) {
+    try {
+      return L.resolvedPromise(fn(`Failed to execute '${what}' on 'SubtleCrypto'`));
+    } catch (e) {
+      return L.rejectedPromise(L.fromNative(e));
+    }
+  }
+  function need(args, n, what) {
+    if (args.length < n) throw new TypeError(`Failed to execute '${what}' on 'SubtleCrypto': ${n} arguments required, but only ${args.length} present.`);
+  }
   class SubtleCrypto {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     digest(algorithm, data) {
-      const name = `${typeof algorithm === 'object' && algorithm !== null ? algorithm.name : algorithm}`.toUpperCase();
-      const bytes = toBytes(data);
-      if (bytes === null) return L.rejectedPromise(new TypeError("Failed to execute 'digest' on 'SubtleCrypto': 2nd argument is not of type ArrayBuffer or ArrayBufferView."));
-      let out;
-      switch (name) {
-        case 'SHA-1': out = sha1(bytes); break;
-        case 'SHA-256': out = sha256(bytes); break;
-        case 'SHA-384': out = sha512(bytes, true); break;
-        case 'SHA-512': out = sha512(bytes, false); break;
-        default: return L.rejectedPromise(new DOMException('Algorithm: Unrecognized name', 'NotSupportedError'));
-      }
-      return L.resolvedPromise(out.buffer);
+      const args = arguments;
+      return run('digest', (what) => {
+        need(args, 2, 'digest');
+        const name = normAlg(algorithm, what).name;
+        if (!(name in HASH_BLOCK_BITS)) throw notSupported();
+        const bytes = bufferArg(data, what, 'data');
+        if (typeof N.cryptoDigest === 'function') return N.cryptoDigest(name, bytes);
+        const out = name === 'SHA-1' ? sha1(bytes) : name === 'SHA-256' ? sha256(bytes) : sha512(bytes, name === 'SHA-384');
+        return out.buffer;
+      });
     }
-  }
-  for (const m of ['encrypt', 'decrypt', 'sign', 'verify', 'generateKey', 'deriveKey', 'deriveBits', 'importKey', 'exportKey', 'wrapKey', 'unwrapKey']) {
-    Object.defineProperty(SubtleCrypto.prototype, m, {
-      value: { [m]() { return L.rejectedPromise(new DOMException(`SubtleCrypto.${m} is not supported by this browser`, 'NotSupportedError')); } }[m],
-      writable: true, enumerable: true, configurable: true,
-    });
+    importKey(format, keyData, algorithm, extractable, keyUsages) {
+      const args = arguments;
+      return run('importKey', (what) => {
+        need(args, 5, 'importKey');
+        return importSecret(`${format}`, keyData, normAlg(algorithm, what), extractable, keyUsages, what);
+      });
+    }
+    exportKey(format, key) {
+      const args = arguments;
+      return run('exportKey', (what) => { need(args, 2, 'exportKey'); return exportSecret(`${format}`, key, what); });
+    }
+    generateKey(algorithm, extractable, keyUsages) {
+      const args = arguments;
+      return run('generateKey', (what) => {
+        need(args, 3, 'generateKey');
+        const a = normAlg(algorithm, what);
+        if (!SUPPORTED_KEY_ALGS.includes(a.name) || a.name === 'PBKDF2' || a.name === 'HKDF') throw notSupported();
+        const bits = derivedKeyLength(a, what);
+        const bytes = new Uint8Array(N.randomBytes(Math.ceil(bits / 8)));
+        return importSecret('raw', bytes, a.name === 'HMAC' ? { ...a, length: bits } : a, extractable, keyUsages, what);
+      });
+    }
+    encrypt(algorithm, key, data) {
+      const args = arguments;
+      return run('encrypt', (what) => {
+        need(args, 3, 'encrypt');
+        return cipher(normAlg(algorithm, what), key, bufferArg(data, what, 'data'), true, 'encrypt', what);
+      });
+    }
+    decrypt(algorithm, key, data) {
+      const args = arguments;
+      return run('decrypt', (what) => {
+        need(args, 3, 'decrypt');
+        return cipher(normAlg(algorithm, what), key, bufferArg(data, what, 'data'), false, 'decrypt', what);
+      });
+    }
+    sign(algorithm, key, data) {
+      const args = arguments;
+      return run('sign', (what) => {
+        need(args, 3, 'sign');
+        if (normAlg(algorithm, what).name !== 'HMAC') throw notSupported();
+        const info = useKey(key, 'HMAC', 'sign', what);
+        return N.cryptoHmac(info.algorithm.hash.name, info.bytes, bufferArg(data, what, 'data'));
+      });
+    }
+    verify(algorithm, key, signature, data) {
+      const args = arguments;
+      return run('verify', (what) => {
+        need(args, 4, 'verify');
+        if (normAlg(algorithm, what).name !== 'HMAC') throw notSupported();
+        const info = useKey(key, 'HMAC', 'verify', what);
+        const sig = bufferArg(signature, what, 'signature');
+        const mac = new Uint8Array(N.cryptoHmac(info.algorithm.hash.name, info.bytes, bufferArg(data, what, 'data')));
+        if (sig.length !== mac.length) return false;
+        let diff = 0;
+        for (let i = 0; i < mac.length; i++) diff |= mac[i] ^ sig[i];
+        return diff === 0;
+      });
+    }
+    deriveBits(algorithm, baseKey, length) {
+      const args = arguments;
+      return run('deriveBits', (what) => {
+        need(args, 2, 'deriveBits');
+        const a = normAlg(algorithm, what);
+        if (a.name !== 'PBKDF2' && a.name !== 'HKDF') throw notSupported();
+        return deriveBitsImpl(a, useKey(baseKey, a.name, 'deriveBits', what), length, what);
+      });
+    }
+    deriveKey(algorithm, baseKey, derivedKeyType, extractable, keyUsages) {
+      const args = arguments;
+      return run('deriveKey', (what) => {
+        need(args, 5, 'deriveKey');
+        const a = normAlg(algorithm, what);
+        if (a.name !== 'PBKDF2' && a.name !== 'HKDF') throw notSupported();
+        const d = normAlg(derivedKeyType, what);
+        const info = useKey(baseKey, a.name, 'deriveKey', what);
+        const bits = deriveBitsImpl(a, info, derivedKeyLength(d, what), what);
+        return importSecret('raw', bits, d, extractable, keyUsages, what);
+      });
+    }
+    wrapKey(format, key, wrappingKey, wrapAlgorithm) {
+      const args = arguments;
+      return run('wrapKey', (what) => {
+        need(args, 4, 'wrapKey');
+        const a = normAlg(wrapAlgorithm, what);
+        const exported = exportSecret(`${format}`, key, what);
+        const bytes = `${format}` === 'jwk' ? new Uint8Array(N.textEncode(JSON.stringify(exported))) : new Uint8Array(exported);
+        return cipher(a, wrappingKey, bytes, true, 'wrapKey', what);
+      });
+    }
+    unwrapKey(format, wrappedKey, unwrappingKey, unwrapAlgorithm, unwrappedKeyAlgorithm, extractable, keyUsages) {
+      const args = arguments;
+      return run('unwrapKey', (what) => {
+        need(args, 7, 'unwrapKey');
+        const a = normAlg(unwrapAlgorithm, what);
+        const plain = cipher(a, unwrappingKey, bufferArg(wrappedKey, what, 'wrappedKey'), false, 'unwrapKey', what);
+        let keyData = plain;
+        if (`${format}` === 'jwk') {
+          try { keyData = JSON.parse(N.textDecode(plain, 'utf-8', false)); } catch (e) { throw cryptoErr('DataError', 'The key data is not valid JSON'); }
+        }
+        return importSecret(`${format}`, keyData, normAlg(unwrappedKeyAlgorithm, what), extractable, keyUsages, what);
+      });
+    }
   }
   const subtle = new SubtleCrypto(INTERNAL);
   const INT_ARRAYS = ['Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'BigInt64Array', 'BigUint64Array'];
@@ -2438,6 +3369,7 @@
     'transferSize', 'encodedBodySize', 'decodedBodySize', 'renderBlockingStatus', 'responseStatus', 'deliveryType']) {
     Object.defineProperty(PerformanceResourceTiming.prototype, k, { get() { const v = L.prtData(this)[k]; return v === undefined ? (typeof v === 'string' ? '' : 0) : v; }, enumerable: true, configurable: true });
   }
+  Object.defineProperty(PerformanceResourceTiming.prototype, 'serverTiming', { get() { return Object.freeze([]); }, enumerable: true, configurable: true });
   PerformanceResourceTiming.prototype.toJSON = function () { return Object.assign(PerformanceEntry.prototype.toJSON.call(this), L.prtData(this)); };
   class PerformanceNavigationTiming extends PerformanceResourceTiming { }
   for (const k of ['unloadEventStart', 'unloadEventEnd', 'domInteractive', 'domContentLoadedEventStart', 'domContentLoadedEventEnd',
@@ -2547,6 +3479,26 @@
     if (TIMING_KEYS.includes(s)) return 0;
     throw new DOMException(`Failed to execute '${method}' on 'Performance': The mark '${s}' does not exist.`, 'SyntaxError');
   }
+  let resourceBufferSize = 250, bufferFullFired = false;
+  const resourceCount = () => { let n = 0; for (const e of perfEntries) if (e.entryType === 'resource') n++; return n; };
+  L.addResourceTiming = function (url, initiator, timing, status, body, error) {
+    const end = N.now();
+    const failed = (error !== null && error !== undefined) || status === 0;
+    const size = failed || body === null || body === undefined ? 0 : body.byteLength;
+    const responseStart = failed ? 0 : (timing.firstByte || end);
+    const e = new PerformanceResourceTiming(INTERNAL, stripFragment(`${url}`), 'resource', timing.start, end - timing.start, {
+      initiatorType: initiator, nextHopProtocol: '', workerStart: 0, redirectStart: 0, redirectEnd: 0,
+      fetchStart: timing.start, domainLookupStart: timing.start, domainLookupEnd: timing.start,
+      connectStart: timing.start, connectEnd: timing.start, secureConnectionStart: 0, requestStart: timing.start,
+      responseStart, responseEnd: end,
+      // Headers are not measured: estimate them like a typical response.
+      transferSize: failed ? 0 : size + 300, encodedBodySize: size, decodedBodySize: size,
+      renderBlockingStatus: 'non-blocking', responseStatus: failed ? 0 : status, deliveryType: '',
+    });
+    if (resourceCount() < resourceBufferSize) perfEntries.push(e);
+    else if (!bufferFullFired) { bufferFullFired = true; L.postTask(() => L.fire(performance, 'resourcetimingbufferfull', {})); }
+    queuePerfEntry(e);
+  };
   const timingObj = new PerformanceTiming(INTERNAL);
   const navigationObj = new PerformanceNavigation(INTERNAL);
   class Performance extends EventTarget {
@@ -2582,8 +3534,8 @@
     }
     clearMarks(name) { removeEntries('mark', name); }
     clearMeasures(name) { removeEntries('measure', name); }
-    clearResourceTimings() { }
-    setResourceTimingBufferSize() { }
+    clearResourceTimings() { removeEntries('resource'); bufferFullFired = false; }
+    setResourceTimingBufferSize(n) { resourceBufferSize = Math.max(0, Number(n) | 0); bufferFullFired = false; }
     getEntries() { return [navigationEntry()].concat(perfEntries).sort((a, b) => a.startTime - b.startTime); }
     getEntriesByType(type) {
       const t = `${type}`;
@@ -2850,6 +3802,7 @@
     get length() { return this.#mimes.length; }
     item(i) { return this.#mimes[Number(i) >>> 0] || null; }
     namedItem(n) { return this.#mimes.find((m) => m.type === `${n}`) || null; }
+    *[Symbol.iterator]() { yield* this.#mimes; }
   }
   L.makeIndexed(Plugin.prototype, (o, i) => L.pluginMimes(o)[i], 4);
   class PluginArray {
@@ -2958,6 +3911,51 @@
     get saveData() { return false; }
   }
   L.defineEventHandlers(NetworkInformation.prototype, ['onchange']);
+  class DeprecatedStorageQuota {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    queryUsageAndQuota(success, error) {
+      if (typeof success !== 'function') throw new TypeError("Failed to execute 'queryUsageAndQuota' on 'DeprecatedStorageQuota': parameter 1 is not of type 'Function'.");
+      L.microtask(() => { try { success(0, 299977904946); } catch (e) { L.reportException(e); } });
+    }
+    requestQuota(bytes, success, error) {
+      L.microtask(() => { try { if (typeof success === 'function') success(Number(bytes) || 0); } catch (e) { L.reportException(e); } });
+    }
+  }
+  // Notifications: never granted (no permission prompt), like a denied site in Chrome.
+  class Notification extends EventTarget {
+    #title; #options;
+    constructor(title, options) {
+      super();
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'Notification': 1 argument required, but only 0 present.");
+      this.#title = `${title}`;
+      this.#options = options !== null && typeof options === 'object' ? options : {};
+      L.microtask(() => L.fire(this, 'error', {}));
+    }
+    static get permission() { return 'denied'; }
+    static get maxActions() { return 2; }
+    static requestPermission(callback) {
+      const p = L.resolvedPromise('denied');
+      if (typeof callback === 'function') L.promiseThen.call(p, (v) => { try { callback(v); } catch (e) { L.reportException(e); } });
+      return p;
+    }
+    get title() { return this.#title; }
+    get dir() { return this.#options.dir === undefined ? 'auto' : `${this.#options.dir}`; }
+    get lang() { return this.#options.lang === undefined ? '' : `${this.#options.lang}`; }
+    get body() { return this.#options.body === undefined ? '' : `${this.#options.body}`; }
+    get tag() { return this.#options.tag === undefined ? '' : `${this.#options.tag}`; }
+    get icon() { return this.#options.icon === undefined ? '' : `${this.#options.icon}`; }
+    get badge() { return this.#options.badge === undefined ? '' : `${this.#options.badge}`; }
+    get image() { return this.#options.image === undefined ? '' : `${this.#options.image}`; }
+    get data() { return this.#options.data === undefined ? null : this.#options.data; }
+    get silent() { return this.#options.silent === undefined ? null : !!this.#options.silent; }
+    get requireInteraction() { return !!this.#options.requireInteraction; }
+    get renotify() { return !!this.#options.renotify; }
+    get actions() { return Object.freeze([]); }
+    get timestamp() { return this.#options.timestamp === undefined ? Date.now() : Number(this.#options.timestamp); }
+    get vibrate() { return Object.freeze([]); }
+    close() { }
+  }
+  L.defineEventHandlers(Notification.prototype, ['onclick', 'onshow', 'onerror', 'onclose']);
   class StorageManager {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     estimate() { return L.resolvedPromise({ quota: 299977904946, usage: 0, usageDetails: {} }); }
@@ -3046,6 +4044,17 @@
   }
   const navState = {};
   function lazy(key, make) { if (navState[key] === undefined) navState[key] = make(); return navState[key]; }
+  // HTML "user activation": sticky once any trusted activation event was seen, transient
+  // for a few seconds after it (10_events.js records L.lastActivation).
+  class UserActivation {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    get hasBeenActive() { return L.lastActivation !== 0; }
+    get isActive() { return L.lastActivation !== 0 && Date.now() - L.lastActivation < 5000; }
+  }
+  class Scheduling {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    isInputPending() { return false; }
+  }
   class Navigator {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     get userAgent() { return ua(); }
@@ -3076,10 +4085,15 @@
     get userAgentData() { return lazy('uad', () => new NavigatorUAData(INTERNAL)); }
     get connection() { return lazy('connection', () => new NetworkInformation(INTERNAL)); }
     get storage() { return lazy('storage', () => new StorageManager(INTERNAL)); }
+    // Legacy quota API (still present in Chrome; feature-detected by some scripts).
+    get webkitTemporaryStorage() { return lazy('webkitTemporaryStorage', () => new DeprecatedStorageQuota(INTERNAL)); }
+    get webkitPersistentStorage() { return lazy('webkitPersistentStorage', () => new DeprecatedStorageQuota(INTERNAL)); }
     get geolocation() { return lazy('geolocation', () => new Geolocation(INTERNAL)); }
     get locks() { return lazy('locks', () => new LockManager(INTERNAL)); }
-    get mediaDevices() { return undefined; }
-    get serviceWorker() { return undefined; }
+    get userActivation() { return lazy('userActivation', () => new UserActivation(INTERNAL)); }
+    get scheduling() { return lazy('scheduling', () => new Scheduling(INTERNAL)); }
+    // No `serviceWorker` / `mediaDevices` members (like Chrome in an insecure context):
+    // sites test `'serviceWorker' in navigator` and then call methods on it.
     sendBeacon(url, data) {
       const p = N.urlParse(L.toUSV(url), L.baseURL());
       if (p === null) throw new TypeError(`Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported.`);
@@ -3806,6 +4820,7 @@
     }
     remove(index) { L.dtRemove(this.#dt, Number(index) >>> 0); }
     clear() { this.#dt.clearData(); }
+    *[Symbol.iterator]() { yield* L.dtItems(this.#dt); }
   }
   L.makeIndexed(DataTransferItemList.prototype, (o, i) => L.dtItems(L.dtilOwner(o))[i], 8);
   class DataTransfer {
@@ -3830,6 +4845,677 @@
   }
 
   // =======================================================================================
+  // Web Animations (Element.animate, Animation, KeyframeEffect, document.timeline)
+  // Effects run on the animation frames: the animated values are written into the target's
+  // inline style natively (no style attribute mutation records), and a property's own
+  // inline value comes back when no animation affects it any more.
+  // =======================================================================================
+  function cubicBezier(x1, y1, x2, y2) {
+    const bx = (t) => 3 * x1 * t * (1 - t) * (1 - t) + 3 * x2 * t * t * (1 - t) + t * t * t;
+    const by = (t) => 3 * y1 * t * (1 - t) * (1 - t) + 3 * y2 * t * t * (1 - t) + t * t * t;
+    const dx = (t) => 3 * x1 * (1 - t) * (1 - t) + 6 * (x2 - x1) * t * (1 - t) + 3 * (1 - x2) * t * t;
+    return (x) => {
+      if (x <= 0) return x1 > 0 ? (y1 / x1) * x : 0;
+      if (x >= 1) return x2 < 1 ? 1 + ((y2 - 1) / (x2 - 1)) * (x - 1) : 1;
+      let t = x;
+      for (let i = 0; i < 8; i++) {
+        const e = bx(t) - x;
+        if (Math.abs(e) < 1e-6) break;
+        const d = dx(t);
+        if (Math.abs(d) < 1e-6) break;
+        t -= e / d;
+      }
+      if (t < 0 || t > 1 || Math.abs(bx(t) - x) > 1e-4) {
+        let lo = 0, hi = 1; t = x;
+        for (let i = 0; i < 30; i++) { if (bx(t) < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+      }
+      return by(t);
+    };
+  }
+  const NAMED_EASINGS = {
+    linear: (x) => x, ease: cubicBezier(0.25, 0.1, 0.25, 1), 'ease-in': cubicBezier(0.42, 0, 1, 1),
+    'ease-out': cubicBezier(0, 0, 0.58, 1), 'ease-in-out': cubicBezier(0.42, 0, 0.58, 1),
+  };
+  function steps(n, pos) {
+    const jumps = pos === 'jump-none' ? n - 1 : pos === 'jump-both' ? n + 1 : n;
+    const startJump = pos === 'start' || pos === 'jump-start' || pos === 'jump-both';
+    return (x) => {
+      let step = Math.floor(x * n);
+      if (startJump) step++;
+      if (x >= 0 && step < 0) step = 0;
+      if (x <= 1 && step > jumps) step = jumps;
+      return step / jumps;
+    };
+  }
+  function parseEasing(value) {
+    const s = `${value}`.trim();
+    if (Object.prototype.hasOwnProperty.call(NAMED_EASINGS, s)) return NAMED_EASINGS[s];
+    if (s === 'step-start') return steps(1, 'start');
+    if (s === 'step-end') return steps(1, 'end');
+    let m = /^cubic-bezier\(\s*([^,]+),([^,]+),([^,]+),([^)]+)\)$/.exec(s);
+    if (m) {
+      const v = m.slice(1).map(Number);
+      if (v.every(Number.isFinite) && v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1) return cubicBezier(v[0], v[1], v[2], v[3]);
+    }
+    m = /^steps\(\s*(\d+)\s*(?:,\s*(start|end|jump-start|jump-end|jump-none|jump-both)\s*)?\)$/.exec(s);
+    if (m && +m[1] > 0 && !(m[2] === 'jump-none' && +m[1] < 2)) return steps(+m[1], m[2] || 'end');
+    m = /^linear\((.*)\)$/.exec(s);
+    if (m) {
+      // linear(): points with optional percentages, evenly spaced otherwise.
+      const pts = m[1].split(',').map((p) => p.trim().split(/\s+/));
+      const out = pts.map((p) => [Number(p[0]), p[1] !== undefined ? parseFloat(p[1]) / 100 : null]);
+      if (out.length >= 2 && out.every((p) => Number.isFinite(p[0]))) {
+        if (out[0][1] === null) out[0][1] = 0;
+        if (out[out.length - 1][1] === null) out[out.length - 1][1] = 1;
+        for (let i = 1; i < out.length - 1; i++) {
+          if (out[i][1] !== null) continue;
+          let j = i; while (out[j][1] === null) j++;
+          const a = out[i - 1][1], b = out[j][1];
+          for (let k = i; k < j; k++) out[k][1] = a + ((b - a) * (k - i + 1)) / (j - i + 1);
+        }
+        return (x) => {
+          for (let i = 1; i < out.length; i++) {
+            if (x <= out[i][1] || i === out.length - 1) {
+              const [y0, x0] = out[i - 1], [y1, x1] = out[i];
+              return x1 === x0 ? y1 : y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+            }
+          }
+          return x;
+        };
+      }
+    }
+    throw new TypeError(`'${s}' is not a valid value for easing`);
+  }
+
+  const FILLS = ['none', 'forwards', 'backwards', 'both', 'auto'];
+  const DIRECTIONS = ['normal', 'reverse', 'alternate', 'alternate-reverse'];
+  function makeTiming(options, base) {
+    const t = base ? { ...base } : {
+      delay: 0, endDelay: 0, fill: 'auto', iterationStart: 0, iterations: 1, duration: 'auto',
+      direction: 'normal', easing: 'linear',
+    };
+    if (options === undefined || options === null) return t;
+    if (typeof options !== 'object') {
+      const d = Number(options);
+      if (Number.isNaN(d) || d < 0) throw new TypeError("Failed to execute 'animate' on 'Element': The provided duration is invalid.");
+      t.duration = d;
+      return t;
+    }
+    if (options.delay !== undefined) { t.delay = Number(options.delay); if (!Number.isFinite(t.delay)) throw new TypeError('delay must be finite'); }
+    if (options.endDelay !== undefined) { t.endDelay = Number(options.endDelay); if (!Number.isFinite(t.endDelay)) throw new TypeError('endDelay must be finite'); }
+    if (options.fill !== undefined) { if (!FILLS.includes(`${options.fill}`)) throw new TypeError(`The provided value '${options.fill}' is not a valid enum value of type FillMode.`); t.fill = `${options.fill}`; }
+    if (options.iterationStart !== undefined) { t.iterationStart = Number(options.iterationStart); if (!(t.iterationStart >= 0)) throw new TypeError('iterationStart must be non-negative'); }
+    if (options.iterations !== undefined) { t.iterations = Number(options.iterations); if (Number.isNaN(t.iterations) || t.iterations < 0) throw new TypeError('iterations must be non-negative'); }
+    if (options.duration !== undefined) {
+      if (options.duration === 'auto') t.duration = 'auto';
+      else { const d = Number(options.duration); if (Number.isNaN(d) || d < 0 || typeof options.duration === 'string') throw new TypeError('The provided duration is invalid.'); t.duration = d; }
+    }
+    if (options.direction !== undefined) { if (!DIRECTIONS.includes(`${options.direction}`)) throw new TypeError(`The provided value '${options.direction}' is not a valid enum value of type PlaybackDirection.`); t.direction = `${options.direction}`; }
+    if (options.easing !== undefined) { parseEasing(options.easing); t.easing = `${options.easing}`; }
+    return t;
+  }
+
+  // CSS property name of a keyframe member (camelCase, `cssFloat`, `cssOffset`).
+  function cssProp(k) {
+    if (k === 'cssFloat') return 'float';
+    if (k === 'cssOffset') return 'offset';
+    if (k.startsWith('--')) return k;
+    return k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  }
+  const KEYFRAME_META = new Set(['offset', 'easing', 'composite']);
+  function normalizeKeyframes(keyframes) {
+    if (keyframes === null || keyframes === undefined) return [];
+    let frames = [];
+    if (typeof keyframes[Symbol.iterator] === 'function') {
+      for (const kf of keyframes) {
+        if (kf === null || typeof kf !== 'object') throw new TypeError("Failed to execute 'animate' on 'Element': Keyframes must be objects.");
+        const f = { offset: kf.offset === undefined || kf.offset === null ? null : Number(kf.offset), easing: kf.easing === undefined ? 'linear' : `${kf.easing}`, composite: kf.composite === undefined ? 'auto' : `${kf.composite}`, props: {} };
+        for (const k of Object.keys(kf)) if (!KEYFRAME_META.has(k)) f.props[cssProp(k)] = `${kf[k]}`;
+        frames.push(f);
+      }
+    } else if (typeof keyframes === 'object') {
+      // Property-indexed: { opacity: [0, 1], offset: [...], easing: ... }
+      const lists = {};
+      let count = 0;
+      for (const k of Object.keys(keyframes)) {
+        if (KEYFRAME_META.has(k)) continue;
+        const v = keyframes[k];
+        const list = Array.isArray(v) ? v.map(String) : [`${v}`];
+        lists[cssProp(k)] = list;
+      }
+      const offsets = keyframes.offset === undefined ? [] : [].concat(keyframes.offset);
+      const easings = keyframes.easing === undefined ? [] : [].concat(keyframes.easing);
+      // Each property's values are spaced evenly on their own, then merged by offset.
+      const merged = new Map();
+      for (const [prop, list] of Object.entries(lists)) {
+        count = Math.max(count, list.length);
+        list.forEach((val, i) => {
+          const off = list.length === 1 ? 1 : i / (list.length - 1);
+          const key = String(off);
+          let f = merged.get(key);
+          if (f === undefined) { f = { offset: off, easing: 'linear', composite: 'auto', props: {}, computed: true }; merged.set(key, f); }
+          f.props[prop] = val;
+        });
+      }
+      frames = Array.from(merged.values()).sort((a, b) => a.offset - b.offset);
+      // Evenly spaced lists keep their spacing implicit (`offset: null`, as in browsers).
+      const lengths = new Set(Object.values(lists).map((l) => l.length));
+      if (lengths.size <= 1) frames.forEach((f, i) => { if (!(frames.length === 1 && i === 0)) f.offset = null; });
+      if (frames.length === 1) frames[0].offset = null;
+      frames.forEach((f, i) => {
+        if (offsets[i] !== undefined && offsets[i] !== null) f.offset = Number(offsets[i]);
+        if (easings.length) f.easing = `${easings[i % easings.length]}`;
+      });
+    } else {
+      throw new TypeError("Failed to execute 'animate' on 'Element': parameter 1 is not of type 'object'.");
+    }
+    let prev = -Infinity;
+    for (const f of frames) {
+      if (f.offset !== null) {
+        if (!(f.offset >= 0 && f.offset <= 1)) throw new TypeError('Offsets must be null or in the range [0,1].');
+        if (f.offset < prev) throw new TypeError('Offsets must be monotonically non-decreasing.');
+        prev = f.offset;
+      }
+      parseEasing(f.easing);
+    }
+    return frames;
+  }
+  // Computed offsets: missing ones spaced evenly between their neighbours.
+  function computedOffsets(frames) {
+    const offs = frames.map((f) => f.offset);
+    if (offs.length === 0) return offs;
+    if (offs.length > 1 && offs[0] === null) offs[0] = 0;
+    if (offs[offs.length - 1] === null) offs[offs.length - 1] = 1;
+    for (let i = 1; i < offs.length - 1; i++) {
+      if (offs[i] !== null) continue;
+      let j = i; while (offs[j] === null) j++;
+      const a = offs[i - 1], b = offs[j];
+      for (let k = i; k < j; k++) offs[k] = a + ((b - a) * (k - i + 1)) / (j - i + 1);
+    }
+    return offs;
+  }
+
+  // Interpolation of two computed-ish values: numbers inside matching text, colors,
+  // `none` transforms against function lists; anything else switches halfway.
+  const NUM_RE = /[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi;
+  function splitNums(s) {
+    const nums = [];
+    const text = s.replace(NUM_RE, (m) => { nums.push(Number(m)); return '\u0000'; });
+    return [text, nums];
+  }
+  function parseRgba(s) {
+    try { const c = N.parseColor(s); return c === null || c === undefined ? null : c; } catch (_) { return null; }
+  }
+  function identityTransform(fns) {
+    return fns.replace(/([a-zA-Z0-9]+)\(([^)]*)\)/g, (m, name, args) => {
+      const one = /^scale/i.test(name);
+      if (/^matrix3d$/i.test(name)) return 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)';
+      if (/^matrix$/i.test(name)) return 'matrix(1, 0, 0, 1, 0, 0)';
+      return `${name}(${args.split(',').map((a) => a.trim().replace(NUM_RE, one ? '1' : '0')).join(', ')})`;
+    });
+  }
+  function fmtNum(n) { return String(Math.round(n * 10000) / 10000); }
+  function interpolate(prop, a, b, p) {
+    if (p <= 0) return a;
+    if (p >= 1) return b;
+    if (a === b) return a;
+    if (prop === 'transform' || prop === 'translate' || prop === 'rotate' || prop === 'scale') {
+      if (a === 'none') a = identityTransform(b);
+      else if (b === 'none') b = identityTransform(a);
+    }
+    const [ta, na] = splitNums(a), [tb, nb] = splitNums(b);
+    if (ta === tb && na.length === nb.length && na.length > 0) {
+      let i = 0;
+      return ta.replace(/\u0000/g, () => { const v = fmtNum(na[i] + (nb[i] - na[i]) * p); i++; return v; });
+    }
+    if (/color|fill|stroke|background$/.test(prop) || /^(#|rgb|hsl|hwb|lab|lch|oklab|oklch|color\()/i.test(a)) {
+      const ca = parseRgba(a), cb = parseRgba(b);
+      if (ca && cb) {
+        const mix = (i) => ca[i] + (cb[i] - ca[i]) * p;
+        return `rgba(${Math.round(mix(0))}, ${Math.round(mix(1))}, ${Math.round(mix(2))}, ${fmtNum(mix(3))})`;
+      }
+    }
+    return p < 0.5 ? a : b;
+  }
+
+  const ANIMATIONS = new Set(); // relevant animations, in creation order
+  let animSeq = 0;
+  class AnimationTimeline {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    get currentTime() { return N.now(); }
+    get duration() { return null; }
+  }
+  class DocumentTimeline extends AnimationTimeline {
+    #origin;
+    constructor(options) {
+      super(INTERNAL);
+      this.#origin = options && options.originTime !== undefined ? Number(options.originTime) : 0;
+    }
+    get currentTime() { return N.now() - this.#origin; }
+  }
+  const documentTimeline = new DocumentTimeline();
+  L.documentTimeline = documentTimeline;
+
+  class AnimationEffect {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    getTiming() {
+      const t = effectState(this).timing;
+      return { delay: t.delay, direction: t.direction, duration: t.duration, easing: t.easing, endDelay: t.endDelay, fill: t.fill, iterationStart: t.iterationStart, iterations: t.iterations };
+    }
+    getComputedTiming() {
+      const s = effectState(this);
+      const a = s.animation;
+      const lt = a === null ? null : animCurrentTime(a);
+      return computeTiming(s.timing, lt, a === null ? 1 : ANIM.get(a).rate);
+    }
+    updateTiming(timing) { const s = effectState(this); s.timing = makeTiming(timing, s.timing); scheduleAnimations(); }
+  }
+  const EFFECT = new WeakMap(); // KeyframeEffect -> state
+  function effectState(e) { const s = EFFECT.get(e); if (s === undefined) throw L.illegal(); return s; }
+  function activeDuration(t) {
+    const d = t.duration === 'auto' ? 0 : t.duration;
+    return d * t.iterations;
+  }
+  function endTime(t) { return Math.max(t.delay + activeDuration(t) + t.endDelay, 0); }
+  // Computed timing at local time `lt` (null: idle).
+  function computeTiming(t, lt, rate) {
+    const d = t.duration === 'auto' ? 0 : t.duration;
+    const ad = activeDuration(t);
+    const end = endTime(t);
+    const out = {
+      delay: t.delay, endDelay: t.endDelay, fill: t.fill === 'auto' ? 'none' : t.fill, iterationStart: t.iterationStart,
+      iterations: t.iterations, duration: d, direction: t.direction, easing: t.easing,
+      endTime: end, activeDuration: ad, localTime: lt, progress: null, currentIteration: null,
+    };
+    if (lt === null) return out;
+    const fill = out.fill;
+    const before = lt < Math.max(Math.min(t.delay, end), 0) || (rate < 0 && lt === Math.max(Math.min(t.delay, end), 0));
+    const after = lt > Math.max(Math.min(t.delay + ad, end), 0) || (rate >= 0 && lt === Math.max(Math.min(t.delay + ad, end), 0));
+    let activeTime;
+    if (before) {
+      if (fill !== 'backwards' && fill !== 'both') return out;
+      activeTime = Math.max(lt - t.delay, 0);
+    } else if (after) {
+      if (fill !== 'forwards' && fill !== 'both') return out;
+      activeTime = Math.max(Math.min(lt - t.delay, ad), 0);
+    } else {
+      activeTime = lt - t.delay;
+    }
+    let overall = d === 0 ? (after ? t.iterations + t.iterationStart : t.iterationStart) : activeTime / d + t.iterationStart;
+    let simple = Number.isFinite(overall) ? overall % 1 : t.iterationStart % 1;
+    if (simple === 0 && (after || (d === 0 && !before)) && t.iterations !== 0 && overall !== 0 && (activeTime === ad || d === 0)) simple = 1;
+    let iteration = (after || d === 0) && simple === 1 ? Math.floor(overall) - 1 : Math.floor(overall);
+    if (!Number.isFinite(iteration)) iteration = Infinity;
+    let forward = true;
+    if (t.direction === 'reverse') forward = false;
+    else if (t.direction === 'alternate') forward = iteration % 2 === 0;
+    else if (t.direction === 'alternate-reverse') forward = iteration % 2 !== 0;
+    let dir = forward ? simple : 1 - simple;
+    out.progress = parseEasing(t.easing)(dir);
+    out.currentIteration = iteration;
+    return out;
+  }
+  class KeyframeEffect extends AnimationEffect {
+    constructor(target, keyframes, options) {
+      super(INTERNAL);
+      if (target instanceof KeyframeEffect) {
+        const src = effectState(target);
+        EFFECT.set(this, { target: src.target, pseudo: src.pseudo, frames: src.frames.map((f) => ({ ...f, props: { ...f.props } })), timing: { ...src.timing }, composite: src.composite, animation: null });
+        return;
+      }
+      if (target !== null && !(target instanceof L.Element)) throw new TypeError("Failed to construct 'KeyframeEffect': parameter 1 is not of type 'Element'.");
+      const timing = makeTiming(options);
+      EFFECT.set(this, {
+        target, pseudo: options && typeof options === 'object' && options.pseudoElement ? `${options.pseudoElement}` : null,
+        frames: normalizeKeyframes(keyframes), timing,
+        composite: options && typeof options === 'object' && options.composite ? `${options.composite}` : 'replace',
+        animation: null,
+      });
+    }
+    get target() { return effectState(this).target; }
+    set target(v) { effectState(this).target = v instanceof L.Element ? v : null; scheduleAnimations(); }
+    get pseudoElement() { return effectState(this).pseudo; }
+    set pseudoElement(v) { effectState(this).pseudo = v === null ? null : `${v}`; }
+    get composite() { return effectState(this).composite; }
+    set composite(v) { if (['replace', 'add', 'accumulate'].includes(`${v}`)) effectState(this).composite = `${v}`; }
+    get iterationComposite() { return 'replace'; }
+    getKeyframes() {
+      const s = effectState(this);
+      const offs = computedOffsets(s.frames);
+      return s.frames.map((f, i) => {
+        const o = { offset: f.offset, easing: f.easing, composite: f.composite };
+        for (const [k, v] of Object.entries(f.props)) o[k.startsWith('--') ? k : k.replace(/-([a-z])/g, (m, c) => c.toUpperCase()).replace(/^float$/, 'cssFloat')] = v;
+        o.computedOffset = offs[i];
+        return o;
+      });
+    }
+    setKeyframes(keyframes) { effectState(this).frames = normalizeKeyframes(keyframes); scheduleAnimations(); }
+  }
+
+  const ANIM = new WeakMap(); // Animation -> state
+  function animState(a) { const s = ANIM.get(a); if (s === undefined) throw L.illegal(); return s; }
+  function animCurrentTime(a) {
+    const s = ANIM.get(a);
+    if (s.hold !== null) return s.hold;
+    if (s.start === null || s.timeline === null) return null;
+    return (s.timeline.currentTime - s.start) * s.rate;
+  }
+  function effectEnd(s) { return s.effect === null ? 0 : endTime(effectState(s.effect).timing); }
+  function newFinished(s, a) {
+    s.finished = L.newPromise((res, rej) => { s.resolveFinished = res; s.rejectFinished = rej; });
+    L.promiseThen.call(s.finished, null, () => {});
+    s.finishedResolved = false;
+  }
+  function playStateOf(a) {
+    const s = ANIM.get(a);
+    const ct = animCurrentTime(a);
+    if (ct === null && s.start === null && !s.pendingPlay) return 'idle';
+    if (s.paused) return 'paused';
+    if (ct !== null && ((s.rate > 0 && ct >= effectEnd(s)) || (s.rate < 0 && ct <= 0))) return 'finished';
+    return 'running';
+  }
+  function fireAnimEvent(a, type, ct) {
+    L.fire(a, type, { currentTime: ct, timelineTime: documentTimeline.currentTime }, L.AnimationPlaybackEvent);
+  }
+  // Update the finished state after a time change (possibly firing `finish`).
+  function updateFinished(a, sync) {
+    const s = ANIM.get(a);
+    const end = effectEnd(s);
+    const ct = animCurrentTime(a);
+    if (ct !== null && s.start !== null && !s.pendingPlay) {
+      if (s.rate > 0 && ct >= end) { s.hold = end; s.start = null; }
+      else if (s.rate < 0 && ct <= 0) { s.hold = 0; s.start = null; }
+    }
+    const done = playStateOf(a) === 'finished' && !s.pendingPlay && !s.paused;
+    if (done && !s.finishedResolved) {
+      s.finishedResolved = true;
+      const finish = () => {
+        if (playStateOf(a) !== 'finished') return;
+        s.resolveFinished(a);
+        // The `finished` promise's reactions run before the event.
+        const ct = animCurrentTime(a);
+        L.microtask(() => fireAnimEvent(a, 'finish', ct));
+      };
+      if (sync) finish(); else L.microtask(finish);
+    } else if (!done && s.finishedResolved) {
+      newFinished(s, a);
+    }
+  }
+  class Animation extends EventTarget {
+    constructor(effect, timeline) {
+      super();
+      if (effect !== undefined && effect !== null && !(effect instanceof KeyframeEffect)) throw new TypeError("Failed to construct 'Animation': parameter 1 is not of type 'AnimationEffect'.");
+      const s = {
+        effect: effect === undefined ? null : effect, timeline: timeline === undefined ? documentTimeline : timeline,
+        start: null, hold: null, rate: 1, paused: false, pendingPlay: false, id: '', seq: ++animSeq,
+        finished: null, resolveFinished: null, rejectFinished: null, finishedResolved: false,
+        ready: L.resolvedPromise(), replaceState: 'active',
+      };
+      ANIM.set(this, s);
+      newFinished(s, this);
+      if (s.effect) {
+        const es = effectState(s.effect);
+        if (es.animation && es.animation !== this) ANIM.get(es.animation).effect = null;
+        es.animation = this;
+      }
+    }
+    get id() { return animState(this).id; }
+    set id(v) { animState(this).id = `${v}`; }
+    get effect() { return animState(this).effect; }
+    set effect(v) { const s = animState(this); s.effect = v instanceof KeyframeEffect ? v : null; if (s.effect) effectState(s.effect).animation = this; scheduleAnimations(); }
+    get timeline() { return animState(this).timeline; }
+    set timeline(v) { animState(this).timeline = v; }
+    get startTime() { return animState(this).start; }
+    set startTime(v) {
+      const s = animState(this);
+      if (v === null) { s.hold = animCurrentTime(this); s.start = null; }
+      else { s.start = Number(v); s.hold = null; s.pendingPlay = false; s.paused = false; ANIMATIONS.add(this); }
+      updateFinished(this, true); applyAnimations(); scheduleAnimations();
+    }
+    get currentTime() { return animCurrentTime(this); }
+    set currentTime(v) {
+      const s = animState(this);
+      if (v === null) { if (animCurrentTime(this) !== null) throw new TypeError('currentTime cannot be set to null'); return; }
+      const t = Number(v);
+      if (s.hold !== null || s.start === null || s.paused || s.pendingPlay) s.hold = t;
+      else s.start = s.timeline.currentTime - t / s.rate;
+      ANIMATIONS.add(this);
+      updateFinished(this, true); applyAnimations(); scheduleAnimations();
+    }
+    get playbackRate() { return animState(this).rate; }
+    set playbackRate(v) {
+      const s = animState(this);
+      const ct = animCurrentTime(this);
+      s.rate = Number(v);
+      if (ct !== null) this.currentTime = ct;
+    }
+    get playState() { return playStateOf(this); }
+    get pending() { return animState(this).pendingPlay; }
+    get replaceState() { return animState(this).replaceState; }
+    get ready() { return animState(this).ready; }
+    get finished() { return animState(this).finished; }
+    play() {
+      const s = animState(this);
+      const end = effectEnd(s);
+      let ct = animCurrentTime(this);
+      if (s.rate > 0 && (ct === null || ct < 0 || ct >= end)) s.hold = 0;
+      else if (s.rate < 0 && (ct === null || ct <= 0 || ct > end)) {
+        if (end === Infinity) throw new DOMException('Cannot play reversed Animation with infinite target effect end.', 'InvalidStateError');
+        s.hold = end;
+      } else if (s.rate === 0 && ct === null) s.hold = 0;
+      else if (s.start !== null && !s.paused) { s.hold = ct; }
+      s.start = null;
+      s.paused = false;
+      s.pendingPlay = true;
+      if (s.finishedResolved) newFinished(s, this);
+      ANIMATIONS.add(this);
+      let resolveReady;
+      s.ready = L.newPromise((res) => { resolveReady = res; });
+      s.resolveReady = resolveReady;
+      applyAnimations();
+      scheduleAnimations();
+    }
+    pause() {
+      const s = animState(this);
+      if (s.paused) return;
+      let ct = animCurrentTime(this);
+      if (ct === null) ct = s.rate >= 0 ? 0 : effectEnd(s);
+      s.hold = ct;
+      s.start = null;
+      s.paused = true;
+      s.pendingPlay = false;
+      ANIMATIONS.add(this);
+      const ready = s.resolveReady;
+      if (ready) { s.resolveReady = null; L.microtask(() => ready(this)); }
+      else s.ready = L.resolvedPromise(this);
+      applyAnimations();
+      scheduleAnimations();
+    }
+    finish() {
+      const s = animState(this);
+      const end = effectEnd(s);
+      if (s.rate === 0 || (s.rate > 0 && end === Infinity)) throw new DOMException("Failed to execute 'finish' on 'Animation': Cannot finish Animation with a playbackRate of 0 or an infinite target effect end.", 'InvalidStateError');
+      const limit = s.rate > 0 ? end : 0;
+      s.paused = false;
+      if (s.pendingPlay || s.start === null) { s.pendingPlay = false; if (s.resolveReady) { const r = s.resolveReady; s.resolveReady = null; r(this); } }
+      s.hold = null;
+      s.start = s.timeline.currentTime - limit / s.rate;
+      ANIMATIONS.add(this);
+      updateFinished(this, true);
+      applyAnimations();
+    }
+    cancel() {
+      const s = animState(this);
+      if (playStateOf(this) !== 'idle') {
+        if (s.resolveReady) { s.resolveReady = null; s.ready = L.rejectedPromise(new DOMException('The user aborted a request.', 'AbortError')); L.promiseThen.call(s.ready, null, () => {}); }
+        if (!s.finishedResolved) s.rejectFinished(new DOMException('The user aborted a request.', 'AbortError'));
+        newFinished(s, this);
+        s.start = null; s.hold = null; s.paused = false; s.pendingPlay = false;
+        L.microtask(() => fireAnimEvent(this, 'cancel', null));
+      }
+      ANIMATIONS.delete(this);
+      applyAnimations();
+    }
+    reverse() {
+      const s = animState(this);
+      s.rate = -s.rate;
+      this.play();
+    }
+    updatePlaybackRate(rate) { this.playbackRate = rate; }
+    persist() { animState(this).replaceState = 'persisted'; }
+    commitStyles() {
+      const s = animState(this);
+      if (!s.effect) return;
+      const target = effectState(s.effect).target;
+      if (!target) return;
+      for (const [prop, v] of currentValues(target)) target.style.setProperty(prop, v);
+    }
+  }
+  L.defineEventHandlers(Animation.prototype, ['onfinish', 'oncancel', 'onremove']);
+
+  // Values each property of `target` has from its relevant animations (later ones win).
+  function currentValues(target) {
+    const out = new Map();
+    for (const a of ANIMATIONS) {
+      const s = ANIM.get(a);
+      if (!s.effect) continue;
+      const es = effectState(s.effect);
+      if (es.target !== target || es.pseudo) continue;
+      const timing = computeTiming(es.timing, animCurrentTime(a), s.rate);
+      if (timing.progress === null) continue;
+      const frames = es.frames;
+      if (frames.length === 0) continue;
+      const offs = computedOffsets(frames);
+      const props = new Set();
+      for (const f of frames) for (const k of Object.keys(f.props)) props.add(k);
+      for (const prop of props) {
+        const pf = [];
+        frames.forEach((f, i) => { if (f.props[prop] !== undefined) pf.push([offs[i], f.props[prop], f.easing]); });
+        const base = () => baseValue(target, prop);
+        if (pf[0][0] !== 0) pf.unshift([0, base(), 'linear']);
+        if (pf[pf.length - 1][0] !== 1) pf.push([1, base(), 'linear']);
+        const p = timing.progress;
+        let i = 0;
+        if (p >= 1) i = pf.length - 2;
+        else if (p > 0) { while (i < pf.length - 2 && pf[i + 1][0] <= p) i++; }
+        const [o1, v1, e1] = pf[i], [o2, v2] = pf[i + 1];
+        const local = o2 === o1 ? 0 : (p - o1) / (o2 - o1);
+        const eased = parseEasing(e1)(local);
+        out.set(prop, interpolate(prop, v1, v2, eased));
+      }
+    }
+    return out;
+  }
+  // The value a property has without script animations (its computed value).
+  function baseValue(target, prop) {
+    const id = idOf(target);
+    const rec = animatedStyles.get(target);
+    if (rec === undefined) {
+      try { return N.computedStyle(id, prop, ''); } catch (_) { return ''; }
+    }
+    N.setAnimationStyle(id, '');
+    let v = '';
+    try { v = N.computedStyle(id, prop, ''); } catch (_) { v = ''; }
+    N.setAnimationStyle(id, rec.pairs);
+    return v;
+  }
+  const animatedStyles = new Map(); // Element -> { pairs } (its current animation values)
+  function applyAnimations() {
+    const targets = new Set();
+    for (const a of ANIMATIONS) {
+      const s = ANIM.get(a);
+      if (s.effect && effectState(s.effect).target) targets.add(effectState(s.effect).target);
+    }
+    for (const t of animatedStyles.keys()) targets.add(t);
+    let changed = false;
+    for (const target of targets) {
+      let values;
+      try { values = currentValues(target); } catch (e) { values = new Map(); L.reportException(e); }
+      const parts = [];
+      for (const [prop, v] of values) parts.push(prop, v);
+      const pairs = parts.join('\u0000');
+      const rec = animatedStyles.get(target);
+      if ((rec === undefined && pairs === '') || (rec !== undefined && rec.pairs === pairs)) continue;
+      try { N.setAnimationStyle(idOf(target), pairs); } catch (_) { }
+      changed = true;
+      if (pairs === '') animatedStyles.delete(target);
+      else animatedStyles.set(target, { pairs });
+    }
+    if (changed && L.observersDirty !== null && L.observersDirty !== undefined) L.observersDirty();
+  }
+  let animFrameScheduled = false;
+  function scheduleAnimations() {
+    if (animFrameScheduled) return;
+    animFrameScheduled = true;
+    L.requestFrame();
+  }
+  // Called at the start of each animation frame (before requestAnimationFrame callbacks).
+  L.tickAnimations = function () {
+    if (!animFrameScheduled && ANIMATIONS.size === 0 && animatedStyles.size === 0) return;
+    animFrameScheduled = false;
+    const now = documentTimeline.currentTime;
+    for (const a of Array.from(ANIMATIONS)) {
+      const s = ANIM.get(a);
+      if (s.pendingPlay) {
+        s.pendingPlay = false;
+        const hold = s.hold === null ? 0 : s.hold;
+        s.start = s.rate === 0 ? now : now - hold / s.rate;
+        s.hold = null;
+        if (s.resolveReady) { const r = s.resolveReady; s.resolveReady = null; r(a); }
+      }
+      updateFinished(a, false);
+    }
+    applyAnimations();
+    // Keep ticking while something runs; drop finished animations that fill nothing.
+    let running = false;
+    for (const a of Array.from(ANIMATIONS)) {
+      const st = playStateOf(a);
+      const s = ANIM.get(a);
+      if (st === 'running') running = true;
+      if (st === 'idle' || (st === 'finished' && s.effect && computeTiming(effectState(s.effect).timing, animCurrentTime(a), s.rate).progress === null)) {
+        if (st === 'idle' || s.finishedResolved) ANIMATIONS.delete(a);
+      }
+      if (!s.effect && st !== 'running') ANIMATIONS.delete(a);
+    }
+    if (running) scheduleAnimations();
+  };
+  function relevantAnimations(filter) {
+    const out = [];
+    for (const a of ANIMATIONS) {
+      const s = ANIM.get(a);
+      if (!s.effect) continue;
+      const st = playStateOf(a);
+      const es = effectState(s.effect);
+      const timing = computeTiming(es.timing, animCurrentTime(a), s.rate);
+      const current = st === 'running' || st === 'paused' || s.pendingPlay;
+      if (!current && timing.progress === null) continue;
+      if (st === 'idle') continue;
+      if (filter(es.target)) out.push(a);
+    }
+    return out;
+  }
+  L.elementAnimations = function (el, options) {
+    const subtree = !!(options && options.subtree);
+    const id = idOf(el);
+    return relevantAnimations((t) => t !== null && (t === el || (subtree && N.contains(id, idOf(t)))));
+  };
+  L.documentAnimations = function (doc) {
+    return relevantAnimations((t) => t !== null && N.isConnected(idOf(t)));
+  };
+  L.elementAnimate = function (el, keyframes, options) {
+    const effect = new KeyframeEffect(el, keyframes, options);
+    const a = new Animation(effect, documentTimeline);
+    if (options && typeof options === 'object' && options.id !== undefined) a.id = options.id;
+    a.play();
+    return a;
+  };
+  L.expose('AnimationTimeline', AnimationTimeline);
+  L.expose('DocumentTimeline', DocumentTimeline);
+  L.expose('AnimationEffect', AnimationEffect);
+  L.expose('KeyframeEffect', KeyframeEffect);
+  L.expose('Animation', Animation);
+
+  // =======================================================================================
   // Exports
   // =======================================================================================
   L.windowFunctions = {
@@ -3838,10 +5524,11 @@
   };
   L.CSS = CSS;
   const exp = {
-    Crypto, SubtleCrypto, Performance, PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
+    Crypto, SubtleCrypto, CryptoKey, Performance, PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
     PerformanceNavigationTiming, PerformanceTiming, PerformanceNavigation, PerformanceObserver, PerformanceObserverEntryList,
     Navigator, MimeType, MimeTypeArray, Plugin, PluginArray, Permissions, PermissionStatus, Clipboard, ClipboardItem,
-    NavigatorUAData, NetworkInformation, StorageManager, Geolocation, GeolocationPositionError, LockManager, Lock,
+    NavigatorUAData, NetworkInformation, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
+    UserActivation, Scheduling,
     Screen, ScreenOrientation, VisualViewport, Location, History, DOMStringList, Storage, MediaQueryList,
     IntersectionObserver, IntersectionObserverEntry, ResizeObserver, ResizeObserverEntry, ResizeObserverSize,
     FontFace, FontFaceSet, DataTransfer, DataTransferItem, DataTransferItemList,

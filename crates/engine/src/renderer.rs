@@ -10,9 +10,9 @@
 //! ```
 
 use crate::decode::{self, DocKind};
-use crate::host::{CountingNetProvider, NavProvider, RendererHost, Shared, Shell};
+use crate::host::{CountingNetProvider, FrameMessage, NavProvider, RendererHost, Shared, Shell};
 use crate::input::to_ui_event;
-use blitz_dom::{BaseDocument, DocumentConfig, EventDriver, FontContext, NoopEventHandler};
+use blitz_dom::{BaseDocument, DocumentConfig, EventDriver, FontContext, NodeId, NoopEventHandler};
 use blitz_html::HtmlDocument;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use common::display_list::{DisplayListRecorder, SentResources};
@@ -38,8 +38,13 @@ pub enum LoopMsg {
     Browser(Option<ToRenderer>),
     /// Main document response for navigation `generation`.
     Document { generation: u64, resp: NetResponse },
-    /// Response to a script-initiated fetch.
-    ScriptFetch { generation: u64, resp: NetResponse },
+    /// Response to a script-initiated fetch (`frame`: of an iframe's document, see
+    /// `RendererHost::frame`).
+    ScriptFetch { generation: u64, frame: Option<Vec<u64>>, resp: NetResponse },
+    /// Upload/download progress of a script-initiated fetch.
+    ScriptFetchProgress { generation: u64, frame: Option<Vec<u64>>, id: u64, loaded: u64, total: u64, upload: bool },
+    /// Event of a page's WebSocket (`id` is the script's socket id).
+    ScriptWs { generation: u64, frame: Option<Vec<u64>>, id: u64, event: common::protocol::WsEvent },
     /// Something happened on another thread (subresource loaded, redraw requested).
     Wake,
 }
@@ -52,10 +57,118 @@ const LOADING_FRAME_INTERVAL: Duration = Duration::from_millis(100);
 /// Don't paint an unstyled page while render-blocking stylesheets load (like browsers),
 /// but give up waiting after this long.
 const RENDER_BLOCK_TIMEOUT: Duration = Duration::from_secs(4);
+/// At most this many iframes of a page get a script realm on the renderer's initiative
+/// (a same-origin script reaching into a frame creates its realm regardless).
+const MAX_FRAME_RUNTIMES: usize = 12;
+/// An iframe's `load` event waits for its document's scripts to load, at most this long.
+const FRAME_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// An iframe document with a script realm (in the page's runtime).
+struct FrameCtx {
+    host: Rc<RendererHost>,
+    /// `Document::id` of the sub-document it runs (a new one replaces the runtime).
+    doc_id: usize,
+    origin: String,
+    created: Instant,
+    last_ready_check: Instant,
+    /// The document fired `load` (the `<iframe>`'s `load` then fires in the page).
+    loaded: bool,
+}
+
+/// The document of the frame at `path`: the `<iframe>` node ids (`NodeId::as_u64`) from
+/// `doc` down, each in its parent's document.
+fn subdoc_mut<'a>(doc: &'a mut BaseDocument, path: &[u64]) -> Option<&'a mut BaseDocument> {
+    let mut cur = doc;
+    for &id in path {
+        match cur.get_node_mut(NodeId::from_u64(id))?.subdoc_mut()?.inner_mut() {
+            blitz_dom::DocGuardMut::Ref(d) => cur = d,
+            _ => return None,
+        }
+    }
+    Some(cur)
+}
+
+/// Like [`subdoc_mut`], shared.
+fn subdoc_ref<'a>(doc: &'a BaseDocument, path: &[u64]) -> Option<&'a BaseDocument> {
+    let mut cur = doc;
+    for &id in path {
+        match cur.get_node(NodeId::from_u64(id))?.subdoc()?.inner() {
+            blitz_dom::DocGuard::Ref(d) => cur = d,
+            _ => return None,
+        }
+    }
+    Some(cur)
+}
+
+/// The frame paths of all documents nested in `doc` (parents before their children).
+fn subdoc_paths(doc: &BaseDocument) -> Vec<Vec<u64>> {
+    fn walk(doc: &BaseDocument, prefix: &mut Vec<u64>, out: &mut Vec<Vec<u64>>, depth: usize) {
+        if depth > 10 {
+            return;
+        }
+        let mut nodes = doc.sub_document_node_ids();
+        nodes.sort_by_key(|n| n.as_u64());
+        for node in nodes {
+            prefix.push(node.as_u64());
+            out.push(prefix.clone());
+            if let Some(blitz_dom::DocGuard::Ref(sub)) =
+                doc.get_node(node).and_then(|n| n.subdoc()).map(|d| d.inner())
+            {
+                walk(sub, prefix, out, depth + 1);
+            }
+            prefix.pop();
+        }
+    }
+    let mut out = Vec::new();
+    walk(doc, &mut Vec::new(), &mut out, 0);
+    out
+}
+
+pub(crate) fn origin_of(url: &str) -> String {
+    url::Url::parse(url)
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_else(|_| "null".into())
+}
+
+/// The `<iframe>`/`<frame>` elements of `doc` in tree order, as `(node id, name)`.
+fn list_iframes(doc: &BaseDocument) -> Vec<(u64, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![doc.root_node().id];
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.get_node(id) else { continue };
+        if let Some(el) = node.element_data() {
+            let tag = el.name.local.as_ref();
+            if tag == "iframe" || tag == "frame" {
+                let name = el.attr(blitz_dom::local_name!("name")).unwrap_or("");
+                out.push((id.as_u64(), name.to_string()));
+                continue;
+            }
+        }
+        stack.extend(node.children.iter().rev().copied());
+    }
+    out
+}
 
 struct Page {
     doc: BaseDocument,
+    /// The page's script runtime: one isolate with a realm per document (the page's and
+    /// its iframes').
     rt: Option<ScriptRuntime>,
+    /// Iframe documents with a realm, by frame path (the `<iframe>` node ids from the
+    /// page down).
+    frames: HashMap<Vec<u64>, FrameCtx>,
+    /// Sub-documents (frame path, `Document::id`) found to run no script.
+    scriptless_frames: std::collections::HashSet<(Vec<u64>, usize)>,
+    /// `<iframe>`s (by frame path) whose `load` event waits for their document's `load`.
+    deferred_iframe_loads: Vec<Vec<u64>>,
+    /// `postMessage`s between the page's frames, not yet delivered.
+    messages: Rc<RefCell<Vec<FrameMessage>>>,
+    /// When `host.frame_lists` was last refreshed.
+    frames_listed_at: Option<Instant>,
+    /// The iframe (with a runtime) that has the focus: keyboard input goes to it.
+    focused_frame: Option<Vec<u64>>,
+    /// The iframe a mouse button went down in: pointer events go to it until release.
+    pointer_frame: Option<Vec<u64>>,
     host: Rc<RendererHost>,
     url: String,
     generation: u64,
@@ -71,6 +184,10 @@ struct Page {
     script_ms: f64,
     metrics_sent: bool,
     first_frame_costs: Option<(f64, f64)>,
+    /// The last frame sent (its geometry and commands): an identical repaint (an animation
+    /// that is off screen or clipped away, a timer that restyles nothing visible) is not
+    /// sent, so the browser process doesn't re-rasterize an unchanged page.
+    last_sent: Option<(FrameGeometry, Vec<common::display_list::Cmd>)>,
     /// `<!DOCTYPE>` of the document (for a JS runtime created later, see `ensure_runtime`).
     doctype: Option<(String, String, String)>,
 }
@@ -117,6 +234,7 @@ impl Renderer {
             browser,
             redraw: AtomicBool::new(false),
             pending_resources: AtomicUsize::new(0),
+            resource_generation: std::sync::atomic::AtomicU64::new(0),
             cursor: std::sync::Mutex::new(None),
         });
         Self {
@@ -219,8 +337,20 @@ impl Renderer {
             if let Some(t) = page.rt.as_ref().and_then(|rt| rt.next_timer_deadline()) {
                 min(t);
             }
+            for f in page.frames.values() {
+                if !f.loaded {
+                    min(Instant::now() + Duration::from_millis(50));
+                }
+            }
+            if !page.messages.borrow().is_empty() {
+                min(Instant::now());
+            }
             if !page.load_sent {
                 min(Instant::now() + Duration::from_millis(50));
+            }
+            // Animation events of the last frame are dispatched right away.
+            if page.doc.has_animation_events() {
+                min(Instant::now());
             }
         }
         if self.needs_frame() {
@@ -256,12 +386,63 @@ impl Renderer {
                     self.commit_navigation(resp);
                 }
             }
-            LoopMsg::ScriptFetch { generation, resp } => {
+            LoopMsg::ScriptFetch { generation, frame: Some(frame), resp } => {
+                if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
+                    && let Some(f) = page.frames.get_mut(&frame)
+                {
+                    f.host.inflight.borrow_mut().remove(&resp.id);
+                    if let Some(rt) = page.rt.as_mut() {
+                        rt.deliver_fetch_in(&mut page.doc, &frame, resp);
+                    }
+                }
+            }
+            LoopMsg::ScriptFetch { generation, frame: None, resp } => {
                 if let Some(page) = &mut self.page {
                     if page.generation == generation {
                         page.host.inflight.borrow_mut().remove(&resp.id);
                         if let Some(rt) = page.rt.as_mut() {
                             rt.deliver_fetch(&mut page.doc, resp);
+                        }
+                    }
+                }
+            }
+            LoopMsg::ScriptFetchProgress { generation, frame: Some(frame), id, loaded, total, upload } => {
+                if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
+                    && page.frames.contains_key(&frame)
+                    && let Some(rt) = page.rt.as_mut()
+                {
+                    rt.deliver_fetch_progress_in(&mut page.doc, &frame, id, loaded, total, upload);
+                }
+            }
+            LoopMsg::ScriptFetchProgress { generation, frame: None, id, loaded, total, upload } => {
+                if let Some(page) = &mut self.page {
+                    if page.generation == generation {
+                        if let Some(rt) = page.rt.as_mut() {
+                            rt.deliver_fetch_progress(&mut page.doc, id, loaded, total, upload);
+                        }
+                    }
+                }
+            }
+            LoopMsg::ScriptWs { generation, frame: Some(frame), id, event } => {
+                if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
+                    && let Some(f) = page.frames.get_mut(&frame)
+                {
+                    if matches!(event, common::protocol::WsEvent::Closed { .. }) {
+                        f.host.sockets.borrow_mut().remove(&id);
+                    }
+                    if let Some(rt) = page.rt.as_mut() {
+                        rt.deliver_ws_in(&mut page.doc, &frame, id, event);
+                    }
+                }
+            }
+            LoopMsg::ScriptWs { generation, frame: None, id, event } => {
+                if let Some(page) = &mut self.page {
+                    if page.generation == generation {
+                        if matches!(event, common::protocol::WsEvent::Closed { .. }) {
+                            page.host.sockets.borrow_mut().remove(&id);
+                        }
+                        if let Some(rt) = page.rt.as_mut() {
+                            rt.deliver_ws(&mut page.doc, id, event);
                         }
                     }
                 }
@@ -331,6 +512,31 @@ impl Renderer {
                 }
             }
             ToRenderer::Eval { id, source } => {
+                // `click-text:<regex>`: click the first button/link whose text matches, in
+                // the page or in any iframe that runs script (headless `--click-text`).
+                if let Some(pattern) = source.strip_prefix("click-text:") {
+                    let value = self.click_text(pattern);
+                    self.send(FromRenderer::EvalResult { id, ok: true, value });
+                    return true;
+                }
+                // Debugging aid: `frames:<js>` evaluates in every iframe runtime.
+                if std::env::var_os("SHARKO_DEBUG_FRAMES").is_some()
+                    && let Some(js) = source.strip_prefix("frames:")
+                    && let Some(page) = &mut self.page
+                {
+                    let mut out = Vec::new();
+                    if let Some(rt) = page.rt.as_mut() {
+                        let mut keys: Vec<Vec<u64>> = page.frames.keys().cloned().collect();
+                        keys.sort();
+                        for key in keys {
+                            let url = subdoc_ref(&page.doc, &key).map(|d| d.url().to_string()).unwrap_or_default();
+                            let v = rt.eval_in(&mut page.doc, &key, js).unwrap_or_else(|e| format!("error: {e}"));
+                            out.push(format!("{key:?} {url}: {v}"));
+                        }
+                    }
+                    self.send(FromRenderer::EvalResult { id, ok: true, value: out.join("\n") });
+                    return true;
+                }
                 self.ensure_runtime();
                 let (ok, value) = match &mut self.page {
                     Some(Page {
@@ -377,6 +583,72 @@ impl Renderer {
         true
     }
 
+    /// Find the first visible button or link whose text matches `pattern` (a
+    /// case-insensitive regex) in the page or its script-running iframes, and click its
+    /// center. Returns a description of what was clicked, or `no match`.
+    fn click_text(&mut self, pattern: &str) -> String {
+        let escaped = pattern.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', " ");
+        let js = format!(
+            "(() => {{ const re = new RegExp('{escaped}', 'i'); \
+             const els = [...document.querySelectorAll('button, a, [role=button], input[type=submit], input[type=button], summary')]; \
+             const text = (e) => ((e.innerText || e.value || e.getAttribute('aria-label') || e.title || '').trim()); \
+             const visible = (e) => {{ const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; }}; \
+             let cands = els.filter((e) => visible(e) && re.test(text(e))); \
+             if (!cands.length) return 'null'; \
+             const inView = (e) => {{ const r = e.getBoundingClientRect(); return r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth; }}; \
+             let el = cands.find(inView) || cands[0]; \
+             if (!inView(el)) el.scrollIntoView({{ block: 'center' }}); \
+             const r = el.getBoundingClientRect(); \
+             return Math.round(r.x + r.width / 2) + ',' + Math.round(r.y + r.height / 2) + '|' + text(el).slice(0, 60).replace(/\\s+/g, ' '); }})()"
+        );
+        let parse = |v: String| -> Option<(f32, f32, String)> {
+            let v = v.trim().trim_matches('"').to_string();
+            if v == "null" || v.is_empty() {
+                return None;
+            }
+            let (coords, label) = v.split_once('|')?;
+            let (x, y) = coords.split_once(',')?;
+            Some((x.parse().ok()?, y.parse().ok()?, label.to_string()))
+        };
+        self.ensure_runtime();
+        let Some(page) = &mut self.page else { return "no page".into() };
+        let mut hit: Option<(f32, f32, String, Vec<u64>)> = None;
+        if let Some(rt) = page.rt.as_mut() {
+            if let Some((x, y, label)) = rt.eval(&mut page.doc, &js).ok().and_then(&parse) {
+                hit = Some((x, y, label, Vec::new()));
+            }
+        }
+        if hit.is_none()
+            && let Some(rt) = page.rt.as_mut()
+        {
+            let mut keys: Vec<Vec<u64>> = page.frames.keys().cloned().collect();
+            keys.sort();
+            for key in keys {
+                if let Some((x, y, label)) = rt.eval_in(&mut page.doc, &key, &js).ok().and_then(&parse) {
+                    hit = Some((x, y, label, key));
+                    break;
+                }
+            }
+        }
+        let Some((mut x, mut y, label, path)) = hit else { return "no match".into() };
+        if !path.is_empty() {
+            let Some(page) = &self.page else { return "no page".into() };
+            match frame_origin(page, &path) {
+                Some((ox, oy)) => {
+                    x += ox;
+                    y += oy;
+                }
+                None => return "frame not laid out".into(),
+            }
+        }
+        let mods = Default::default();
+        self.handle_input(InputEvent::MouseMove { x, y, buttons: 0, mods });
+        self.handle_input(InputEvent::MouseDown { x, y, button: 0, buttons: 1, mods });
+        self.handle_input(InputEvent::MouseUp { x, y, button: 0, buttons: 0, mods });
+        let frame = if path.is_empty() { String::new() } else { format!(" in iframe {path:?}") };
+        format!("clicked \"{label}\" at {x},{y}{frame}")
+    }
+
     fn handle_input(&mut self, ev: InputEvent) {
         let is_move = matches!(ev, InputEvent::MouseMove { .. });
         if !is_move {
@@ -412,8 +684,10 @@ impl Renderer {
             }
             _ => {}
         }
-        if let Some(ui) = to_ui_event(&ev, scroll) {
-            dispatch(page, ui);
+        if !route_to_frame(page, &ev) {
+            if let Some(ui) = to_ui_event(&ev, scroll) {
+                dispatch(page, ui);
+            }
         }
 
         // Cursor
@@ -597,6 +871,7 @@ impl Renderer {
             }
             drop(old);
         }
+        self.shared.resource_generation.fetch_add(1, Ordering::SeqCst);
         self.shared.pending_resources.store(0, Ordering::SeqCst);
         // New document => new resource ids on the compositor side are fine, but keep the
         // "already sent" set: fonts are shared across documents.
@@ -607,20 +882,35 @@ impl Renderer {
         doc.set_parser_done();
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
+        let messages = Rc::new(RefCell::new(Vec::new()));
         let host = Rc::new(RendererHost {
             shared: self.shared.clone(),
             net: self.net.clone(),
             generation: self.generation,
             inflight: RefCell::new(HashMap::new()),
+            sockets: RefCell::new(HashMap::new()),
             referrer,
             verbose_console: self.config.verbose_console,
             title: RefCell::new(String::new()),
             history: Cell::new((0, 1)),
+            frame: None,
+            origin: origin_of(url),
+            window_name: String::new(),
+            messages: messages.clone(),
+            frame_lists: Rc::new(RefCell::new(HashMap::new())),
+            frame_hosts: Rc::new(RefCell::new(HashMap::new())),
         });
 
         let mut page = Page {
             doc,
             rt: None,
+            frames: HashMap::new(),
+            scriptless_frames: Default::default(),
+            deferred_iframe_loads: Vec::new(),
+            messages,
+            frames_listed_at: None,
+            focused_frame: None,
+            pointer_frame: None,
             host: host.clone(),
             url: url.to_string(),
             generation: self.generation,
@@ -635,6 +925,7 @@ impl Renderer {
             script_ms: 0.0,
             metrics_sent: false,
             first_frame_costs: None,
+            last_sent: None,
             doctype: script::parse_doctype(html),
         };
         if self.config.javascript {
@@ -653,7 +944,7 @@ impl Renderer {
         // that can run script. Others — like the new tab page — paint right away; a
         // runtime is created later if something needs one (`ensure_runtime`).
         if self.config.javascript && document_uses_script(&page.doc) {
-            let rt = self.create_runtime(&mut page);
+            let rt = create_runtime(&self.config, &mut page);
             page.rt = Some(rt);
             common::trace::mark("renderer: scripts started (runtime ready)");
         } else {
@@ -665,25 +956,6 @@ impl Renderer {
         self.shared.redraw.store(true, Ordering::SeqCst);
     }
 
-    fn create_runtime(&self, page: &mut Page) -> ScriptRuntime {
-        let mut rt = ScriptRuntime::new(
-            page.host.clone(),
-            RuntimeOptions {
-                document_url: page.url.clone(),
-                user_agent: self.config.user_agent.clone(),
-                profile_dir: self.config.profile_dir.clone(),
-                load_js_layer: true,
-            },
-        );
-        rt.set_doctype(
-            page.doctype
-                .as_ref()
-                .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())),
-        );
-        rt.document_parsed(&mut page.doc);
-        rt
-    }
-
     /// Create the JS runtime of a script-less page on demand (e.g. for `Eval`).
     fn ensure_runtime(&mut self) {
         if !self.config.javascript {
@@ -691,7 +963,7 @@ impl Renderer {
         }
         let Some(mut page) = self.page.take() else { return };
         if page.rt.is_none() {
-            let mut rt = self.create_runtime(&mut page);
+            let mut rt = create_runtime(&self.config, &mut page);
             if self.shared.pending_resources.load(Ordering::SeqCst) == 0 {
                 rt.resources_loaded(&mut page.doc);
             }
@@ -706,10 +978,20 @@ impl Renderer {
 
     fn tick(&mut self) {
         let now = Instant::now();
+        // Iframe documents attached since the last tick get their runtimes (and run their
+        // scripts) before the page hears of their `load`.
+        if let Some(page) = &mut self.page {
+            page.doc.handle_messages();
+        }
+        self.sync_frames();
         if let Some(page) = &mut self.page {
             // Timers
             if let Some(rt) = page.rt.as_mut() {
-                if rt.next_timer_deadline().is_some_and(|d| d <= now) {
+                // Compare with a fresh clock: with internal tasks queued the deadline is
+                // "now" as of this call, which is always later than `now` above, and the
+                // queue would never be drained (every timer and `load` stalled while the
+                // loop spun at 100% CPU).
+                if rt.next_timer_deadline().is_some_and(|d| d <= Instant::now()) {
                     rt.run_timers(&mut page.doc);
                     self.shared.redraw.store(true, Ordering::SeqCst);
                 }
@@ -722,10 +1004,26 @@ impl Renderer {
             if !events.is_empty() {
                 if let Some(rt) = page.rt.as_mut() {
                     for (node, ok) in events {
+                        // An iframe whose document runs script loads when that document
+                        // does (a realm still bookkept for the previous document counts
+                        // as loading).
+                        let key = vec![node.as_u64()];
+                        if ok && frame_loading(&page.frames, &page.doc, &key) {
+                            page.deferred_iframe_loads.push(key);
+                            continue;
+                        }
                         rt.element_event(&mut page.doc, node, if ok { "load" } else { "error" });
                     }
                 }
                 self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+
+            // CSS animation/transition events recorded by the last style pass.
+            let animation_events = page.doc.take_animation_events();
+            if !animation_events.is_empty() {
+                if let Some(rt) = page.rt.as_mut() {
+                    rt.animation_events(&mut page.doc, animation_events);
+                }
             }
 
             let pending = self.shared.pending_resources.load(Ordering::SeqCst);
@@ -760,6 +1058,24 @@ impl Renderer {
                         url: page.url.clone(),
                         error: None,
                     });
+                    // A URL with a #fragment scrolls to its target once the document is
+                    // parsed (unless the page scrolled itself already).
+                    let fragment = url::Url::parse(&page.url)
+                        .ok()
+                        .and_then(|u| u.fragment().filter(|f| !f.is_empty()).map(str::to_string));
+                    if let Some(fragment) = fragment
+                        && page.doc.viewport_scroll() == blitz_dom::Point::ZERO
+                    {
+                        page.doc.resolve(script::animation_time());
+                        if page.doc.scroll_to_fragment(&fragment)
+                            && page.doc.viewport_scroll() != blitz_dom::Point::ZERO
+                        {
+                            if let Some(rt) = page.rt.as_mut() {
+                                rt.scrolled(&mut page.doc);
+                            }
+                            self.shared.redraw.store(true, Ordering::SeqCst);
+                        }
+                    }
                 }
                 if std::env::var_os("BROWSER_DEBUG_LOAD").is_some()
                     && page.created.elapsed().as_millis() % 1000 < 45
@@ -784,8 +1100,270 @@ impl Renderer {
             }
         }
 
+        self.tick_frames();
+        self.deliver_frame_messages();
+
         if self.needs_frame() && now >= self.last_frame + self.frame_interval() {
             self.produce_frame();
+        }
+    }
+
+    /// Create realms for new iframe documents that run script (and drop those of
+    /// documents that went away); adopt realms the runtime created on demand.
+    fn sync_frames(&mut self) {
+        let Some(page) = &mut self.page else { return };
+        // No script runs here: the documents of iframes removed during the last tasks can
+        // go (their realms are removed below).
+        page.doc.drop_detached_sub_documents();
+        for key in page.frames.keys() {
+            if let Some(sub) = subdoc_mut(&mut page.doc, key) {
+                sub.drop_detached_sub_documents();
+            }
+        }
+        // Realms created on demand (a same-origin script reached into the frame).
+        let on_demand: Vec<(Vec<u64>, Rc<RendererHost>)> =
+            page.host.frame_hosts.borrow_mut().drain().collect();
+        for (key, host) in on_demand {
+            // The document the realm was created for (the frame may have navigated since,
+            // which the stale check below then handles).
+            let Some(doc_id) = page.rt.as_ref().and_then(|rt| rt.frame_doc_id(&key)) else {
+                continue;
+            };
+            let origin = host.origin.clone();
+            if let Some(f) = page.frames.get_mut(&key) {
+                // A script created the realm of the frame's new document before this
+                // renderer noticed the navigation.
+                f.host = host;
+                f.doc_id = doc_id;
+                f.origin = origin;
+                f.created = Instant::now();
+                f.loaded = false;
+                continue;
+            }
+            page.frames.insert(
+                key,
+                FrameCtx {
+                    host,
+                    doc_id,
+                    origin,
+                    created: Instant::now(),
+                    last_ready_check: Instant::now(),
+                    loaded: false,
+                },
+            );
+        }
+        if !page.frames.is_empty() {
+            let stale: Vec<Vec<u64>> = page
+                .frames
+                .iter()
+                .filter(|(key, f)| {
+                    subdoc_ref(&page.doc, key).map(blitz_dom::Document::id) != Some(f.doc_id)
+                })
+                .map(|(key, _)| key.clone())
+                .collect();
+            for key in stale {
+                page.frames.remove(&key);
+                if let Some(rt) = page.rt.as_mut() {
+                    rt.remove_frame(&key);
+                }
+            }
+        }
+        if !self.config.javascript {
+            return;
+        }
+        let paths = subdoc_paths(&page.doc);
+        if paths.is_empty() {
+            return;
+        }
+        // Frames see each other's frames (`parent.frames[name]`, `top.length`): keep the
+        // lists of iframes current while frame runtimes exist.
+        let new_frames = paths.iter().any(|p| {
+            !page.frames.contains_key(p) && !page.scriptless_frames.iter().any(|(k, _)| k == p)
+        });
+        if (new_frames || !page.frames.is_empty())
+            && (new_frames
+                || page
+                    .frames_listed_at
+                    .is_none_or(|t| t.elapsed() >= Duration::from_millis(250)))
+        {
+            let mut lists = HashMap::new();
+            lists.insert(Vec::new(), list_iframes(&page.doc));
+            for p in &paths {
+                if let Some(d) = subdoc_ref(&page.doc, p) {
+                    lists.insert(p.clone(), list_iframes(d));
+                }
+            }
+            *page.host.frame_lists.borrow_mut() = lists;
+            page.frames_listed_at = Some(Instant::now());
+        }
+        for key in paths {
+            if page.frames.contains_key(&key) || page.frames.len() >= MAX_FRAME_RUNTIMES {
+                continue;
+            }
+            let Some(sub) = subdoc_mut(&mut page.doc, &key) else { continue };
+            let doc_id = blitz_dom::Document::id(&*sub);
+            if page.scriptless_frames.contains(&(key.clone(), doc_id)) {
+                continue;
+            }
+            if !document_uses_script(sub) {
+                page.scriptless_frames.insert((key, doc_id));
+                continue;
+            }
+            let url = sub.url().to_string();
+            let (node, parent) = key.split_last().expect("frame paths are not empty");
+            let window_name = subdoc_ref(&page.doc, parent)
+                .and_then(|d| d.get_node(NodeId::from_u64(*node)))
+                .and_then(|n| n.attr(blitz_dom::local_name!("name")))
+                .unwrap_or("")
+                .to_string();
+            let Some(sub) = subdoc_mut(&mut page.doc, &key) else { continue };
+            sub.add_user_agent_stylesheet("noscript { display: none !important; }");
+            let host = page.host.for_frame(key.clone(), &url, window_name);
+            if page.rt.is_none() {
+                // A script-less page whose iframe runs script: the frame's realm lives in
+                // the page's runtime.
+                page.rt = Some(create_runtime(&self.config, page));
+            }
+            if std::env::var_os("SHARKO_DEBUG_FRAMES").is_some() {
+                eprintln!("[frames] script realm for iframe document {url}");
+            }
+            let Some(rt) = page.rt.as_mut() else { continue };
+            rt.ensure_frame(&mut page.doc, &key, host.clone(), &url);
+            page.frames.insert(
+                key,
+                FrameCtx {
+                    host,
+                    doc_id,
+                    origin: origin_of(&url),
+                    created: Instant::now(),
+                    last_ready_check: Instant::now(),
+                    loaded: false,
+                },
+            );
+            self.shared.redraw.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Subresource events and load state of the iframe documents with realms (their
+    /// timers run with the page's, see `ScriptRuntime::run_timers`).
+    fn tick_frames(&mut self) {
+        let Some(page) = &mut self.page else { return };
+        if page.frames.is_empty() && page.host.frame_hosts.borrow().is_empty() {
+            return;
+        }
+        // Nested documents attached by these get their realms (and run their scripts)
+        // before their parents hear of their `load`.
+        for key in page.frames.keys() {
+            if let Some(sub) = subdoc_mut(&mut page.doc, key) {
+                sub.handle_messages();
+            }
+        }
+        self.sync_frames();
+        let Some(page) = &mut self.page else { return };
+        let Some(rt) = page.rt.as_mut() else { return };
+        let pending = self.shared.pending_resources.load(Ordering::SeqCst);
+        let unloaded: std::collections::HashSet<Vec<u64>> = page
+            .frames
+            .keys()
+            .filter(|k| frame_loading(&page.frames, &page.doc, k))
+            .cloned()
+            .collect();
+        let mut loaded = Vec::new();
+        for (key, f) in page.frames.iter_mut() {
+            let (load_events, animation_events) = {
+                let Some(sub) = subdoc_mut(&mut page.doc, key) else { continue };
+                (sub.take_element_load_events(), sub.take_animation_events())
+            };
+            for (n, ok) in load_events {
+                // A nested iframe whose document runs script loads when that document does.
+                let mut child = key.clone();
+                child.push(n.as_u64());
+                if ok && unloaded.contains(&child) {
+                    page.deferred_iframe_loads.push(child);
+                    continue;
+                }
+                rt.element_event_in(&mut page.doc, key, n, if ok { "load" } else { "error" });
+                self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+            if !animation_events.is_empty() {
+                rt.animation_events_in(&mut page.doc, key, animation_events);
+            }
+            if !f.loaded && f.last_ready_check.elapsed() >= Duration::from_millis(40) {
+                f.last_ready_check = Instant::now();
+                if pending == 0 {
+                    rt.resources_loaded_in(&mut page.doc, key);
+                }
+                let ready = rt.eval_in(&mut page.doc, key, "document.readyState").unwrap_or_default();
+                // Its own `load` fired (the resource count is the whole tab's, and the
+                // page may keep loading).
+                if ready.contains("complete") || f.created.elapsed() > FRAME_LOAD_TIMEOUT
+                {
+                    f.loaded = true;
+                    loaded.push(key.clone());
+                }
+            }
+        }
+        if !page.deferred_iframe_loads.is_empty() {
+            let deferred = std::mem::take(&mut page.deferred_iframe_loads);
+            for path in deferred {
+                // Fires once the frame's document loaded, or right away if the document
+                // it was waiting for runs no script (no realm left for the path).
+                if !loaded.contains(&path) && page.frames.contains_key(&path) {
+                    page.deferred_iframe_loads.push(path);
+                    continue;
+                }
+                // The `<iframe>`'s `load` fires in its parent document.
+                let (node, parent) = path.split_last().expect("frame paths are not empty");
+                let node = NodeId::from_u64(*node);
+                if parent.is_empty() || page.frames.contains_key(parent) {
+                    rt.element_event_in(&mut page.doc, parent, node, "load");
+                }
+            }
+        }
+    }
+
+    /// Deliver the `postMessage`s between the page's frames (also those posted while
+    /// delivering, a bounded number of rounds per tick).
+    fn deliver_frame_messages(&mut self) {
+        let Some(page) = &mut self.page else { return };
+        let page_origin = page.host.origin.clone();
+        let debug = std::env::var_os("SHARKO_DEBUG_FRAMES").is_some();
+        for _ in 0..8 {
+            let messages = std::mem::take(&mut *page.messages.borrow_mut());
+            if messages.is_empty() {
+                return;
+            }
+            self.shared.redraw.store(true, Ordering::SeqCst);
+            for m in messages {
+                if debug {
+                    let known = m.to.is_empty() || page.frames.contains_key(&m.to);
+                    eprintln!(
+                        "[frames] message {:?} -> {:?} from {} (target {}, {} bytes){}",
+                        m.from,
+                        m.to,
+                        m.origin,
+                        m.target_origin,
+                        m.data.len(),
+                        if known { "" } else { " to a frame without runtime" }
+                    );
+                }
+                if m.to.is_empty() {
+                    if m.target_origin != "*" && m.target_origin != page_origin {
+                        continue;
+                    }
+                    if let Some(rt) = page.rt.as_mut() {
+                        rt.deliver_message(&mut page.doc, &m.from, &m.origin, &m.data);
+                    }
+                    continue;
+                }
+                let Some(f) = page.frames.get(&m.to) else { continue };
+                if m.target_origin != "*" && m.target_origin != f.origin {
+                    continue;
+                }
+                if let Some(rt) = page.rt.as_mut() {
+                    rt.deliver_message_in(&mut page.doc, &m.to, &m.from, &m.origin, &m.data);
+                }
+            }
         }
     }
 
@@ -852,6 +1430,30 @@ impl Renderer {
         }
 
         let scroll = page.doc.viewport_scroll();
+        let geometry = FrameGeometry {
+            width,
+            height,
+            scale: scale as f32,
+            content_width,
+            content_height,
+            scroll_x: scroll.x as f32,
+            scroll_y: scroll.y as f32,
+        };
+        let unchanged = capture.is_none()
+            && list.new_fonts.is_empty()
+            && list.new_images.is_empty()
+            && page
+                .last_sent
+                .as_ref()
+                .is_some_and(|(g, cmds)| *g == geometry && *cmds == list.cmds);
+        if unchanged {
+            return;
+        }
+        page.last_sent = if capture.is_none() {
+            Some((geometry, list.cmds.clone()))
+        } else {
+            None
+        };
         self.frame_seq += 1;
         let frame = Frame {
             seq: self.frame_seq,
@@ -886,6 +1488,18 @@ impl Renderer {
             });
         }
     }
+}
+
+/// A frame's size, scale and scroll position (see `Page::last_sent`).
+#[derive(PartialEq)]
+struct FrameGeometry {
+    width: u32,
+    height: u32,
+    scale: f32,
+    content_width: f32,
+    content_height: f32,
+    scroll_x: f32,
+    scroll_y: f32,
 }
 
 /// Scrollable size of the document in CSS px: the root box or its overflowing content
@@ -948,7 +1562,7 @@ fn parse_document(html: &str, config: DocumentConfig, scripting: bool) -> BaseDo
 fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {
     match page.rt.as_mut() {
         Some(rt) => {
-            let mut driver = EventDriver::new(&mut page.doc, JsEventHandler { runtime: rt });
+            let mut driver = EventDriver::new(&mut page.doc, JsEventHandler::new(rt));
             driver.handle_ui_event(ui);
         }
         None => {
@@ -956,6 +1570,153 @@ fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {
             driver.handle_ui_event(ui);
         }
     }
+}
+
+/// The content-box origin of the frame at `path` in the page's client coordinates.
+fn frame_origin(page: &Page, path: &[u64]) -> Option<(f32, f32)> {
+    let (mut ox, mut oy) = (0.0, 0.0);
+    let mut doc = &page.doc;
+    for (i, &id) in path.iter().enumerate() {
+        let node = NodeId::from_u64(id);
+        let rect = doc.get_client_bounding_rect(node)?;
+        let l = doc.get_node(node)?.final_layout();
+        ox += rect.x as f32 + l.border.left + l.padding.left;
+        oy += rect.y as f32 + l.border.top + l.padding.top;
+        if i + 1 < path.len() {
+            doc = subdoc_ref(doc, &[id])?;
+        }
+    }
+    Some((ox, oy))
+}
+
+/// The innermost iframe running script under the client point (x, y).
+fn frame_at(page: &Page, x: f32, y: f32) -> Option<Vec<u64>> {
+    if page.frames.is_empty() {
+        return None;
+    }
+    let (mut x, mut y) = (x, y);
+    let mut doc = &page.doc;
+    let mut path = Vec::new();
+    let mut found = None;
+    loop {
+        let Some(hit) = doc.hit(x, y) else { break };
+        let node = hit.node_id;
+        let Some(sub) = subdoc_ref(doc, &[node.as_u64()]) else { break };
+        let Some(rect) = doc.get_client_bounding_rect(node) else { break };
+        let Some(l) = doc.get_node(node).map(|n| n.final_layout()) else { break };
+        x -= rect.x as f32 + l.border.left + l.padding.left;
+        y -= rect.y as f32 + l.border.top + l.padding.top;
+        path.push(node.as_u64());
+        if page.frames.contains_key(&path) {
+            found = Some(path.clone());
+        }
+        doc = sub;
+    }
+    found
+}
+
+/// Send input over (or captured by, or focused in) an iframe that runs script to its
+/// document. Returns whether the page must not see the event.
+fn route_to_frame(page: &mut Page, ev: &InputEvent) -> bool {
+    if page.frames.is_empty() {
+        page.focused_frame = None;
+        page.pointer_frame = None;
+        return false;
+    }
+    let (key, local) = match ev {
+        InputEvent::MouseMove { x, y, .. }
+        | InputEvent::MouseDown { x, y, .. }
+        | InputEvent::MouseUp { x, y, .. }
+        | InputEvent::Wheel { x, y, .. } => {
+            let captured = page
+                .pointer_frame
+                .clone()
+                .filter(|_| !matches!(ev, InputEvent::Wheel { .. }));
+            let key = captured.or_else(|| frame_at(page, *x, *y));
+            if matches!(ev, InputEvent::MouseDown { .. }) {
+                page.focused_frame = key.clone();
+                page.pointer_frame = key.clone();
+            }
+            let Some(key) = key else { return false };
+            let Some((ox, oy)) = frame_origin(page, &key) else { return false };
+            (key, Some((*x - ox, *y - oy)))
+        }
+        InputEvent::KeyDown { .. }
+        | InputEvent::KeyUp { .. }
+        | InputEvent::ImePreedit { .. }
+        | InputEvent::ImeCommit(_) => match page.focused_frame.clone() {
+            Some(key) => (key, None),
+            None => return false,
+        },
+        _ => return false,
+    };
+    if matches!(ev, InputEvent::MouseUp { .. }) {
+        page.pointer_frame = None;
+    }
+    if !page.frames.contains_key(&key) {
+        return false;
+    }
+    let root: *mut BaseDocument = &mut page.doc;
+    let Some(rt) = page.rt.as_mut() else { return false };
+    let Some(sub) = subdoc_mut(&mut page.doc, &key) else { return false };
+    // Wheel scrolling only goes to a document that can scroll.
+    if matches!(ev, InputEvent::Wheel { .. }) {
+        let root = sub.try_root_element().map(|r| (r.scroll_height(), r.final_layout().size.height));
+        let vh = sub.viewport().window_size.1 as f32 / sub.viewport().scale();
+        if !root.is_some_and(|(sh, h)| sh.max(h) > vh + 1.0) {
+            return false;
+        }
+    }
+    let mut local_ev = ev.clone();
+    if let Some((lx, ly)) = local {
+        match &mut local_ev {
+            InputEvent::MouseMove { x, y, .. }
+            | InputEvent::MouseDown { x, y, .. }
+            | InputEvent::MouseUp { x, y, .. }
+            | InputEvent::Wheel { x, y, .. } => {
+                *x = lx;
+                *y = ly;
+            }
+            _ => {}
+        }
+    }
+    let s = sub.viewport_scroll();
+    if let Some(ui) = to_ui_event(&local_ev, (s.x, s.y)) {
+        let handler = JsEventHandler { runtime: rt, frame: key.clone(), root };
+        let mut driver = EventDriver::new(sub, handler);
+        driver.handle_ui_event(ui);
+    }
+    // Moves also reach the page (hover of the <iframe> element).
+    !matches!(ev, InputEvent::MouseMove { .. })
+}
+
+/// Whether the iframe at `key` has a document with a script realm that hasn't finished
+/// loading: its realm is bookkept and not loaded, or bookkept for a previous document
+/// (the frame navigated; the new document's realm follows in `sync_frames`).
+fn frame_loading(frames: &HashMap<Vec<u64>, FrameCtx>, doc: &BaseDocument, key: &[u64]) -> bool {
+    let Some(f) = frames.get(key) else { return false };
+    !f.loaded || subdoc_ref(doc, key).is_some_and(|d| blitz_dom::Document::id(d) != f.doc_id)
+}
+
+/// The page's script runtime, with its document parsed (`onDocumentParsed` runs the
+/// page's scripts).
+fn create_runtime(config: &RendererConfig, page: &mut Page) -> ScriptRuntime {
+    let mut rt = ScriptRuntime::new(
+        page.host.clone(),
+        RuntimeOptions {
+            document_url: page.url.clone(),
+            user_agent: config.user_agent.clone(),
+            profile_dir: config.profile_dir.clone(),
+            load_js_layer: true,
+        },
+    );
+    rt.set_doctype(
+        page.doctype
+            .as_ref()
+            .map(|(a, b, c)| (a.as_str(), b.as_str(), c.as_str())),
+    );
+    rt.document_parsed(&mut page.doc);
+    rt
 }
 
 /// Whether a document can run script: script elements, inline event handlers or

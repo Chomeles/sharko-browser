@@ -1,5 +1,6 @@
 //! The `__native` object: function table, installation and the call trampoline.
 
+mod crypto;
 mod forms_natives;
 mod misc;
 mod tree;
@@ -7,7 +8,7 @@ mod tree;
 use crate::cx::{Cx, JsErr, NResult};
 use crate::state::RuntimeState;
 
-pub(crate) use misc::{format_number, register_hooks};
+pub(crate) use misc::{deserialize_message, format_number, frame_path_value, register_hooks};
 
 type NativeImpl = fn(&mut Cx<'_, '_, '_>) -> NResult;
 
@@ -22,13 +23,19 @@ fn dispatch<'s, 'i>(
     f: NativeImpl,
     name: &'static str,
 ) {
-    let ptr = scope.get_data(crate::snapshot::STATE_SLOT) as *const RuntimeState;
+    // The realm whose JS called us is the current context (a page script calling a
+    // method of a same-origin iframe's document runs that iframe realm's JS layer, and
+    // its natives must see that iframe's document).
+    let ptr = match scope.get_current_context().get_slot::<crate::state::StatePtr>() {
+        Some(p) => p.0,
+        None => scope.get_data(crate::snapshot::STATE_SLOT) as *const RuntimeState,
+    };
     if ptr.is_null() {
         JsErr::dom("InvalidStateError", "the script runtime is gone").throw(scope);
         return;
     }
-    // SAFETY: the slot is set to the runtime's `RuntimeState` when the isolate is
-    // created; the state outlives the isolate (see `ScriptRuntime::drop`).
+    // SAFETY: the slots point at states the runtime keeps alive until its isolate is
+    // disposed (see `ScriptRuntime::drop`).
     let st: &RuntimeState = unsafe { &*ptr };
     if st.snapshotting.get()
         && st.snapshot_taint.get().is_none()
@@ -128,6 +135,7 @@ natives_table! {
     "cloneNode" => tree::n_clone_node,
     "templateContent" => tree::n_template_content,
     "setShadowHost" => tree::n_set_shadow_host,
+    "setAdoptedSheets" => tree::n_set_adopted_sheets,
     "setDefined" => tree::n_set_defined,
     "releaseNode" => tree::n_release_node,
     // Mutation
@@ -145,6 +153,7 @@ natives_table! {
     "getText" => tree::n_get_text,
     "setText" => tree::n_set_text,
     "textContent" => tree::n_text_content,
+    "linkSheetText" => tree::n_link_sheet_text,
     "setTextContent" => tree::n_set_text_content,
     "innerHTML" => tree::n_inner_html,
     "setInnerHTML" => tree::n_set_inner_html,
@@ -160,6 +169,7 @@ natives_table! {
     // Layout / geometry
     "getBoundingClientRect" => crate::layout::n_get_bounding_client_rect,
     "getClientRects" => crate::layout::n_get_client_rects,
+    "textRects" => crate::layout::n_text_rects,
     "offsetMetrics" => crate::layout::n_offset_metrics,
     "clientMetrics" => crate::layout::n_client_metrics,
     "scrollMetrics" => crate::layout::n_scroll_metrics,
@@ -170,10 +180,12 @@ natives_table! {
     "viewport" => crate::layout::n_viewport,
     "scrollTo" => crate::layout::n_scroll_to,
     "imageSize" => crate::layout::n_image_size,
+    "imageCurrentSrc" => crate::layout::n_image_current_src,
     // Style
     "styleGet" => crate::style::n_style_get,
     "styleGetPriority" => crate::style::n_style_get_priority,
     "styleSet" => crate::style::n_style_set,
+    "setAnimationStyle" => crate::style::n_set_animation_style,
     "styleRemove" => crate::style::n_style_remove,
     "styleCssText" => crate::style::n_style_css_text,
     "styleSetCssText" => crate::style::n_style_set_css_text,
@@ -207,6 +219,12 @@ natives_table! {
     "fetch" => misc::n_fetch,
     "fetchSync" => misc::n_fetch_sync,
     "abortFetch" => misc::n_abort_fetch,
+    "workerCreate" => misc::n_worker_create,
+    "workerEval" => misc::n_worker_eval,
+    "cloneInto" => misc::n_clone_into,
+    "wsOpen" => misc::n_ws_open,
+    "wsSend" => misc::n_ws_send,
+    "wsClose" => misc::n_ws_close,
     "registerBlobURL" => misc::n_register_blob_url,
     "revokeBlobURL" => misc::n_revoke_blob_url,
     "getCookie" => misc::n_get_cookie,
@@ -232,6 +250,7 @@ natives_table! {
     "historyIndex" => misc::n_history_index,
     "historyLength" => misc::n_history_length,
     "referrer" => misc::n_referrer,
+    "initialWindowName" => misc::n_initial_window_name,
     "doctype" => misc::n_doctype,
     "openWindow" => misc::n_open_window,
     "clipboardWrite" => misc::n_clipboard_write,
@@ -241,6 +260,37 @@ natives_table! {
     "urlParse" => misc::n_url_parse,
     "urlSet" => misc::n_url_set,
     "randomBytes" => misc::n_random_bytes,
+    "parseColor" => crate::style::n_parse_color,
+    "zCreate" => crate::compress::n_z_create,
+    "zWrite" => crate::compress::n_z_write,
+    "zFinish" => crate::compress::n_z_finish,
+    "zDrop" => crate::compress::n_z_drop,
+    "canvasReset" => crate::canvas::n_canvas_reset,
+    "canvasFill" => crate::canvas::n_canvas_fill,
+    "canvasStroke" => crate::canvas::n_canvas_stroke,
+    "canvasClip" => crate::canvas::n_canvas_clip,
+    "canvasClearRect" => crate::canvas::n_canvas_clear_rect,
+    "canvasDrawImage" => crate::canvas::n_canvas_draw_image,
+    "canvasGetImageData" => crate::canvas::n_canvas_get_image_data,
+    "canvasPutImageData" => crate::canvas::n_canvas_put_image_data,
+    "canvasToDataURL" => crate::canvas::n_canvas_to_data_url,
+    "canvasMeasureText" => crate::canvas::n_canvas_measure_text,
+    "canvasText" => crate::canvas::n_canvas_text,
+    "framePost" => misc::n_frame_post,
+    "framePath" => misc::n_frame_path,
+    "frameList" => misc::n_frame_list,
+    "frameGlobal" => misc::n_frame_global,
+    "realmGlobal" => misc::n_realm_global,
+    "parentGlobal" => misc::n_parent_global,
+    "topGlobal" => misc::n_top_global,
+    "frameElement" => misc::n_frame_element,
+    "foreignNodeType" => misc::n_foreign_node_type,
+    "windowPostMessage" => misc::n_window_post_message,
+    "cryptoDigest" => crypto::n_crypto_digest,
+    "cryptoHmac" => crypto::n_crypto_hmac,
+    "cryptoAes" => crypto::n_crypto_aes,
+    "cryptoPbkdf2" => crypto::n_crypto_pbkdf2,
+    "cryptoHkdf" => crypto::n_crypto_hkdf,
     "textEncode" => misc::n_text_encode,
     "textDecode" => misc::n_text_decode,
     "userAgent" => misc::n_user_agent,

@@ -359,6 +359,7 @@ test('performance, console formatting, navigator, screen, misc window props', as
   assert.deepStrictEqual(logs[12], ['log', "{name: 'c', me: [Circular *]}"]);
   assert.ok(logs[13][1].includes('│ (index) │ a │ b │'), logs[13][1]);
   assert.deepStrictEqual(logs[14], ['log', '{x: 1}']);
+  assert.strictEqual(e.run("'serviceWorker' in navigator || 'mediaDevices' in navigator"), false);
   assert.strictEqual(e.run(`[navigator.language, navigator.languages.join(), navigator.platform, navigator.vendor, navigator.onLine, navigator.cookieEnabled, navigator.hardwareConcurrency, navigator.deviceMemory, navigator.maxTouchPoints, navigator.webdriver, navigator.mediaDevices, navigator.serviceWorker, navigator.plugins.length, navigator.mimeTypes[0].type, navigator.userAgentData.brands.length, navigator.appVersion.startsWith('5.0'), typeof navigator.clipboard.writeText].join('|')`),
     'de-DE|de-DE,de,en-US,en|Win32|Google Inc.|true|true|8|8|0|false|||5|application/pdf|3|true|function');
   const r2 = await settle(e, `
@@ -382,4 +383,142 @@ test('performance, console formatting, navigator, screen, misc window props', as
   e.run("window.innerWidth = 5");
   assert.strictEqual(e.run('innerWidth'), 5, '[Replaceable]');
   assert.strictEqual(e.run("String(fetch) + '|' + String(Object.getOwnPropertyDescriptor(Node.prototype, 'firstChild').get) + '|' + Function.prototype.toString.call(function mine() { return 1; })"), 'function fetch() { [native code] }|function get firstChild() { [native code] }|function mine() { return 1; }');
+});
+
+test('WebSocket: handshake, messages, bufferedAmount, close and failures', async () => {
+  const e = await env();
+  const err = (code) => e.run(`try { ${code}; 'no error' } catch (x) { x.name + ': ' + x.message }`);
+  e.run(`window.log = []; window.ws = new WebSocket('/chat', ['a', 'b']); ws.binaryType = 'arraybuffer';
+    for (const t of ['open', 'message', 'error', 'close']) ws.addEventListener(t, (ev) => log.push(t + ':' +
+      (t === 'message' ? (typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data).join(',')) + '@' + ev.origin
+        : t === 'close' ? ev.code + '/' + ev.reason + '/' + ev.wasClean + '/' + (ev instanceof CloseEvent) : '')));`);
+  assert.deepStrictEqual(e.mock.ws[0], ['open', 1, 'wss://example.com/chat', ['a', 'b'], 'https://example.com']);
+  assert.strictEqual(e.run('ws.readyState + " " + ws.url + " " + WebSocket.OPEN'), '0 wss://example.com/chat 1');
+  assert.match(err("ws.send('x')"), /^InvalidStateError: .*CONNECTING/);
+  e.hook('onWebSocket', 1, 'open', 'a', '');
+  assert.strictEqual(e.run('ws.readyState + ws.protocol'), '1a');
+  e.run("ws.send('h\u00e9llo'); ws.send(new Uint8Array([1, 2])); ws.send(new Blob(['xyz']))");
+  assert.strictEqual(e.run('ws.bufferedAmount'), 11);
+  e.hook('onWebSocket', 1, 'sent', 6);
+  assert.strictEqual(e.run('ws.bufferedAmount'), 5);
+  e.hook('onWebSocket', 1, 'message', 'hi');
+  e.hook('onWebSocket', 1, 'message', e.mock.ab(Buffer.from([7, 8])));
+  assert.match(err('ws.close(1001)'), /^InvalidAccessError/);
+  assert.match(err("ws.close(1000, 'x'.repeat(124))"), /^SyntaxError/);
+  e.run("ws.close(1000, 'bye')");
+  assert.strictEqual(e.run('ws.readyState'), 2);
+  e.run("ws.send('late')");
+  e.hook('onWebSocket', 1, 'close', 1000, 'bye', true);
+  assert.strictEqual(e.run('ws.readyState'), 3);
+  assert.deepStrictEqual(Array.from(e.run('log')), ['open:', 'message:hi@wss://example.com', 'message:7,8@wss://example.com', 'close:1000/bye/true/true']);
+  assert.deepStrictEqual(e.mock.ws.slice(1), [['send', 1, 'h\u00e9llo'], ['send', 1, [1, 2]], ['send', 1, [120, 121, 122]], ['close', 1, 1000, 'bye']]);
+
+  assert.match(err("new WebSocket('ftp://x/')"), /^SyntaxError: .*scheme/);
+  assert.match(err("new WebSocket('wss://x/#f')"), /^SyntaxError: .*fragment/);
+  assert.match(err("new WebSocket('wss://x/', ['a', 'a'])"), /^SyntaxError: .*duplicated/);
+  assert.match(err("new WebSocket('wss://x/', 'a b')"), /^SyntaxError: .*invalid/);
+  assert.match(err("new WebSocket('ws://insecure.example/')"), /^SecurityError/);
+
+  // A failed connection fires error, then close (1006, not clean); blob is the default binaryType.
+  e.run(`window.log2 = []; window.ws2 = new WebSocket('https://down.example/');
+    ws2.onerror = () => log2.push('error'); ws2.onclose = (ev) => log2.push('close:' + ev.code + ':' + ev.wasClean);`);
+  assert.strictEqual(e.run('ws2.url + " " + ws2.binaryType'), 'wss://down.example/ blob');
+  e.hook('onWebSocket', 2, 'error', 'refused');
+  e.hook('onWebSocket', 2, 'close', 1006, '', false);
+  assert.deepStrictEqual(Array.from(e.run('log2')), ['error', 'close:1006:false']);
+});
+
+test('Worker: own realm, messages both ways, importScripts, timers, errors, terminate', async () => {
+  const routes = Object.assign({}, ROUTES, {
+    'https://example.com/w.js': { body: `
+      importScripts('lib.js');
+      var count = 0;
+      onmessage = (ev) => {
+        count++;
+        if (ev.data === 'boom') throw new Error('kaboom');
+        postMessage({ sum: libAdd(ev.data.a, ev.data.b), count, isArray: Array.isArray(ev.data.list),
+          window: typeof window, document: typeof document, scope: self instanceof WorkerGlobalScope,
+          name: self.name, path: location.pathname, same: self === globalThis });
+      };
+      setTimeout(() => postMessage('tick'), 5);
+      const stop = setInterval(() => postMessage('never'), 100000);
+      clearInterval(stop);` },
+    'https://example.com/lib.js': { body: 'function libAdd(a, b) { return a + b; }' },
+    'https://example.com/bad.js': { body: 'throw new Error("top-level")' },
+  });
+  const e = await env({ routes });
+  e.run(`window.got = []; window.w = new Worker('/w.js', { name: 'n1' });
+    w.onmessage = (ev) => got.push(JSON.stringify(ev.data));
+    w.onerror = (ev) => { got.push('error:' + ev.message); ev.preventDefault(); };
+    w.postMessage({ a: 2, b: 3, list: [1] });`);
+  await e.flush();
+  const got = Array.from(e.run('got'));
+  assert.ok(got.includes('"tick"'), got.join(' | '));
+  assert.ok(!got.includes('"never"'));
+  const reply = JSON.parse(got.find((x) => x.startsWith('{')));
+  assert.deepStrictEqual(reply, { sum: 5, count: 1, isArray: true, window: 'undefined', document: 'undefined',
+    scope: true, name: 'n1', path: '/w.js', same: true });
+  assert.strictEqual(e.run('typeof count + typeof libAdd'), 'undefinedundefined', 'worker globals do not leak into the page');
+
+  e.run("got.length = 0; w.postMessage('boom')");
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), ['error:Uncaught Error: kaboom']);
+
+  e.run("got.length = 0; w.terminate(); w.postMessage({ a: 1, b: 1, list: [] })");
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), []);
+
+  e.run(`window.bad = new Worker('bad.js'); bad.onerror = (ev) => { got.push('bad:' + ev.message + '@' + ev.filename); ev.preventDefault(); };`);
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), ['bad:top-level@https://example.com/bad.js']);
+
+  const err = (code) => e.run(`try { ${code}; 'no error' } catch (x) { x.name }`);
+  assert.strictEqual(err("new Worker('https://other.org/w.js')"), 'SecurityError');
+  assert.strictEqual(err("new Worker('http://[')"), 'SyntaxError');
+});
+
+test('XHR: upload and download progress reported by the network', async () => {
+  const e = await env();
+  e.run(`window.pl = []; window.x = new XMLHttpRequest(); x.open('POST', '/api/echo');
+    x.onprogress = (ev) => pl.push('d' + ev.loaded + '/' + ev.total + ':' + ev.lengthComputable);
+    x.upload.onprogress = (ev) => pl.push('u' + ev.loaded + '/' + ev.total);
+    x.send('abcdef');`);
+  const req = e.mock.events.find((ev) => ev.kind === 'fetch');
+  e.hook('onFetchProgress', req.reqId, 3, 6, true);
+  e.hook('onFetchProgress', req.reqId, 50, 0, false);
+  await e.flush();
+  const pl = Array.from(e.run('pl'));
+  assert.deepStrictEqual(pl.slice(0, 2), ['u3/6', 'd50/0:false']);
+  assert.ok(pl.length > 2, 'final progress at completion');
+  e.hook('onFetchProgress', req.reqId, 99, 99, false);
+  assert.strictEqual(e.run('pl.length'), pl.length, 'no progress after completion');
+});
+
+test('CSS animation and transition events from the style engine', async () => {
+  const e = await env();
+  e.run(`window.ev = []; const d = document.createElement('div'); d.id = 'anim'; document.body.append(d);
+    document.body.addEventListener('transitionend', (x) => ev.push(x.type + ':' + x.propertyName + ':' + x.elapsedTime + ':' + (x instanceof TransitionEvent) + ':' + x.target.id));
+    d.onanimationend = (x) => ev.push(x.type + ':' + x.animationName + ':' + x.pseudoElement + ':' + (x instanceof AnimationEvent));`);
+  const id = e.id('#anim');
+  e.hook('onAnimationEvent', id, 'transitionend', 'opacity', 0.3, '');
+  e.hook('onAnimationEvent', id, 'animationend', 'fadeIn', 0.4, '::before');
+  assert.deepStrictEqual(Array.from(e.run('ev')), ['transitionend:opacity:0.3:true:anim', 'animationend:fadeIn:::before:true']);
+});
+
+test('TextEncoderStream / TextDecoderStream and resource timing for fetch', async () => {
+  const e = await env();
+  const r = await settle(e, `
+    const enc = new ReadableStream({ start(c) { c.enqueue('h\\u00e9'); c.enqueue('\\ud83d'); c.enqueue('\\ude00!'); c.close(); } })
+      .pipeThrough(new TextEncoderStream());
+    const bytes = [];
+    for (const reader = enc.getReader(); ;) { const { done, value } = await reader.read(); if (done) break; bytes.push(...value); }
+    const dec = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(bytes.slice(0, 2))); c.enqueue(new Uint8Array(bytes.slice(2))); c.close(); } })
+      .pipeThrough(new TextDecoderStream());
+    let text = '';
+    for (const reader = dec.getReader(); ;) { const { done, value } = await reader.read(); if (done) break; text += value; }
+    await (await fetch('/api/data.json')).text();
+    const t = performance.getEntriesByName('https://example.com/api/data.json')[0];
+    return [bytes.join(','), text, t.initiatorType, t.transferSize > 0, t.responseEnd >= t.startTime, performance.getEntriesByType('resource').length];
+  `);
+  assert.deepStrictEqual(Array.from(r), ['104,195,169,240,159,152,128,33', 'hé😀!', 'fetch', true, true, 1]);
 });

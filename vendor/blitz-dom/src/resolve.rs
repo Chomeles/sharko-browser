@@ -111,6 +111,9 @@ impl BaseDocument {
         self.resolve_transforms(root_node_id);
         timer.record_time("transform");
 
+        // PATCH: lazy images near the viewport, responsive sources after resizes.
+        self.update_image_loads();
+
         // Clear all damage and dirty flags, walking only subtrees which are
         // marked as (potentially) containing damage.
         if self.incremental_layout {
@@ -163,10 +166,14 @@ impl BaseDocument {
             return Rect::ZERO;
         }
 
-        if !self.nodes[node_id]
-            .damage()
-            .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
-            .unwrap_or(false)
+        // PATCH: anonymous blocks carry no damage of their own (damage propagates along
+        // DOM children, which bypass them), so they are never skipped: animated
+        // inline-blocks next to blocks kept the transform of their first keyframe.
+        if !self.nodes[node_id].is_anonymous()
+            && !self.nodes[node_id]
+                .damage()
+                .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
+                .unwrap_or(false)
         {
             return *self.nodes[node_id].scrollable_overflow();
         }

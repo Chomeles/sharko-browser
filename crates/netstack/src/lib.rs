@@ -74,13 +74,14 @@ mod provider;
 mod schemes;
 mod service;
 mod util;
+mod websocket;
 mod wire;
 
-pub use client::NetClient;
+pub use client::{NetClient, ProgressCallback, WsCallback};
 pub use config::NetConfig;
 pub use provider::{BlitzNetProvider, encode_form_body};
 pub use service::{NetworkService, run_service, run_service_with_config};
 
 /// Re-exported protocol types so users of this crate don't need to depend on `common`
 /// just to build requests.
-pub use common::protocol::{CacheMode, Destination, FromNetwork, NetRequest, NetResponse, ToNetwork};
+pub use common::protocol::{CacheMode, Destination, FromNetwork, NetRequest, NetResponse, ToNetwork, WsData, WsEvent};

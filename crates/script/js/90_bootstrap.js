@@ -21,10 +21,19 @@
   // WindowProperties: named access to elements by id (window.myId)
   const namedPropsTarget = Object.create(EventTarget.prototype);
   const NAMED_SEL_CACHE = new Map();
+  const INDEX_RE = /^(0|[1-9][0-9]{0,8})$/;
   function namedWindowProp(name) {
     if (name === '' || name.length > 256) return undefined;
+    if (INDEX_RE.test(name)) {
+      const f = L.childFrames()[+name];
+      return f === undefined ? undefined : L.remoteWindowFor(f);
+    }
     let id = 0;
+    // A child browsing context with that name comes first (window.frames['__tcfapiLocator']).
+    try { id = N.querySelector(docId, `iframe[name=${L.cssString(name)}],frame[name=${L.cssString(name)}]`); } catch (_) { id = 0; }
+    if (id !== 0 && !notYetParsed(id)) return L.remoteWindowFor(id);
     try { id = N.getElementById(name); } catch (_) { id = 0; }
+    if (id !== 0 && notYetParsed(id)) id = 0;
     if (id !== 0) return wrap(id);
     let sel = NAMED_SEL_CACHE.get(name);
     if (sel === undefined) {
@@ -34,7 +43,21 @@
       NAMED_SEL_CACHE.set(name, sel);
     }
     try { id = N.querySelector(docId, sel); } catch (_) { id = 0; }
+    if (id !== 0 && notYetParsed(id)) id = 0;
     return id === 0 ? undefined : wrap(id);
+  }
+  // The whole document is parsed before scripts run. While a parser-blocking script
+  // runs, parser-created elements after its insertion point would not exist yet in a
+  // browser: named access must not find them (`window.cfg = window.cfg || {}` next to a
+  // later `<script id=cfg>` would keep the element). Elements created later have higher
+  // ids than any parser-created one.
+  let parserMaxNodeId = 0;
+  function notYetParsed(id) {
+    try {
+      if (id > parserMaxNodeId || inParserScript === null || writeState === null) return false;
+      const pos = N.compareDocumentPosition(writeState.anchor, id);
+      return (pos & 4) !== 0 && (pos & 16) === 0;
+    } catch (_) { return false; }
   }
   const WindowProperties = new Proxy(namedPropsTarget, {
     get(t, p, r) {
@@ -81,8 +104,8 @@
   defGetter('window', function window() { return g; }, { unforgeable: true });
   defGetter('self', function self() { return g; }, { replaceable: true });
   defGetter('frames', function frames() { return g; }, { replaceable: true });
-  defGetter('parent', function parent() { return g; }, { replaceable: true });
-  defGetter('top', function top() { return g; }, { unforgeable: true });
+  defGetter('parent', function parent() { return L.parentWindow(); }, { replaceable: true });
+  defGetter('top', function top() { return L.windowTop(); }, { unforgeable: true });
   defGetter('document', function document_() { return document; }, { unforgeable: true });
   Object.defineProperty(g, 'location', {
     get: function location() { return L.location; },
@@ -111,11 +134,22 @@
   defGetter('crossOriginIsolated', () => false);
   defGetter('originAgentCluster', () => false);
   defGetter('closed', () => false);
-  defGetter('length', () => 0, { replaceable: true });
+  defGetter('length', () => L.childFrames().length, { replaceable: true });
   defGetter('opener', () => null, { replaceable: true });
-  defGetter('frameElement', () => null);
-  let windowName = '';
-  defGetter('name', () => windowName, { set(v) { windowName = `${v}`; } });
+  // The <iframe> in the parent realm hosting this window (null at the top
+  // or across origins).
+  defGetter('frameElement', () => {
+    if (typeof N.frameElement !== 'function') return null;
+    try { return N.frameElement() ?? null; } catch (_) { return null; }
+  });
+  let windowName = null; // read from the host on first use (not while snapshotting)
+  const getWindowName = () => {
+    if (windowName === null) {
+      try { windowName = N.initialWindowName(); } catch (_) { windowName = ''; }
+    }
+    return windowName;
+  };
+  defGetter('name', getWindowName, { set(v) { windowName = `${v}`; } });
   let windowStatus = '';
   defGetter('status', () => windowStatus, { set(v) { windowStatus = `${v}`; } });
   const vp = () => N.viewport();
@@ -150,10 +184,17 @@
     if (arguments.length === 0) throw new TypeError("Failed to execute 'reportError' on 'Window': 1 argument required, but only 0 present.");
     L.reportException(e);
   });
-  defMethod('postMessage', function postMessage(message, targetOrigin, transfer) {
-    if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-    L.windowPostMessage(message, targetOrigin, transfer);
-  });
+  // The native itself (an API function): V8 then knows the calling realm, so a message
+  // from another frame's script has that frame as its source (see hook windowPostMessage).
+  const postMessageFn = typeof N.windowPostMessage === 'function'
+    ? N.windowPostMessage
+    : function postMessage(message, targetOrigin, transfer) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+      L.windowPostMessage(message, targetOrigin, transfer, null);
+    };
+  Object.defineProperty(postMessageFn, 'name', { value: 'postMessage', configurable: true });
+  Object.defineProperty(postMessageFn, 'length', { value: 1, configurable: true });
+  defMethod('postMessage', postMessageFn);
   defMethod('getSelection', function getSelection() { return L.getSelection(); });
   function scrollArgs(a, b, relative) {
     const v = N.viewport();
@@ -183,7 +224,7 @@
     const p = N.urlParse(u, L.baseURL());
     if (p === null) throw new DOMException(`Failed to execute 'open' on 'Window': Unable to open a window with invalid URL '${u}'.`, 'SyntaxError');
     const t = target === undefined || target === null || `${target}` === '' ? '_blank' : `${target}`;
-    if (t === '_self' || t === '_top' || t === '_parent' || (windowName !== '' && t === windowName)) {
+    if (t === '_self' || t === '_top' || t === '_parent' || (getWindowName() !== '' && t === getWindowName())) {
       if (p[1] === 'javascript:') { L.postTask(() => L.runJavascriptURL(p[0])); return g; }
       N.navigate(p[0], false);
       return g;
@@ -373,7 +414,11 @@
     const prevWrite = writeState;
     L.currentScript = rec.el;
     if (mode === 'parser') { inParserScript = rec; writeState = { anchor: rec.id, stack: [] }; }
-    else if (mode === 'nonblocking') inNonBlockingScript++;
+    // HTML "ignore-destructive-writes counter": while any external script without an
+    // insertion point runs (async/defer, or inserted by another script, e.g. an ad
+    // loader), document.write() must not implicitly reopen and wipe the document.
+    const ignoresWrites = mode === 'nonblocking' || (mode === 'dynamic' && rec.external);
+    if (ignoresWrites) inNonBlockingScript++;
     try {
       N.evalScript(rec.source === null ? '' : rec.source, rec.external ? rec.url : L.documentURL(), !rec.external);
     } catch (e) {
@@ -381,7 +426,7 @@
     } finally {
       L.currentScript = prevScript;
       if (mode === 'parser') { inParserScript = prevParser; lastParserAnchor = writeState.anchor; writeState = prevWrite; }
-      else if (mode === 'nonblocking') inNonBlockingScript--;
+      if (ignoresWrites) inNonBlockingScript--;
     }
     if (rec.external) fireScriptEvent(rec.el, 'load');
   }
@@ -399,11 +444,28 @@
     });
   }
 
+  let parserSeq = 0;               // document order of parser-inserted scripts
+  const asyncWaiting = [];         // fetched async scripts the parser has not reached yet
+  function asyncMayRun(rec) {
+    return rec.seq === undefined || parsingFinished || parserQueue.length === 0 || parserQueue[0].seq > rec.seq;
+  }
+  function releaseAsync() {
+    for (let i = 0; i < asyncWaiting.length;) {
+      const w = asyncWaiting[i];
+      if (asyncMayRun(w.rec)) { asyncWaiting.splice(i, 1); L.postTask(w.run); } else i++;
+    }
+  }
+  // Parser-blocking scripts written (document.write) during the current parser step,
+  // already queued ahead of the rest: later writes queue behind them (two written
+  // `<script src>`s ran in reverse order when the second one arrived first).
+  let writtenQueued = 0;
   function pumpParser() {
     if (parserQueue.length === 0) { finishParsing(); return; }
     const rec = parserQueue[0];
     if (rec.state === 'pending') return;
     parserQueue.shift();
+    writtenQueued = 0;
+    if (asyncWaiting.length) releaseAsync();
     L.internalTimeout(pumpParser, 0); // next parser step runs in its own task
     if (rec.state === 'error') { fireScriptEvent(rec.el, 'error'); return; }
     if (rec.type === 'module') { deferQueue.push(rec); return; }
@@ -412,6 +474,7 @@
   function finishParsing() {
     if (parsingFinished) return;
     parsingFinished = true;
+    if (asyncWaiting.length) releaseAsync();
     registerBodyHandlers();
     L.milestones.domInteractive = N.now();
     setReadyState('interactive');
@@ -479,10 +542,17 @@
       if (rec.external && rec.async) {
         asyncPending++;
         startScriptFetch(rec, (r) => {
-          asyncPending--;
-          if (r.state === 'error') fireScriptEvent(r.el, 'error');
-          else execClassic(r, 'nonblocking');
-          maybeFireLoad();
+          const run = () => {
+            asyncPending--;
+            if (r.state === 'error') fireScriptEvent(r.el, 'error');
+            else execClassic(r, 'nonblocking');
+            maybeFireLoad();
+          };
+          // An async script cannot run before the parser has reached it: earlier
+          // parser-blocking and inline scripts go first (consent managers configure
+          // themselves in an inline script before their async loader).
+          if (asyncMayRun(r)) run();
+          else asyncWaiting.push({ rec: r, run });
         });
         return 'async';
       }
@@ -513,12 +583,14 @@
     if (typeof N.doctype === 'function') { try { dt = N.doctype(); } catch (_) { /* keep default */ } }
     if (dt === null || dt === undefined) L.quirksMode = true;
     else L.ensureDoctype(docId, dt);
+    for (const id of N.querySelectorAll(docId, '*')) if (id > parserMaxNodeId) parserMaxNodeId = id;
     const ids = N.querySelectorAll(docId, 'script');
     for (const id of ids) {
       L.pendingScripts.delete(id);
       if (N.closest(id, 'template') !== 0) continue;
       const rec = makeRecord(id, true);
       if (rec === null) continue;
+      rec.seq = ++parserSeq;
       if (rec.state === 'error' && rec.external) { L.postTask(() => fireScriptEvent(rec.el, 'error')); continue; }
       if (scheduleParserRecord(rec) === 'blocking') parserQueue.push(rec);
     }
@@ -631,7 +703,10 @@
       const kind = scheduleParserRecord(rec);
       if (kind === 'blocking') { queued.push(rec); blocked = true; }
     }
-    if (queued.length) parserQueue = queued.concat(parserQueue);
+    if (queued.length) {
+      parserQueue.splice(Math.min(writtenQueued, parserQueue.length), 0, ...queued);
+      writtenQueued += queued.length;
+    }
   }
   function writeAtInsertionPoint(ws, html) {
     // pure closing tags close previously written open elements
@@ -867,6 +942,16 @@
       }
     };
   }
+  // CSS animation/transition events recorded by the style engine.
+  function onAnimationEvent(id, type, name, elapsedTime, pseudoElement) {
+    if (!N.isConnected(id)) return;
+    const el = L.wrap(id);
+    if (type.startsWith('animation')) {
+      L.fire(el, type, { bubbles: true, animationName: name, elapsedTime, pseudoElement }, L.AnimationEvent);
+    } else {
+      L.fire(el, type, { bubbles: true, propertyName: name, elapsedTime, pseudoElement }, L.TransitionEvent);
+    }
+  }
   N.setHooks({
     onDocumentParsed: guard(onDocumentParsed),
     onEvent: guardFlags(onEvent),
@@ -883,6 +968,16 @@
     onUnhandledRejection: guard(onUnhandledRejection),
     onRejectionHandled: guard(onRejectionHandled),
     onError: guard(onError),
+    onWebSocket: guard(L.onWebSocket),
+    onFetchProgress: guard(L.onFetchProgress),
+    onAnimationEvent: guard(onAnimationEvent),
+    onMessage: guard(L.onMessage),
+    // Wrapper for a node of this realm's document (used by `frameElement`
+    // of a child realm).
+    wrapNode: (id) => wrap(id),
+    nodeTypeOf: (o) => (isNode(o) ? typeOf(o) : 0),
+    // Not guarded: its exceptions are the caller's (invalid target origin, DataCloneError).
+    windowPostMessage: (message, targetOrigin, transfer, source) => L.windowPostMessage(message, targetOrigin, transfer, source),
   });
 
   // =======================================================================================

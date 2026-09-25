@@ -114,6 +114,7 @@ input[type="button"] {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
 }
 
 /* Button-flavored inputs clip their contents to the border box and never

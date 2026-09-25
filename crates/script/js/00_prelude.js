@@ -78,13 +78,16 @@
   // Convert an exception thrown by a native function ("HierarchyRequestError: ...") into
   // a DOMException (or a proper TypeError/RangeError).
   const NATIVE_ERR_RE = /^([A-Za-z]+Error):\s?([\s\S]*)$/;
+  // DOMException names without a legacy code.
+  const MODERN_DOMEXC = ['EncodingError', 'NotReadableError', 'UnknownError', 'ConstraintError', 'DataError',
+    'TransactionInactiveError', 'ReadOnlyError', 'VersionError', 'OperationError', 'NotAllowedError'];
   L.fromNative = function (e) {
     if (e instanceof DOMException) return e;
     const msg = e && typeof e.message === 'string' ? e.message : null;
     if (msg !== null) {
       const m = NATIVE_ERR_RE.exec(msg);
       if (m) {
-        if (m[1] in DOMEXC_CODES) return new DOMException(m[2], m[1]);
+        if (m[1] in DOMEXC_CODES || MODERN_DOMEXC.includes(m[1])) return new DOMException(m[2], m[1]);
         if (m[1] === 'TypeError') return new TypeError(m[2]);
         if (m[1] === 'RangeError') return new RangeError(m[2]);
       }
@@ -97,14 +100,16 @@
   // namespace code, stamped onto an object created with Object.create(proto).
   // ---------------------------------------------------------------------------------------
   class StampBase { constructor(o) { return o; } }
+  // `#rm` marks the realm: the private names may be shared by the realms (V8 contexts)
+  // of one page, and a node id only means something in its own realm's document.
   class NodeStamp extends StampBase {
-    #id; #t; #ln; #ns;
-    constructor(o, id, t, ln, ns) { super(o); this.#id = id; this.#t = t; this.#ln = ln; this.#ns = ns; }
+    #id; #t; #ln; #ns; #rm;
+    constructor(o, id, t, ln, ns) { super(o); this.#id = id; this.#t = t; this.#ln = ln; this.#ns = ns; this.#rm = L; }
     static id(o) { return o.#id; }
     static type(o) { return o.#t; }
     static ln(o) { return o.#ln; }
     static ns(o) { return o.#ns; }
-    static is(o) { return typeof o === 'object' && o !== null && #id in o; }
+    static is(o) { return typeof o === 'object' && o !== null && #id in o && o.#rm === L; }
     static setNs(o, ns) { o.#ns = ns; }
   }
   // o: wrapper object, id: native node id, t: nodeType, ln: local name ('' for non-elements),
@@ -116,6 +121,11 @@
   L.nsOf = NodeStamp.ns;
   L.isNode = NodeStamp.is;
   L.setStampNs = NodeStamp.setNs;
+  // The nodeType of a node wrapper of another realm of this page (0: not one).
+  L.foreignNodeType = function (o) {
+    if (typeof o !== 'object' || o === null || typeof N.foreignNodeType !== 'function') return 0;
+    try { return N.foreignNodeType(o) | 0; } catch (_) { return 0; }
+  };
   L.nodeArg = function (o, method, n) {
     if (NodeStamp.is(o)) return NodeStamp.id(o);
     throw new TypeError(`Failed to execute '${method || 'operation'}': parameter ${n || 1} is not of type 'Node'.`);

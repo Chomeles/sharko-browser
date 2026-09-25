@@ -224,6 +224,13 @@ impl<'b, B: Brush> TreeBuilder<'b, B> {
         self.lcx.tree_style_builder.push_text(text);
     }
 
+    /// PATCH: commit the pending text (white-space collapsing carries across) and return
+    /// the length of the layout's text so far (to map DOM text to layout offsets).
+    pub fn committed_text_len(&mut self) -> usize {
+        self.lcx.tree_style_builder.push_uncommitted_text(false);
+        self.lcx.tree_style_builder.current_text_len()
+    }
+
     /// PATCH: push an in-flow inline box that is transparent to white-space collapsing
     /// (e.g. a spacer for an inline element's padding): a space after it still collapses
     /// with a space before it, as if the box weren't there.

@@ -38,6 +38,10 @@ impl BaseDocument {
         node_id: NodeId,
         damage_from_parent: RestyleDamage,
     ) -> RestyleDamage {
+        // PATCH: see `clear_damage_and_dirty_flags`.
+        if !self.nodes.contains_key(node_id) {
+            return RestyleDamage::empty();
+        }
         let mut damage = if let Some(data) = self.nodes[node_id]
             .stylo_element_data_opt_mut()
             .and_then(|s| s.get_mut())
@@ -135,6 +139,11 @@ impl BaseDocument {
     /// on all nodes which may carry them, using the `damaged_descendants`
     /// flags to skip clean subtrees (mirroring `propagate_damage_flags`).
     pub(crate) fn clear_damage_and_dirty_flags(&mut self, node_id: NodeId) {
+        // PATCH: tolerate ids of nodes that were dropped meanwhile (a panic here left
+        // welt.de blank).
+        if !self.nodes.contains_key(node_id) {
+            return;
+        }
         {
             let node = &self.nodes[node_id];
             let has_damage = node.damage().is_some_and(|d| !d.is_empty());
@@ -528,7 +537,7 @@ impl BaseDocument {
                                 doc_id,
                                 None, // Don't pass node_id, we'll handle via pending_images
                                 self.shell_provider.clone(),
-                                ImageHandler::new(kind.image_type(idx)),
+                                ImageHandler::new(kind.image_type(idx), url_str.to_string()),
                             ),
                         );
 
@@ -556,6 +565,10 @@ impl BaseDocument {
         let display = {
             let node = self.nodes.get_mut(node_id).unwrap();
             let _damage = node.damage().unwrap_or(ALL_DAMAGE);
+            let is_button = node
+                .data
+                .downcast_element()
+                .is_some_and(|el| el.name.local == crate::local_name!("button"));
 
             // Compute the owned taffy style and display in an inner scope so the
             // immutable borrow of `node` (held by the stylo element data guard)
@@ -584,6 +597,27 @@ impl BaseDocument {
                         right: taffy::LengthPercentageAuto::auto(),
                         top: taffy::LengthPercentageAuto::auto(),
                         bottom: taffy::LengthPercentageAuto::auto(),
+                    };
+                }
+                // PATCH: buttons center their contents with the UA's `justify-content:
+                // center` (they are inline-flex containers, not blocks with an anonymous
+                // content box as in browsers), so `text-align: left/right` on a button
+                // aligns its contents instead.
+                if is_button
+                    && taffy_style.display == taffy::Display::Flex
+                    && taffy_style.flex_direction == taffy::FlexDirection::Row
+                    && taffy_style.justify_content == Some(taffy::JustifyContent::CENTER)
+                {
+                    use style::values::specified::TextAlignKeyword;
+                    let rtl = style.clone_direction() == style::computed_values::direction::T::Rtl;
+                    let start = taffy::JustifyContent::FLEX_START;
+                    let end = taffy::JustifyContent::FLEX_END;
+                    taffy_style.justify_content = match style.clone_text_align() {
+                        TextAlignKeyword::Left | TextAlignKeyword::MozLeft => Some(if rtl { end } else { start }),
+                        TextAlignKeyword::Right | TextAlignKeyword::MozRight => Some(if rtl { start } else { end }),
+                        TextAlignKeyword::Start => Some(start),
+                        TextAlignKeyword::End => Some(end),
+                        _ => taffy_style.justify_content,
                     };
                 }
                 (taffy_style, style.clone_display())
@@ -619,24 +653,6 @@ impl BaseDocument {
         if let Some(mut children) = children {
             let is_flex_or_grid = matches!(display, taffy::Display::Flex | taffy::Display::Grid);
 
-            // Recursively call flush_styles_to_layout on each child
-            for &child in children.iter() {
-                // PATCH: a subtree without damage keeps the taffy styles, paint order and
-                // stacking contexts of its last flush (unless it contributes hoisted
-                // children to this stacking context, or its flex/grid item status changed).
-                if incremental && self.flush_is_clean(child, is_flex_or_grid) {
-                    continue;
-                }
-                self.flush_styles_to_layout_impl(
-                    child,
-                    match self.nodes[child].is_stacking_context_root(is_flex_or_grid) {
-                        true => None,
-                        false => Some(stacking_context),
-                    },
-                );
-                self.nodes[child].flags.set(NodeFlags::FLUSHED_AS_ITEM, is_flex_or_grid);
-            }
-
             // Sort layout_children
             if is_flex_or_grid {
                 children.sort_by(|left, right| {
@@ -647,38 +663,57 @@ impl BaseDocument {
             }
 
             // Reserve space for paint_children
-            let mut paint_children = self.nodes[node_id].paint_children.borrow_mut();
+            let mut paint_children = self.nodes[node_id].paint_children.borrow_mut().take();
             if paint_children.is_none() {
-                *paint_children = Some(ThinVec::new());
+                paint_children = Some(ThinVec::new());
             }
-            let paint_children = paint_children.as_mut().unwrap();
+            let mut paint_children = paint_children.unwrap();
             paint_children.clear();
             paint_children.reserve(children.len());
 
-            // Push children to either paint_children or layout_children depending on
+            // PATCH: push each child to either paint_children or this stacking context, then
+            // flush its subtree (which appends the children it hoists), so that hoisted
+            // children are in (order-modified) tree order. Descendants used to come before
+            // the direct children, and with equal z-indexes a consent dialog's backdrop was
+            // painted (and hit) above the dialog.
             for &child_id in children.iter() {
                 let child = &self.nodes[child_id];
 
-                let Some(style) = child.primary_styles() else {
-                    paint_children.push(child_id);
-                    continue;
-                };
+                match child.primary_styles() {
+                    None => paint_children.push(child_id),
+                    Some(style) => {
+                        let position = style.clone_position();
+                        let z_index = style.clone_z_index().integer_or(0);
 
-                let position = style.clone_position();
-                let z_index = style.clone_z_index().integer_or(0);
-
-                // TODO: more complete hoisting detection
-                // z-index applies to static flex/grid items too
-                // (css-flexbox-1 §painting, css-grid-1 §z-order).
-                if z_index != 0 && (position != Position::Static || is_flex_or_grid) {
-                    stacking_context.children.push(HoistedPaintChild {
-                        node_id: child_id,
-                        z_index,
-                        position: taffy::Point::ZERO,
-                    })
-                } else {
-                    paint_children.push(child_id);
+                        // TODO: more complete hoisting detection
+                        // z-index applies to static flex/grid items too
+                        // (css-flexbox-1 §painting, css-grid-1 §z-order).
+                        if z_index != 0 && (position != Position::Static || is_flex_or_grid) {
+                            stacking_context.children.push(HoistedPaintChild {
+                                node_id: child_id,
+                                z_index,
+                                position: taffy::Point::ZERO,
+                            })
+                        } else {
+                            paint_children.push(child_id);
+                        }
+                    }
                 }
+
+                // PATCH: a subtree without damage keeps the taffy styles, paint order and
+                // stacking contexts of its last flush (unless it contributes hoisted
+                // children to this stacking context, or its flex/grid item status changed).
+                if incremental && self.flush_is_clean(child_id, is_flex_or_grid) {
+                    continue;
+                }
+                self.flush_styles_to_layout_impl(
+                    child_id,
+                    match self.nodes[child_id].is_stacking_context_root(is_flex_or_grid) {
+                        true => None,
+                        false => Some(stacking_context),
+                    },
+                );
+                self.nodes[child_id].flags.set(NodeFlags::FLUSHED_AS_ITEM, is_flex_or_grid);
             }
 
             // Sort paint_children
@@ -688,6 +723,8 @@ impl BaseDocument {
                 node_to_paint_order(left_node, is_flex_or_grid)
                     .cmp(&node_to_paint_order(right_node, is_flex_or_grid))
             });
+
+            *self.nodes[node_id].paint_children.borrow_mut() = Some(paint_children);
 
             // Put children back
             *self.nodes[node_id].layout_children.borrow_mut() = Some(children);

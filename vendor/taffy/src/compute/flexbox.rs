@@ -1328,6 +1328,28 @@ fn determine_container_main_size(
 
                 if lines.len() > 1 {
                     f32_max(size, main_axis_available_space)
+                } else if dir.is_row() {
+                    // PATCH: a single-line row container is fit-content wide: its max-content
+                    // width clamped to the available space, but not below the sum of its
+                    // items' minimum sizes. It used to keep its max-content width, so e.g. a
+                    // flex row of text in a column with `align-items: flex-start` didn't wrap.
+                    let min_line_length: f32 = lines
+                        .iter()
+                        .map(|line| {
+                            line.items
+                                .iter()
+                                .map(|child| {
+                                    let padding_border_sum =
+                                        (child.padding + child.border).main_axis_sum(constants.dir);
+                                    (child.resolved_minimum_main_size + child.margin.main_axis_sum(constants.dir))
+                                        .max(padding_border_sum)
+                                })
+                                .sum::<f32>()
+                                + sum_axis_gaps(main_axis_gap, line.items.len())
+                        })
+                        .max_by(|a, b| a.total_cmp(b))
+                        .unwrap_or(0.0);
+                    f32_max(min_line_length + main_content_box_inset, f32_min(size, main_axis_available_space))
                 } else {
                     size
                 }
@@ -2381,6 +2403,7 @@ fn calculate_flex_item(
     total_offset_cross: f32,
     line_offset_cross: f32,
     #[cfg(feature = "content_size")] total_overflow_rect: &mut Rect<f32>,
+    #[cfg(feature = "content_size")] inflow_margin_end: &mut Point<f32>,
     #[cfg(feature = "content_size")] border: Rect<f32>,
     constants: &AlgoConstants,
 ) {
@@ -2494,14 +2517,40 @@ fn calculate_flex_item(
         } else {
             Point { x: location.x - border.left, y: location.y - border.top }
         };
-        *total_overflow_rect = total_overflow_rect.union(compute_scrollable_overflow_contribution(
+        let contribution = compute_scrollable_overflow_contribution(
             contribution_location,
             size,
             scrollable_overflow_rect,
             item.overflow,
             item.contain,
             constants.is_scroll_container,
-        ));
+        );
+        // CSS Overflow 3 §2.2: a flex item's margin box is part of the container's scrollable
+        // overflow (unless it lies wholly in a scroll container's unreachable region), and the
+        // container's end padding extends the region past the items' margin boxes.
+        let (start_margin_x, end_margin_x) = if layout_direction.is_rtl() {
+            (item.margin.right, item.margin.left)
+        } else {
+            (item.margin.left, item.margin.right)
+        };
+        let margin_box = Rect {
+            left: contribution_location.x - start_margin_x,
+            right: contribution_location.x + size.width + end_margin_x,
+            top: contribution_location.y - item.margin.top,
+            bottom: contribution_location.y + size.height + item.margin.bottom,
+        };
+        // Zero-area boxes contribute nothing (as for their border boxes).
+        let zero_area = size.width <= 0.0 || size.height <= 0.0;
+        let unreachable = constants.is_scroll_container && (margin_box.right <= 0.0 || margin_box.bottom <= 0.0);
+        if !zero_area && !unreachable {
+            inflow_margin_end.x = inflow_margin_end.x.max(margin_box.right);
+            inflow_margin_end.y = inflow_margin_end.y.max(margin_box.bottom);
+        }
+        *total_overflow_rect = total_overflow_rect.union(if zero_area || unreachable {
+            contribution
+        } else {
+            contribution.union(margin_box)
+        });
     }
 }
 
@@ -2512,6 +2561,7 @@ fn calculate_layout_line(
     line: &mut FlexLine,
     total_offset_cross: &mut f32,
     #[cfg(feature = "content_size")] overflow_rect: &mut Rect<f32>,
+    #[cfg(feature = "content_size")] inflow_margin_end: &mut Point<f32>,
     #[cfg(feature = "content_size")] border: Rect<f32>,
     constants: &AlgoConstants,
 ) {
@@ -2542,6 +2592,8 @@ fn calculate_layout_line(
                 #[cfg(feature = "content_size")]
                 overflow_rect,
                 #[cfg(feature = "content_size")]
+                inflow_margin_end,
+                #[cfg(feature = "content_size")]
                 border,
                 constants,
             );
@@ -2556,6 +2608,8 @@ fn calculate_layout_line(
                 line_offset_cross,
                 #[cfg(feature = "content_size")]
                 overflow_rect,
+                #[cfg(feature = "content_size")]
+                inflow_margin_end,
                 #[cfg(feature = "content_size")]
                 border,
                 constants,
@@ -2583,6 +2637,8 @@ fn final_layout_pass(
 
     #[cfg_attr(not(feature = "content_size"), allow(unused_mut))]
     let mut overflow_rect = Rect::ZERO;
+    #[cfg_attr(not(feature = "content_size"), allow(unused_mut, unused_variables))]
+    let mut inflow_margin_end = Point { x: 0.0f32, y: 0.0f32 };
 
     if constants.is_wrap_reverse {
         for line in flex_lines.iter_mut().rev() {
@@ -2592,6 +2648,8 @@ fn final_layout_pass(
                 &mut total_offset_cross,
                 #[cfg(feature = "content_size")]
                 &mut overflow_rect,
+                #[cfg(feature = "content_size")]
+                &mut inflow_margin_end,
                 #[cfg(feature = "content_size")]
                 constants.border,
                 constants,
@@ -2606,6 +2664,8 @@ fn final_layout_pass(
                 #[cfg(feature = "content_size")]
                 &mut overflow_rect,
                 #[cfg(feature = "content_size")]
+                &mut inflow_margin_end,
+                #[cfg(feature = "content_size")]
                 constants.border,
                 constants,
             );
@@ -2615,15 +2675,18 @@ fn final_layout_pass(
     // A scroll container's own padding at the end of the content is part of its scrollable
     // overflow region, so it is included in the overflow rect. Boxes that are not scroll
     // containers do not extend their overflow region by their own padding.
+    // (CSS Overflow 3 §2.2: the end padding extends the region past the items' margin boxes,
+    // not past overflow that descendants contribute.)
     #[cfg(feature = "content_size")]
     if constants.is_scroll_container {
-        overflow_rect.right += if constants.layout_direction.is_rtl() {
+        let end_padding_x = if constants.layout_direction.is_rtl() {
             constants.content_box_inset.left - constants.border.left - constants.scrollbar_gutter.x
         } else {
             constants.content_box_inset.right - constants.border.right - constants.scrollbar_gutter.x
         };
-        overflow_rect.bottom +=
-            constants.content_box_inset.bottom - constants.border.bottom - constants.scrollbar_gutter.y;
+        let end_padding_y = constants.content_box_inset.bottom - constants.border.bottom - constants.scrollbar_gutter.y;
+        overflow_rect.right = overflow_rect.right.max(inflow_margin_end.x + end_padding_x);
+        overflow_rect.bottom = overflow_rect.bottom.max(inflow_margin_end.y + end_padding_y);
     }
 
     overflow_rect

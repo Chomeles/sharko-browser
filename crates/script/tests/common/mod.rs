@@ -39,6 +39,12 @@ pub struct MockHost {
     pub history_pushes: RefCell<Vec<(String, bool)>>,
     pub referrer: RefCell<String>,
     pub clipboard: RefCell<Vec<String>>,
+    /// `postMessage`s to other frames: (target path, target origin, serialized message).
+    pub posted: RefCell<Vec<(Vec<u64>, String, Vec<u8>)>>,
+    /// This document's frame path (`[]`: the page).
+    pub frame_path: RefCell<Vec<u64>>,
+    /// Frames of other documents by frame path (`ScriptHost::frame_children`).
+    pub frame_lists: RefCell<HashMap<Vec<u64>, Vec<(u64, String)>>>,
 }
 
 impl ScriptHost for MockHost {
@@ -111,6 +117,23 @@ impl ScriptHost for MockHost {
     }
     fn clipboard_write(&self, text: &str) {
         self.clipboard.borrow_mut().push(text.to_string());
+    }
+    fn post_message(&self, target: &[u64], target_origin: &str, data: Vec<u8>) {
+        self.posted
+            .borrow_mut()
+            .push((target.to_vec(), target_origin.to_string(), data));
+    }
+    fn frame_path(&self) -> Vec<u64> {
+        self.frame_path.borrow().clone()
+    }
+    fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
+        self.frame_lists.borrow().get(path).cloned()
+    }
+    fn frame_host(&self, path: &[u64], _url: &str) -> Option<Rc<dyn ScriptHost>> {
+        let host = MockHost::default();
+        *host.frame_path.borrow_mut() = path.to_vec();
+        *host.frame_lists.borrow_mut() = self.frame_lists.borrow().clone();
+        Some(Rc::new(host))
     }
     fn fetch_sync(&self, req: NetRequest) -> Option<NetResponse> {
         let resp = self.respond(&req);

@@ -50,7 +50,7 @@ fn pointer(x: f32, y: f32, buttons: MouseEventButtons) -> BlitzPointerEvent {
 
 fn send(e: &mut Env, ev: UiEvent) {
     let doc: &mut dyn Document = &mut e.doc;
-    let mut driver = EventDriver::new(doc, JsEventHandler { runtime: &mut e.rt });
+    let mut driver = EventDriver::new(doc, JsEventHandler::new(&mut e.rt));
     driver.handle_ui_event(ev);
 }
 
@@ -534,4 +534,275 @@ fn js_layer_import_maps() {
     }
     assert!(e.host.errors().is_empty(), "{:#?}", e.host.errors());
     assert_eq!(e.eval("[d, u]"), r#"["dep+x","x"]"#);
+}
+
+/// Web Crypto on the aws-lc-rs natives: known answers (checked against Chromium) for
+/// AES-GCM, HMAC, PBKDF2 and SHA-256, and a failed authentication.
+#[test]
+fn js_layer_web_crypto() {
+    let mut e = js_env(PAGE);
+    e.eval(
+        r#"globalThis.cr = null; (async () => {
+      const S = crypto.subtle, enc = new TextEncoder();
+      const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+      const bytes = (n, s) => new Uint8Array(n).map((_, i) => (i * s + 7) & 255);
+      const msg = enc.encode('Hello, Sharko! The quick brown fox jumps over the lazy dog.');
+      const gcm = await S.importKey('raw', bytes(32, 3), 'AES-GCM', true, ['encrypt', 'decrypt']);
+      const params = { name: 'AES-GCM', iv: bytes(12, 5), additionalData: enc.encode('aad') };
+      const ct = await S.encrypt(params, gcm, msg);
+      const pt = new TextDecoder().decode(await S.decrypt(params, gcm, ct));
+      let tamper = 'none';
+      try { const c = new Uint8Array(ct).slice(); c[0] ^= 1; await S.decrypt(params, gcm, c); } catch (err) { tamper = err.name; }
+      const hm = await S.importKey('raw', bytes(32, 3), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+      const pb = await S.importKey('raw', enc.encode('password'), 'PBKDF2', false, ['deriveBits']);
+      const bits = await S.deriveBits({ name: 'PBKDF2', salt: enc.encode('salt'), iterations: 1000, hash: 'SHA-256' }, pb, 256);
+      cr = [hex(ct).slice(0, 32), pt.slice(0, 6), tamper, hex(await S.sign('HMAC', hm, msg)).slice(0, 16),
+        hex(bits).slice(0, 16), hex(await S.digest('SHA-256', msg)).slice(0, 16), String(gcm), gcm.algorithm.length];
+    })(); 1"#,
+    );
+    run_timers_for(&mut e, Duration::from_millis(10));
+    assert_eq!(
+        e.eval("cr"),
+        r#"["f5b251874e90c050b5106b700646beb4","Hello,","OperationError","a270d36291d79755","632c2812e46d4604","402e800b29584d63","[object CryptoKey]",256]"#
+    );
+}
+
+/// Same-origin iframes share the page's isolate with a V8 context (realm) each:
+/// `contentWindow`/`contentDocument` are the frame's real globals (created on demand),
+/// `parent`/`top`/`frameElement` cross realms, functions of one realm run against the
+/// other's document, `postMessage` goes both ways, and a realm goes away with its frame.
+#[test]
+fn js_layer_frame_realms() {
+    let mut page = js_env(
+        r#"<!DOCTYPE html><html><body><iframe id="f" srcdoc="<p id=p>child</p>"></iframe><div id="d"></div></body></html>"#,
+    );
+    let iframe = page.doc.get_element_by_id("f").unwrap().as_u64();
+    assert!(!page.rt.has_frame(&[iframe], None));
+
+    // The page reaches into the frame: its realm is created on first access.
+    assert_eq!(
+        page.eval(
+            "const f = document.getElementById('f'); const w = f.contentWindow; \
+             [w !== window, w.document === f.contentDocument, w.document.getElementById('p').textContent, \
+              w.parent === window, w.top === window, w.frameElement === f, w.document.defaultView === w, \
+              String(w), w.Array !== Array, w.document.body.ownerDocument === w.document, \
+              window.length, frames[0] === w, w.location.href, f.contentWindow === w]"
+        ),
+        r#"[true,true,"child",true,true,true,true,"[object Window]",true,true,1,true,"https://example.com/dir/page.html",true]"#
+    );
+    assert!(page.rt.has_frame(&[iframe], None));
+    assert_eq!(page.rt.frames(), vec![vec![iframe]]);
+
+    // The frame reaches into the page, and functions cross realms in both directions.
+    page.eval("globalThis.fromFrame = []; globalThis.ping = (x) => { fromFrame.push(x); return document.getElementById('d').id; }; 1");
+    assert_eq!(
+        page.rt
+            .eval_in(
+                &mut page.doc,
+                &[iframe],
+                "[parent.ping('hi'), parent.document.getElementById('d') !== null, \
+                  frameElement.id, parent.frames[0] === window, top === parent, \
+                  parent.document.getElementById('f').contentWindow === window, document.getElementById('p').tagName]"
+            )
+            .unwrap(),
+        r#"["d",true,"f",true,true,true,"P"]"#
+    );
+    assert_eq!(page.eval("fromFrame"), r#"["hi"]"#);
+    // Nodes built by one realm's functions belong to that realm's document.
+    assert_eq!(
+        page.eval(
+            "const fd = f.contentDocument; const el = fd.createElement('span'); el.textContent = 'x'; fd.body.append(el); \
+             [fd.body.innerHTML, el.ownerDocument === fd, fd.body.contains(el), document.contains(el)]"
+        ),
+        r#"["<p id=\"p\">child</p><span>x</span>",true,true,false]"#
+    );
+
+    // postMessage both ways (structured clone, origin, source identity): a call of the
+    // page's `postMessage` from the frame's script has the frame's window as its source
+    // (V8's incumbent realm), a self-post the window itself.
+    page.eval(
+        "globalThis.got = []; addEventListener('message', (e) => got.push([e.data.a.join(), e.origin, e.source === w, e.source === window])); \
+         w.addEventListener('message', (e) => w.got2 = [e.data, e.source === window, e.source === w]); 1",
+    );
+    page.rt
+        .eval_in(&mut page.doc, &[iframe], "parent.postMessage({ a: [1, 2] }, '*'); 1")
+        .unwrap();
+    run_timers_for(&mut page, Duration::from_millis(50));
+    assert_eq!(page.eval("got"), r#"[["1,2","https://example.com",true,false]]"#);
+    page.eval("w.postMessage('hi', 'https://example.com'); 1");
+    run_timers_for(&mut page, Duration::from_millis(50));
+    assert_eq!(page.eval("w.got2"), r#"["hi",true,false]"#);
+    page.eval("got.length = 0; postMessage({ a: [3] }, '*'); 1");
+    run_timers_for(&mut page, Duration::from_millis(50));
+    assert_eq!(page.eval("got"), r#"[["3","https://example.com",false,true]]"#);
+    let err = page.eval_err("w.postMessage('x', 'nope')");
+    assert!(
+        err.starts_with("SyntaxError: Failed to execute 'postMessage' on 'Window': Invalid target origin 'nope'"),
+        "{err}"
+    );
+    assert!(page.host.posted.borrow().is_empty());
+
+    // A src-less iframe has an about:blank document that scripts can fill.
+    assert_eq!(
+        page.eval(
+            "const i = document.createElement('iframe'); i.name = '__tcfapiLocator'; document.body.append(i); \
+             const d2 = i.contentDocument; d2.body.innerHTML = '<b>late</b>'; \
+             [typeof i.contentWindow, d2.body.textContent, window.length, frames[1] === i.contentWindow, \
+              window.__tcfapiLocator === i.contentWindow, i.contentWindow.parent === window, \
+              i.contentWindow.frameElement === i]"
+        ),
+        r#"["object","late",2,true,true,true,true]"#
+    );
+
+    // The window object outlives its document (the WindowProxy): after the frame's
+    // document is replaced, the same object is the new document's window (with a fresh
+    // global state).
+    assert_eq!(
+        page.eval(
+            "globalThis.w0 = i.contentWindow; w0.marker = 1; i.srcdoc = '<p id=n>new</p>'; const w1 = i.contentWindow; \
+             [w1 === w0, w0.document.getElementById('n') !== null, w0.marker, i.contentDocument === w0.document, \
+              w0.frameElement === i, w0.parent === window, w0.document.getElementById('n').ownerDocument === w0.document]"
+        ),
+        "[true,true,null,true,true,true,true]"
+    );
+    assert_eq!(page.rt.frames().len(), 2);
+
+    // Removing the iframe drops its realm; objects the page still holds keep working.
+    page.eval("f.remove(); 1");
+    page.rt.remove_frame(&[iframe]);
+    assert!(!page.rt.has_frame(&[iframe], None));
+    assert_eq!(page.eval("[typeof w.postMessage, f.contentWindow, w.parent === window]"), r#"["function",null,true]"#);
+    assert_eq!(page.eval("1 + 1"), "2");
+    drop(page);
+}
+
+/// Canvas 2D (tiny-skia natives): fills, strokes, transforms, gradients, clipping, pixel
+/// access, text metrics and PNG export; the pixels reach the element's image data.
+#[test]
+fn js_layer_canvas_2d() {
+    let mut e = js_env(
+        r#"<!DOCTYPE html><html><body><canvas id="c" width="100" height="60"></canvas></body></html>"#,
+    );
+    let r = e.eval(
+        r#"(() => {
+          const c = document.getElementById('c'), x = c.getContext('2d');
+          const px = (a, b) => Array.from(x.getImageData(a, b, 1, 1).data).join(',');
+          x.fillStyle = 'red'; x.fillRect(0, 0, 10, 10);
+          x.save(); x.translate(20, 0); x.rotate(Math.PI / 2); x.fillStyle = 'rgb(0, 0, 255)'; x.fillRect(0, 0, 10, 10); x.restore();
+          x.beginPath(); x.rect(30, 0, 10, 10); x.clip(); x.fillStyle = 'lime'; x.fillRect(0, 0, 100, 60);
+          x.restore(); x.save();
+          const g = x.createLinearGradient(0, 0, 100, 0); g.addColorStop(0, '#000'); g.addColorStop(1, '#fff');
+          x.globalAlpha = 1;
+          const out = [px(5, 5), px(15, 5), px(35, 5), px(50, 5), x.fillStyle, x.getTransform().e];
+          const y = document.createElement('canvas').getContext('2d');
+          y.canvas.width = 50; y.canvas.height = 20;
+          y.fillStyle = g; y.fillRect(0, 0, 50, 20);
+          y.lineWidth = 4; y.strokeStyle = '#008000'; y.beginPath(); y.moveTo(0, 18); y.lineTo(50, 18); y.stroke();
+          const d = y.getImageData(0, 0, 50, 20).data;
+          out.push(d[0] < d[4 * 40], d[(18 * 50 + 10) * 4 + 1], y.measureText('Hallo').width > 10, c.toDataURL().startsWith('data:image/png;base64,iVBOR'));
+          y.putImageData(new ImageData(new Uint8ClampedArray([1, 2, 3, 255]), 1, 1), 0, 0);
+          out.push(Array.from(y.getImageData(0, 0, 1, 1).data).join(','));
+          return out;
+        })()"#,
+    );
+    assert_eq!(
+        r,
+        r##"["255,0,0,255","0,0,255,255","0,255,0,255","0,0,0,0","#00ff00",0,true,128,true,true,"1,2,3,255"]"##
+    );
+    // The pixels were handed to the document for painting.
+    let id = e.doc.get_element_by_id("c").unwrap();
+    let el = e.doc.get_node(id).unwrap().element_data().unwrap();
+    let img = el.raster_image_data().expect("canvas image data");
+    assert_eq!((img.width, img.height), (100, 60));
+    assert_eq!(&img.data.data()[..4], &[255, 0, 0, 255]);
+}
+
+/// CompressionStream / DecompressionStream round trips (gzip, deflate, deflate-raw) and
+/// errors for bad formats and corrupt input.
+#[test]
+fn js_layer_compression_streams() {
+    let mut e = js_env(PAGE);
+    e.eval(
+        r#"globalThis.zr = null; (async () => {
+          const text = 'Hallo Sharko! '.repeat(200);
+          const pipe = async (stream, bytes) => {
+            const w = stream.writable.getWriter(); w.write(bytes.slice(0, 7)); w.write(bytes.slice(7)); w.close();
+            const r = stream.readable.getReader(); const parts = [];
+            for (;;) { const { value, done } = await r.read(); if (done) break; parts.push(...value); }
+            return new Uint8Array(parts);
+          };
+          const out = [];
+          for (const f of ['gzip', 'deflate', 'deflate-raw']) {
+            const packed = await pipe(new CompressionStream(f), new TextEncoder().encode(text));
+            const back = new TextDecoder().decode(await pipe(new DecompressionStream(f), packed));
+            out.push([f, packed.length < 200, back === text]);
+          }
+          let bad = 'none'; try { new CompressionStream('brotli'); } catch (err) { bad = err.name; }
+          let corrupt = 'none'; try { await pipe(new DecompressionStream('gzip'), new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9])); } catch (err) { corrupt = err.name; }
+          out.push(bad, corrupt, packedMagic(await pipe(new CompressionStream('gzip'), new Uint8Array([1]))));
+          zr = out;
+          function packedMagic(b) { return b[0] === 0x1f && b[1] === 0x8b; }
+        })(); 1"#,
+    );
+    run_timers_for(&mut e, Duration::from_millis(50));
+    assert_eq!(
+        e.eval("zr"),
+        r#"[["gzip",true,true],["deflate",true,true],["deflate-raw",true,true],"TypeError","TypeError",true]"#
+    );
+}
+
+/// Range.getClientRects()/getBoundingClientRect() of text measure the selected text (not
+/// its element), one rect per line; a trailing <br> adds no empty line.
+#[test]
+fn js_layer_text_range_rects() {
+    let mut e = js_env(
+        r#"<!DOCTYPE html><html><body style="margin:0;font:16px sans-serif">
+        <div id="a" style="padding-left:30px">hello world</div>
+        <div id="w" style="width:90px">one two three four five six seven</div>
+        <div id="br">text<br></div><div id="nobr">text</div>
+        </body></html>"#,
+    );
+    let r = e.eval(
+        r#"
+        const t = document.getElementById('a').firstChild;
+        const all = document.createRange(); all.selectNodeContents(t);
+        const part = document.createRange(); part.setStart(t, 0); part.setEnd(t, 5);
+        const caret = document.createRange(); caret.setStart(t, 5); caret.collapse(true);
+        const a = all.getBoundingClientRect(), p = part.getBoundingClientRect(), c = caret.getBoundingClientRect();
+        const w = document.createRange(); w.selectNodeContents(document.getElementById('w').firstChild);
+        const h = (id) => document.getElementById(id).getBoundingClientRect().height;
+        [a.x, a.width > 0 && a.width < 200, p.width > 0 && p.width < a.width, c.width, c.x === p.x + p.width,
+         all.getClientRects().length, w.getClientRects().length > 2, h('br') === h('nobr')]
+    "#,
+    );
+    assert_eq!(r, "[30,true,true,0,true,1,true,true]");
+}
+
+/// Element.animate(): keyframe values are cascaded at the animation level (the style
+/// attribute is untouched), follow currentTime/pause/finish/cancel, and are listed by
+/// getAnimations().
+#[test]
+fn js_layer_web_animations() {
+    let mut e = js_env(
+        r#"<!DOCTYPE html><html><body><div id="box" style="width:10px">x</div></body></html>"#,
+    );
+    let r = e.eval(
+        r#"
+        const el = document.getElementById('box');
+        const a = el.animate([{ opacity: 0, width: '100px' }, { opacity: 1, width: '200px' }], { duration: 1000, fill: 'forwards' });
+        a.pause(); a.currentTime = 250;
+        const mid = [a.playState, getComputedStyle(el).opacity, getComputedStyle(el).width, el.getAttribute('style'),
+          el.getAnimations().length, document.getAnimations().length, a.effect.getComputedTiming().progress];
+        a.finish();
+        const end = [a.playState, getComputedStyle(el).opacity, el.getAnimations().length];
+        a.cancel();
+        const gone = [a.playState, getComputedStyle(el).opacity, getComputedStyle(el).width, el.getAnimations().length];
+        let err = 'none'; try { el.animate([{ opacity: 0 }], { easing: 'nope' }); } catch (x) { err = x.name; }
+        [mid, end, gone, err, typeof document.timeline.currentTime]
+    "#,
+    );
+    assert_eq!(
+        r,
+        r#"[["paused","0.25","125px","width:10px",1,1,0.25],["finished","1",1],["idle","1","10px",0],"TypeError","number"]"#
+    );
 }

@@ -2,7 +2,7 @@
 //! evaluate JavaScript and report timings. Used for automated testing.
 
 use crate::{Browser, BrowserEvent, BrowserOptions, TabId};
-use common::protocol::{FromRenderer, LoadEvent, ToRenderer, ViewportInfo};
+use common::protocol::{FromRenderer, InputEvent, LoadEvent, Modifiers, ToRenderer, ViewportInfo};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -24,8 +24,19 @@ pub struct HeadlessOptions {
     pub timings: bool,
     /// Simulated input after load: list of (x, y) clicks.
     pub clicks: Vec<(f32, f32)>,
+    /// Time to let the page react after each click.
+    pub click_wait: Duration,
+    /// Buttons/links to click by text (case-insensitive regexes), also inside iframes.
+    pub click_text: Vec<String>,
     /// Scroll by this many CSS px after load (before the screenshot).
     pub scroll_y: f64,
+    /// Before `--eval`, poll this expression until it is truthy (or `timeout` passes).
+    pub wait_for: Option<String>,
+    /// Poll interval for `wait_for`.
+    pub wait_poll: Duration,
+    /// Batch mode: read `URL[<TAB>TIMEOUT_MS]` lines from stdin, load each in the same
+    /// tab (`wait_for`, then the `--eval`s) and print one JSON line per URL.
+    pub batch: bool,
 }
 
 impl Default for HeadlessOptions {
@@ -41,19 +52,117 @@ impl Default for HeadlessOptions {
             eval: Vec::new(),
             timeout: Duration::from_secs(30),
             settle: Duration::from_millis(300),
+            click_wait: Duration::from_millis(300),
+            click_text: Vec::new(),
             print_console: false,
             timings: true,
             clicks: Vec::new(),
             scroll_y: 0.0,
+            wait_for: None,
+            wait_poll: Duration::from_millis(50),
+            batch: false,
         }
     }
 }
 
 struct Driver {
     browser: Browser,
-    #[allow(dead_code)]
     tab: TabId,
     print_console: bool,
+    /// Batch mode collects the console per URL instead of printing it.
+    collect_console: bool,
+    console: Vec<(String, String)>,
+    /// State of the page-driven input (`__sharko_testdriver` requests, see
+    /// tools/wpt/testdriver-vendor.js): pointer position, held buttons and modifiers.
+    td_seq: u64,
+    pointer: (f32, f32),
+    buttons: u8,
+    mods: Modifiers,
+}
+
+const TESTDRIVER_PREFIX: &str = "__sharko_testdriver ";
+
+/// DOM `key`/`code` (and produced text) for a character of a WebDriver key string
+/// (https://w3c.github.io/webdriver/#keyboard-actions: U+E000.. are special keys).
+fn webdriver_key(c: char) -> (String, String, Option<String>) {
+    let special = match c {
+        '\u{E003}' => Some(("Backspace", "Backspace")),
+        '\u{E004}' => Some(("Tab", "Tab")),
+        '\u{E005}' => Some(("Clear", "")),
+        '\u{E006}' => Some(("Enter", "Enter")),
+        '\u{E007}' => Some(("Enter", "NumpadEnter")),
+        '\u{E008}' => Some(("Shift", "ShiftLeft")),
+        '\u{E009}' => Some(("Control", "ControlLeft")),
+        '\u{E00A}' => Some(("Alt", "AltLeft")),
+        '\u{E00B}' => Some(("Pause", "Pause")),
+        '\u{E00C}' => Some(("Escape", "Escape")),
+        '\u{E00D}' => Some((" ", "Space")),
+        '\u{E00E}' => Some(("PageUp", "PageUp")),
+        '\u{E00F}' => Some(("PageDown", "PageDown")),
+        '\u{E010}' => Some(("End", "End")),
+        '\u{E011}' => Some(("Home", "Home")),
+        '\u{E012}' => Some(("ArrowLeft", "ArrowLeft")),
+        '\u{E013}' => Some(("ArrowUp", "ArrowUp")),
+        '\u{E014}' => Some(("ArrowRight", "ArrowRight")),
+        '\u{E015}' => Some(("ArrowDown", "ArrowDown")),
+        '\u{E016}' => Some(("Insert", "Insert")),
+        '\u{E017}' => Some(("Delete", "Delete")),
+        '\u{E03D}' => Some(("Meta", "MetaLeft")),
+        '\u{E050}' => Some(("Shift", "ShiftRight")),
+        '\u{E051}' => Some(("Control", "ControlRight")),
+        '\u{E052}' => Some(("Alt", "AltRight")),
+        '\u{E053}' => Some(("Meta", "MetaRight")),
+        _ => None,
+    };
+    if let Some((key, code)) = special {
+        let text = if key == " " || key == "Enter" { Some(key.to_string()) } else { None };
+        return (key.to_string(), code.to_string(), text);
+    }
+    if ('\u{E031}'..='\u{E03C}').contains(&c) {
+        let n = c as u32 - 0xE031 + 1;
+        return (format!("F{n}"), format!("F{n}"), None);
+    }
+    let code = if c.is_ascii_alphabetic() {
+        format!("Key{}", c.to_ascii_uppercase())
+    } else if c.is_ascii_digit() {
+        format!("Digit{c}")
+    } else if c == ' ' {
+        "Space".to_string()
+    } else {
+        String::new()
+    };
+    (c.to_string(), code, Some(c.to_string()))
+}
+
+/// The `buttons` bit of a DOM/WebDriver button number.
+fn button_bit(button: u8) -> u8 {
+    match button {
+        0 => 1,
+        1 => 4,
+        2 => 2,
+        3 => 8,
+        4 => 16,
+        _ => 0,
+    }
+}
+
+/// JSON string literal (for the batch-mode result lines; no serde dependency here).
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 impl Driver {
@@ -72,8 +181,17 @@ impl Driver {
             match self.browser.events.recv_timeout(deadline - now) {
                 Ok(ev) => {
                     if let Some(ev) = self.browser.process_event(ev) {
-                        if self.print_console {
-                            if let BrowserEvent::Tab(_, FromRenderer::Console { level, message }) = &ev {
+                        if let BrowserEvent::Tab(_, FromRenderer::Console { level, message }) = &ev {
+                            if level == "log" && message.starts_with(TESTDRIVER_PREFIX) {
+                                let payload = message[TESTDRIVER_PREFIX.len()..].to_string();
+                                self.testdriver(&payload);
+                                continue;
+                            }
+                            if self.collect_console {
+                                if self.console.len() < 200 {
+                                    self.console.push((level.clone(), message.clone()));
+                                }
+                            } else if self.print_console {
                                 eprintln!("console.{level}: {message}");
                             }
                         }
@@ -89,6 +207,114 @@ impl Driver {
                 Err(_) => return None,
             }
         }
+    }
+
+    fn input(&mut self, ev: InputEvent) {
+        self.browser.send(self.tab, ToRenderer::Input(ev));
+    }
+
+    fn key(&mut self, c: char, down: bool) {
+        let (key, code, text) = webdriver_key(c);
+        match key.as_str() {
+            "Shift" => self.mods.shift = down,
+            "Control" => self.mods.ctrl = down,
+            "Alt" => self.mods.alt = down,
+            "Meta" => self.mods.meta = down,
+            _ => {}
+        }
+        let mods = self.mods;
+        if down {
+            self.input(InputEvent::KeyDown { key, code, text, repeat: false, location: 0, mods });
+        } else {
+            self.input(InputEvent::KeyUp { key, code, location: 0, mods });
+        }
+    }
+
+    /// A `test_driver` request from the page (tools/wpt/testdriver-vendor.js): perform
+    /// the input natively, then resolve the page's promise.
+    fn testdriver(&mut self, payload: &str) {
+        let v: serde_json::Value = match serde_json::from_str(payload) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let id = v["id"].as_i64().unwrap_or(0);
+        let cmd = v["cmd"].as_str().unwrap_or("").to_string();
+        let args = v["args"].clone();
+        let mut err: Option<String> = None;
+        let f = |v: &serde_json::Value| v.as_f64().unwrap_or(0.0) as f32;
+        match cmd.as_str() {
+            "click" => {
+                let (x, y) = (f(&args["x"]), f(&args["y"]));
+                let mods = self.mods;
+                self.input(InputEvent::MouseMove { x, y, buttons: 0, mods });
+                self.input(InputEvent::MouseDown { x, y, button: 0, buttons: 1, mods });
+                self.input(InputEvent::MouseUp { x, y, button: 0, buttons: 0, mods });
+                self.pointer = (x, y);
+            }
+            "keys" => {
+                for c in args["keys"].as_str().unwrap_or("").chars() {
+                    self.key(c, true);
+                    self.key(c, false);
+                }
+            }
+            "actions" => {
+                for step in args.as_array().cloned().unwrap_or_default() {
+                    let mods = self.mods;
+                    match step["t"].as_str().unwrap_or("") {
+                        "move" => {
+                            let (x, y) = (f(&step["x"]), f(&step["y"]));
+                            self.pointer = (x, y);
+                            let buttons = self.buttons;
+                            self.input(InputEvent::MouseMove { x, y, buttons, mods });
+                        }
+                        "down" => {
+                            let button = step["button"].as_u64().unwrap_or(0) as u8;
+                            self.buttons |= button_bit(button);
+                            let (x, y) = self.pointer;
+                            let buttons = self.buttons;
+                            self.input(InputEvent::MouseDown { x, y, button, buttons, mods });
+                        }
+                        "up" => {
+                            let button = step["button"].as_u64().unwrap_or(0) as u8;
+                            self.buttons &= !button_bit(button);
+                            let (x, y) = self.pointer;
+                            let buttons = self.buttons;
+                            self.input(InputEvent::MouseUp { x, y, button, buttons, mods });
+                        }
+                        "keydown" | "keyup" => {
+                            let down = step["t"] == "keydown";
+                            for c in step["key"].as_str().unwrap_or("").chars() {
+                                self.key(c, down);
+                            }
+                        }
+                        "wheel" => {
+                            let (x, y) = (f(&step["x"]), f(&step["y"]));
+                            let dx = step["dx"].as_f64().unwrap_or(0.0);
+                            let dy = step["dy"].as_f64().unwrap_or(0.0);
+                            self.input(InputEvent::Wheel { x, y, dx, dy, mods });
+                        }
+                        "pause" => {
+                            // Sleep rather than pump: a nested pump would consume events
+                            // (load, eval results) the outer wait is looking for.
+                            let ms = step["ms"].as_u64().unwrap_or(0).min(10_000);
+                            std::thread::sleep(Duration::from_millis(ms));
+                        }
+                        other => err = Some(format!("unknown action {other}")),
+                    }
+                }
+            }
+            other => err = Some(format!("{other} is not implemented by Sharko's testdriver")),
+        }
+        let source = match err {
+            None => format!("__sharko_testdriver_done({id}, null)"),
+            Some(e) => format!(
+                "__sharko_testdriver_done({id}, {})",
+                serde_json::to_string(&e).unwrap_or_default()
+            ),
+        };
+        let id = 7000 + self.td_seq;
+        self.td_seq += 1;
+        self.browser.send(self.tab, ToRenderer::Eval { id, source });
     }
 }
 
@@ -120,7 +346,17 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
         browser,
         tab,
         print_console: opts.print_console,
+        collect_console: opts.batch,
+        console: Vec::new(),
+        td_seq: 0,
+        pointer: (0.0, 0.0),
+        buttons: 0,
+        mods: Modifiers::default(),
     };
+
+    if opts.batch {
+        return run_batch(&mut d, tab, &opts);
+    }
 
     // Wait for load (or failure / timeout).
     let mut exit = 0;
@@ -155,7 +391,18 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
         ] {
             d.browser.send(tab, ToRenderer::Input(m));
         }
-        d.pump_until(Duration::from_millis(300), |_| false);
+        d.pump_until(opts.click_wait, |_| false);
+    }
+    for (i, pattern) in opts.click_text.iter().enumerate() {
+        let id = 900 + i as u64;
+        d.browser.send(tab, ToRenderer::Eval { id, source: format!("click-text:{pattern}") });
+        if let Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { value, .. })) = d.pump_until(
+            Duration::from_secs(10),
+            |ev| matches!(ev, BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id),
+        ) {
+            eprintln!("[headless] click-text /{pattern}/: {value}");
+        }
+        d.pump_until(opts.click_wait, |_| false);
     }
     if opts.scroll_y != 0.0 {
         d.browser.send(
@@ -169,6 +416,47 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
             }),
         );
         d.pump_until(Duration::from_millis(300), |_| false);
+    }
+
+    // Wait for a page condition (test harness completion, a rendered widget, ...).
+    if let Some(cond) = &opts.wait_for {
+        let source = format!("!!({cond})");
+        let deadline = Instant::now() + opts.timeout;
+        let mut n = 0u64;
+        loop {
+            let id = 2000 + n;
+            n += 1;
+            d.browser.send(tab, ToRenderer::Eval { id, source: source.clone() });
+            let ev = d.pump_until(Duration::from_secs(10), |ev| {
+                matches!(
+                    ev,
+                    BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id
+                ) || matches!(ev, BrowserEvent::TabCrashed(_))
+            });
+            match ev {
+                Some(BrowserEvent::TabCrashed(_)) => {
+                    d.browser.shutdown();
+                    return 3;
+                }
+                Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { ok, value, .. }))
+                    if ok && value == "true" =>
+                {
+                    break;
+                }
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                eprintln!("[headless] wait-for timeout after {:?}", opts.timeout);
+                exit = exit.max(4);
+                break;
+            }
+            if let Some(BrowserEvent::TabCrashed(_)) = d.pump_until(opts.wait_poll, |ev| {
+                matches!(ev, BrowserEvent::TabCrashed(_))
+            }) {
+                d.browser.shutdown();
+                return 3;
+            }
+        }
     }
 
     // Evaluate scripts.
@@ -284,4 +572,150 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
     }
     d.browser.shutdown();
     exit
+}
+
+/// Run one URL in the batch tab: navigate, wait for load, `wait_for`, the `--eval`s.
+/// Returns the JSON fields for the result line, or `None` when the renderer crashed.
+fn batch_one(d: &mut Driver, tab: TabId, opts: &HeadlessOptions, url: &str, timeout: Duration) -> Option<String> {
+    let t0 = Instant::now();
+    d.console.clear();
+    d.browser.navigate(tab, url);
+    let crashed = |ev: &BrowserEvent| matches!(ev, BrowserEvent::TabCrashed(_));
+    // The previous page may still report events; wait for this navigation to start.
+    let started = d.pump_until(timeout, |ev| {
+        crashed(ev)
+            || matches!(
+                ev,
+                BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Started | LoadEvent::Failed, .. })
+            )
+    });
+    let load = match started {
+        Some(BrowserEvent::TabCrashed(_)) => return None,
+        Some(BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Failed, error, .. })) => {
+            format!("failed: {}", error.unwrap_or_default())
+        }
+        None => "timeout".to_string(),
+        _ => {
+            let remaining = timeout.saturating_sub(t0.elapsed());
+            match d.pump_until(remaining, |ev| {
+                crashed(ev)
+                    || matches!(
+                        ev,
+                        BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Load | LoadEvent::Failed, .. })
+                    )
+            }) {
+                Some(BrowserEvent::TabCrashed(_)) => return None,
+                Some(BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Failed, error, .. })) => {
+                    format!("failed: {}", error.unwrap_or_default())
+                }
+                Some(_) => "ok".to_string(),
+                None => "timeout".to_string(),
+            }
+        }
+    };
+    if !load.starts_with("failed") {
+        d.pump_until(opts.settle, |_| false);
+    }
+    let mut wait = "none".to_string();
+    if let Some(cond) = &opts.wait_for {
+        if load.starts_with("failed") {
+            wait = "skipped".to_string();
+        } else {
+            let source = format!("!!({cond})");
+            let deadline = t0 + timeout;
+            let mut n = 0u64;
+            wait = loop {
+                let id = 3000 + n;
+                n += 1;
+                d.browser.send(tab, ToRenderer::Eval { id, source: source.clone() });
+                match d.pump_until(Duration::from_secs(10), |ev| {
+                    crashed(ev)
+                        || matches!(ev, BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id)
+                }) {
+                    Some(BrowserEvent::TabCrashed(_)) => return None,
+                    Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { ok, value, .. })) if ok && value == "true" => {
+                        break "ok".to_string();
+                    }
+                    _ => {}
+                }
+                if Instant::now() >= deadline {
+                    break "timeout".to_string();
+                }
+                if d.pump_until(opts.wait_poll, crashed).is_some() {
+                    return None;
+                }
+            };
+        }
+    }
+    let mut evals = Vec::new();
+    for (i, src) in opts.eval.iter().enumerate() {
+        let id = 4000 + i as u64;
+        d.browser.send(tab, ToRenderer::Eval { id, source: src.clone() });
+        match d.pump_until(Duration::from_secs(10), |ev| {
+            crashed(ev) || matches!(ev, BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id)
+        }) {
+            Some(BrowserEvent::TabCrashed(_)) => return None,
+            Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { ok, value, .. })) => {
+                evals.push(format!("{{\"ok\":{ok},\"value\":{}}}", json_str(&value)));
+            }
+            _ => evals.push("{\"ok\":false,\"value\":\"eval timeout\"}".to_string()),
+        }
+    }
+    let console: Vec<String> = d
+        .console
+        .iter()
+        .map(|(level, message)| format!("{}: {}", level, message))
+        .map(|s| json_str(&s))
+        .collect();
+    Some(format!(
+        "\"load\":{},\"wait\":{},\"ms\":{},\"evals\":[{}],\"console\":[{}]",
+        json_str(&load),
+        json_str(&wait),
+        t0.elapsed().as_millis(),
+        evals.join(","),
+        console.join(",")
+    ))
+}
+
+/// `--batch`: one JSON line per stdin URL. A renderer crash prints `"crash":true` for the
+/// URL and ends the process with status 3 (the caller restarts it).
+fn run_batch(d: &mut Driver, tab: TabId, opts: &HeadlessOptions) -> i32 {
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout();
+    for line in stdin.lock().lines() {
+        let Ok(line) = line else { break };
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (url, timeout) = match line.split_once('\t') {
+            Some((u, t)) => (
+                u.trim().to_string(),
+                t.trim().parse().map(Duration::from_millis).unwrap_or(opts.timeout),
+            ),
+            None => (line.to_string(), opts.timeout),
+        };
+        match batch_one(d, tab, opts, &url, timeout) {
+            Some(fields) => {
+                let _ = writeln!(stdout, "{{\"url\":{},{}}}", json_str(&url), fields);
+                // Popups the page opened (window.open) are separate tabs with their own
+                // renderer process; drop them before the next URL.
+                for id in d.browser.tab_ids().to_vec() {
+                    if id != tab {
+                        d.browser.close_tab(id);
+                    }
+                }
+            }
+            None => {
+                let _ = writeln!(stdout, "{{\"url\":{},\"crash\":true}}", json_str(&url));
+                let _ = stdout.flush();
+                d.browser.shutdown();
+                return 3;
+            }
+        }
+        let _ = stdout.flush();
+    }
+    d.browser.shutdown();
+    0
 }

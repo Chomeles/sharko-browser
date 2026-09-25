@@ -70,6 +70,9 @@
     constructor() { throw L.illegal(); }
   }
   class Document extends Node {
+    // HTML "parse HTML from a string" without sanitization (scripts are not run), like
+    // DOMParser's text/html path.
+    static parseHTMLUnsafe(html) { return L.createDetachedDocument('html', `${html}`); }
     constructor() { return L.createDetachedDocument('xml', null, new.target.prototype); }
   }
   class HTMLDocument extends Document {
@@ -143,6 +146,10 @@
   L.document = document;
   L.documentId = mainDocId;
   let detachedDocs = 0;
+  // Node document of detached nodes that belong to a document other than the main one
+  // (created, imported, cloned or adopted by it): keyed by the root of a detached subtree.
+  const nodeDocs = new WeakMap();
+  function ownDoc(doc, w) { if (doc !== document) nodeDocs.set(w, doc); return w; }
   L.registerDetachedDocument = function (w, backingId, info) {
     detachedDocs++;
     docState.set(w, info);
@@ -518,6 +525,142 @@
   }
   L.titleChanged = titleChanged;
 
+  // ---------------------------------------------------------------------------------------
+  // Live ranges (https://dom.spec.whatwg.org/#concept-live-range): every Range (and so the
+  // selection's range) follows the DOM's insert / remove / replace-data / split / normalize
+  // steps. The registry holds WeakRefs so ranges a page drops are collected as usual.
+  // ---------------------------------------------------------------------------------------
+  //
+  // Each Range owns a state `{sc, so, ec, eo}`; `rangeIndex` maps a container node id to
+  // the states anchored in it, so a mutation only visits the ranges it can affect (a page
+  // with thousands of ranges and a busy DOM stays fast). A FinalizationRegistry drops the
+  // state of a collected Range.
+  const rangeIndex = new Map(); // node id -> Set<state>
+  const liveRanges = { get size() { return rangeIndex.size; } };
+  function indexAdd(id, s) {
+    let set = rangeIndex.get(id);
+    if (set === undefined) { set = new Set(); rangeIndex.set(id, set); }
+    set.add(s);
+  }
+  function indexRemove(id, s) {
+    const set = rangeIndex.get(id);
+    if (set === undefined) return;
+    set.delete(s);
+    if (set.size === 0) rangeIndex.delete(id);
+  }
+  const rangeReaper = new FinalizationRegistry((s) => { indexRemove(s.sc, s); if (s.ec !== s.sc) indexRemove(s.ec, s); });
+  function newRangeState(range, sc, so, ec, eo) {
+    const s = { sc, so, ec, eo };
+    indexAdd(sc, s);
+    if (ec !== sc) indexAdd(ec, s);
+    rangeReaper.register(range, s);
+    return s;
+  }
+  function setRangeState(s, sc, so, ec, eo) {
+    const oSc = s.sc, oEc = s.ec;
+    if (sc !== oSc || ec !== oEc) {
+      if (oSc !== sc && oSc !== ec) indexRemove(oSc, s);
+      if (oEc !== oSc && oEc !== sc && oEc !== ec) indexRemove(oEc, s);
+      if (sc !== oSc && sc !== oEc) indexAdd(sc, s);
+      if (ec !== sc && ec !== oSc && ec !== oEc) indexAdd(ec, s);
+      s.sc = sc; s.ec = ec;
+    }
+    s.so = so; s.eo = eo;
+  }
+  // The states with a boundary in the subtree of `nid` (grouped by container).
+  function statesInside(nid, skip) {
+    let out = null;
+    for (const [cid, set] of rangeIndex) {
+      if (cid === skip || !N.contains(nid, cid)) continue;
+      if (out === null) out = new Set();
+      for (const s of set) out.add(s);
+    }
+    return out;
+  }
+  // Insert steps: `count` nodes were inserted into `pid` at `index`.
+  function rangesOnInsert(pid, index, count) {
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === pid && s.so > index) s.so += count;
+      if (s.ec === pid && s.eo > index) s.eo += count;
+    }
+  }
+  // Remove steps (run before the removal): `nid` is the child of `pid` at `index`.
+  function rangesOnRemove(pid, nid, index) {
+    const inside = statesInside(nid, pid);
+    if (inside !== null) {
+      for (const s of inside) {
+        const a = N.contains(nid, s.sc), b = N.contains(nid, s.ec);
+        setRangeState(s, a ? pid : s.sc, a ? index : s.so, b ? pid : s.ec, b ? index : s.eo);
+      }
+    }
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === pid && s.so > index) s.so -= 1;
+      if (s.ec === pid && s.eo > index) s.eo -= 1;
+    }
+  }
+  // Replace all (innerHTML, textContent, replaceChildren): the sequential remove steps for
+  // `oldKids` then the insert at 0 leave every range that was in `pid` at (pid, 0).
+  function rangesOnReplaceAll(pid, oldKids) {
+    const touched = new Set();
+    const own = rangeIndex.get(pid);
+    if (own !== undefined) for (const s of own) touched.add(s);
+    for (const k of oldKids) {
+      const inside = statesInside(k, pid);
+      if (inside !== null) for (const s of inside) touched.add(s);
+    }
+    const inOld = (id) => id === pid || oldKids.some((k) => N.contains(k, id));
+    for (const s of touched) {
+      const a = inOld(s.sc), b = inOld(s.ec);
+      setRangeState(s, a ? pid : s.sc, a ? 0 : s.so, b ? pid : s.ec, b ? 0 : s.eo);
+    }
+  }
+  // Replace data steps: in `id`, `count` code units at `offset` were replaced by `added`.
+  function rangesOnReplaceData(id, offset, count, added) {
+    const set = rangeIndex.get(id);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === id) { if (s.so > offset && s.so <= offset + count) s.so = offset; else if (s.so > offset + count) s.so += added - count; }
+      if (s.ec === id) { if (s.eo > offset && s.eo <= offset + count) s.eo = offset; else if (s.eo > offset + count) s.eo += added - count; }
+    }
+  }
+  // splitText steps after the new node was inserted at `index + 1` in `pid`.
+  function rangesOnSplit(id, newId, offset, pid, index) {
+    const own = rangeIndex.get(id);
+    if (own !== undefined) {
+      for (const s of [...own]) {
+        const a = s.sc === id && s.so > offset, b = s.ec === id && s.eo > offset;
+        if (a || b) setRangeState(s, a ? newId : s.sc, a ? s.so - offset : s.so, b ? newId : s.ec, b ? s.eo - offset : s.eo);
+      }
+    }
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === pid && s.so === index + 1) s.so += 1;
+      if (s.ec === pid && s.eo === index + 1) s.eo += 1;
+    }
+  }
+  // normalize(): the text node `from` (child `index` of `pid`) is about to be merged into
+  // `into`, whose data is `length` code units long so far.
+  function rangesOnMerge(into, from, pid, index, length) {
+    const own = rangeIndex.get(from);
+    if (own !== undefined) {
+      for (const s of [...own]) {
+        const a = s.sc === from, b = s.ec === from;
+        setRangeState(s, a ? into : s.sc, a ? s.so + length : s.so, b ? into : s.ec, b ? s.eo + length : s.eo);
+      }
+    }
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of [...set]) {
+      const a = s.sc === pid && s.so === index, b = s.ec === pid && s.eo === index;
+      if (a || b) setRangeState(s, a ? into : s.sc, a ? length : s.so, b ? into : s.ec, b ? length : s.eo);
+    }
+  }
+
   L.optionsInserted = null; // installed by 30_html.js (select selectedness on option insertion)
   function afterInsertion(pid, parentW, insertedIds) {
     if (L.pendingScripts.size !== 0 && L.checkPendingScripts !== null) L.checkPendingScripts();
@@ -541,22 +684,25 @@
   function insertCore(pid, parentW, nodeW, nid, refId) {
     const nt = typeOf(nodeW);
     const isFrag = nt === 11;
-    const mo = moRegCount !== 0, ce = ceActive();
+    const mo = moRegCount !== 0, ce = ceActive(), lr = liveRanges.size !== 0;
     let added = null, oldParent = 0, oldPrev = 0, oldNext = 0, ceMoved = null;
     if (isFrag) {
       added = N.childIds(nid);
       if (added.length === 0) return;
       if (mo) queueMutation('childList', nid, null, null, null, added, 0, 0);
+      if (lr) for (const c of added) rangesOnRemove(nid, c, 0);
     } else {
       oldParent = N.parent(nid);
       if (oldParent !== 0 && (mo || ce)) {
         if (mo) { oldPrev = N.prevSibling(nid); oldNext = N.nextSibling(nid); }
         if (ce && N.isConnected(nid)) ceMoved = collectCE(nid, true);
       }
+      if (lr && oldParent !== 0) rangesOnRemove(oldParent, nid, indexOfNode(nid));
     }
     nativeCall(() => N.insertBefore(pid, nid, refId));
     childListChanged(pid, isFrag ? nid : oldParent);
     const insertedIds = isFrag ? added : [nid];
+    if (lr) rangesOnInsert(pid, indexOfNode(insertedIds[0]), insertedIds.length);
     if (mo) {
       if (oldParent !== 0) queueMutation('childList', oldParent, null, null, null, [nid], oldPrev, oldNext);
       const first = insertedIds[0], last = insertedIds[insertedIds.length - 1];
@@ -572,8 +718,17 @@
     let prev = 0, next = 0, ceList = null;
     if (mo) { prev = N.prevSibling(nid); next = N.nextSibling(nid); }
     if (ceActive() && N.isConnected(nid)) ceList = collectCE(nid, true);
+    if (liveRanges.size !== 0) rangesOnRemove(pid, nid, indexOfNode(nid));
     nativeCall(() => N.removeChild(pid, nid));
     childListChanged(pid, 0);
+    if (detachedDocs !== 0) {
+      // The removed subtree keeps the document it was in (its root now carries it).
+      const w = cache.get(nid);
+      if (w !== undefined) {
+        const od = ownerDocumentOf(parentW !== undefined ? parentW : wrap(pid));
+        if (od !== document) nodeDocs.set(w, od); else nodeDocs.delete(w);
+      }
+    }
     if (mo) queueMutation('childList', pid, null, null, null, [nid], prev, next);
     if (ceList !== null && ceList.length) ceDisconnected(ceList);
     childrenChanged(pid, parentW);
@@ -588,10 +743,12 @@
     const mo = moRegCount !== 0;
     const ce = ceActive();
     let removed = null, ceList = null;
-    if (mo) removed = N.childIds(pid);
+    const lr = liveRanges.size !== 0;
+    if (mo || lr) removed = N.childIds(pid);
     const connected = ce ? N.isConnected(pid) : false;
     if (ce && connected) ceList = collectCE(pid, false);
     nativeCall(mutate);
+    if (lr) rangesOnReplaceAll(pid, removed);
     if (moves === true) treeChanged();
     childListChanged(pid, 0);
     const added = mo || ce ? N.childIds(pid) : null;
@@ -650,8 +807,50 @@
     return idOf(parentW);
   }
 
+  // A node of another realm (a same-origin frame) passed to a mutating operation of
+  // this one: adopted by copy — an equivalent node of this document (its own wrapper),
+  // the original removed from its tree when `remove`. Identity is not preserved (see
+  // README "Known gaps").
+  function adoptForeign(o, method, remove) {
+    const t = L.foreignNodeType(o);
+    if (t === 0) throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
+    let n;
+    switch (t) {
+      case 1: {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = o.outerHTML;
+        n = tpl.content.firstChild;
+        if (n === null) throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
+        tpl.content.removeChild(n);
+        document.adoptNode(n);
+        break;
+      }
+      case 3: n = document.createTextNode(o.data); break;
+      case 4: n = document.createCDATASection(o.data); break;
+      case 7: n = document.createProcessingInstruction(o.target, o.data); break;
+      case 8: n = document.createComment(o.data); break;
+      case 10: n = document.implementation.createDocumentType(o.name, o.publicId, o.systemId); break;
+      case 11: {
+        n = document.createDocumentFragment();
+        for (const c of Array.from(o.childNodes)) n.appendChild(adoptForeign(c, method, remove));
+        return n;
+      }
+      case 9: throw new DOMException(`Failed to execute '${method}': The node provided is a document, which may not be adopted.`, 'NotSupportedError');
+      default: throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
+    }
+    if (remove && o.parentNode !== null) o.parentNode.removeChild(o);
+    return n;
+  }
+  L.adoptForeign = adoptForeign;
+  // The node argument of a mutating operation: a node of this realm, or a foreign one
+  // adopted (by copy).
+  L.adoptArg = function (o, method) {
+    return isNode(o) || L.foreignNodeType(o) === 0 ? o : adoptForeign(o, method, true);
+  };
+
   function preInsert(parentW, nodeW, childW, method) {
     const pid = realParent(parentW);
+    nodeW = L.adoptArg(nodeW, method);
     const nid = L.nodeArg(nodeW, method, 1);
     let refId = childW === null || childW === undefined ? 0 : L.nodeArg(childW, method, 2);
     const sr = isShadowRoot(parentW) ? parentW : null;
@@ -700,6 +899,7 @@
 
   function replaceChildImpl(parentW, nodeW, childW) {
     const pid = idOf(parentW);
+    nodeW = L.adoptArg(nodeW, 'replaceChild');
     const nid = L.nodeArg(nodeW, 'replaceChild', 1);
     const cid = L.nodeArg(childW, 'replaceChild', 2);
     const pt = typeOf(parentW);
@@ -743,12 +943,13 @@
   // Convert (Node or string)... into a single node (ParentNode/ChildNode helpers)
   function convertNodes(args, method) {
     if (args.length === 1) {
-      const a = args[0];
+      const a = L.adoptArg(args[0], method);
       if (isNode(a) && !isShadowRoot(a)) return a;
       if (!isNode(a)) return makeWrapper(N.createText(`${a}`), 3, Text.prototype);
     }
     const frag = N.createFragment();
-    for (const a of args) {
+    for (let a of args) {
+      a = L.adoptArg(a, method);
       if (isNode(a)) {
         const nid = L.nodeArg(a, method, 1);
         if (typeOf(a) === 11) {
@@ -813,9 +1014,15 @@
   };
 
   // Character data mutation core
-  function setDataCore(w, id, data) {
-    const mo = moRegCount !== 0;
-    const old = mo ? N.getText(id) : null;
+  // Set the data of a CharacterData node. `offset`/`count`/`added` describe the replaced
+  // segment for live ranges (default: the whole data).
+  function setDataCore(w, id, data, offset, count, added) {
+    const mo = moRegCount !== 0, lr = liveRanges.size !== 0;
+    const old = mo || (lr && offset === undefined) ? N.getText(id) : null;
+    if (lr) {
+      if (offset === undefined) rangesOnReplaceData(id, 0, old.length, data.length);
+      else rangesOnReplaceData(id, offset, count, added);
+    }
     N.setText(id, data);
     if (mo) queueMutation('characterData', id, null, old, null, null, 0, 0);
     if (titleIds.size !== 0 && titleIds.has(N.parent(id))) titleChanged();
@@ -872,19 +1079,26 @@
       case 7: return piTarget.get(w) || '';
       case 8: return '#comment';
       case 9: return '#document';
-      case 10: return 'html';
+      case 10: { const info = doctypeInfo.get(w); return info !== undefined ? info.name : 'html'; }
       case 11: return '#document-fragment';
       default: return '';
     }
   }
   const upperCache = new Map();
-  function tagNameOf(w) {
+  // The qualified name (prefix included): "div", "x:b".
+  function qualifiedNameOf(w) {
     const ln = lnOf(w);
-    if (nsOf(w) !== HTML) return ln;
-    let u = upperCache.get(ln);
+    const p = elementPrefix.get(w);
+    return p ? p + ':' + ln : ln;
+  }
+  // The HTML-uppercased qualified name (prefix included): "DIV", "X:B", but "svg".
+  function tagNameOf(w) {
+    const q = qualifiedNameOf(w);
+    if (nsOf(w) !== HTML) return q;
+    let u = upperCache.get(q);
     if (u === undefined) {
-      u = L.asciiUpper(ln);
-      upperCache.set(ln, u);
+      u = L.asciiUpper(q);
+      upperCache.set(q, u);
     }
     return u;
   }
@@ -897,7 +1111,11 @@
     let r = id, p;
     while ((p = N.parent(r)) !== 0) r = p;
     const rw = cache.get(r);
-    if (rw !== undefined && docState.has(rw)) return rw;
+    if (rw !== undefined) {
+      if (docState.has(rw)) return rw;
+      const od = nodeDocs.get(rw);
+      if (od !== undefined) return od;
+    }
     return document;
   }
   L.ownerDocumentOf = ownerDocumentOf;
@@ -982,14 +1200,23 @@
     get textContent() { return textContentGet(this); },
     set textContent(v) { textContentSet(this, v); },
     normalize() { normalizeNode(idOf(this)); },
-    cloneNode(deep = false) { return cloneNodeImpl(this, !!deep); },
+    cloneNode(deep = false) {
+      const c = cloneNodeImpl(this, !!deep);
+      if (detachedDocs !== 0) ownDoc(ownerDocumentOf(this), c);
+      return c;
+    },
     isEqualNode(other) {
       if (other === null || other === undefined) return false;
-      if (!isNode(other)) throw new TypeError("Failed to execute 'isEqualNode' on 'Node': parameter 1 is not of type 'Node'.");
+      if (!isNode(other)) {
+        if (L.foreignNodeType(other) !== 0) return false;
+        throw new TypeError("Failed to execute 'isEqualNode' on 'Node': parameter 1 is not of type 'Node'.");
+      }
       return nodesEqual(idOf(this), idOf(other));
     },
     isSameNode(other) { return this === other; },
     compareDocumentPosition(other) {
+      // A node of another realm: disconnected, implementation-specific, preceding.
+      if (!isNode(other) && L.foreignNodeType(other) !== 0) return 1 | 32 | 2;
       const oid = L.nodeArg(other, 'compareDocumentPosition', 1);
       const id = idOf(this);
       if (oid === id) return 0;
@@ -997,6 +1224,7 @@
     },
     contains(other) {
       if (other === null || other === undefined) return false;
+      if (!isNode(other) && L.foreignNodeType(other) !== 0) return false;
       const oid = L.nodeArg(other, 'contains', 1);
       if (isShadowRoot(other) && other !== this) return false;
       return N.contains(idOf(this), oid);
@@ -1060,14 +1288,18 @@
           c = next;
           continue;
         }
+        // Spec order: append the following text nodes' data first (a replace-data step
+        // that moves no range), then move the ranges from each merged node, then remove it.
         let s = next, merged = data;
-        while (s !== 0 && N.nodeType(s) === 3) {
-          const ns = N.nextSibling(s);
-          merged += N.getText(s);
-          removeCore(id, undefined, s);
-          s = ns;
+        const toMerge = [];
+        while (s !== 0 && N.nodeType(s) === 3) { toMerge.push(s); merged += N.getText(s); s = N.nextSibling(s); }
+        if (merged !== data) setDataCore(wrap(c), c, merged, data.length, 0, merged.length - data.length);
+        let length = data.length;
+        for (const m of toMerge) {
+          if (liveRanges.size !== 0) rangesOnMerge(c, m, id, indexOfNode(m), length);
+          length += N.getText(m).length;
+          removeCore(id, undefined, m);
         }
-        if (merged !== data) setDataCore(wrap(c), c, merged);
         c = s;
         continue;
       }
@@ -1121,7 +1353,7 @@
     if (sw !== undefined && typeOf(sw) === 1 && (nsOf(sw) === NONE || nsOf(sw) === OTHER) && !cache.has(dst)) {
       const cw = L.wrapElementAs(dst, Object.getPrototypeOf(sw), lnOf(sw), nsOf(sw));
       if (elementNsOther.has(sw)) elementNsOther.set(cw, elementNsOther.get(sw));
-      if (elementPrefix.has(sw)) elementPrefix.set(cw, elementPrefix.get(sw));
+      if (elementPrefix.has(sw)) { elementPrefix.set(cw, elementPrefix.get(sw)); prefixedElements++; }
     }
     if (!deep || foreignWrappers === 0) return;
     const a = N.childIds(src), b = N.childIds(dst);
@@ -1309,7 +1541,20 @@
     return toks.map((t) => '.' + L.cssEscape(t)).join('');
   }
   function getElementsByTagNameImpl(scopeId, qn) {
-    return queryCollection(scopeId, tagSelector(`${qn}`), false);
+    qn = `${qn}`;
+    // The selector engine matches the local name (HTML elements case-insensitively, others
+    // exactly), which is the spec's rule for qualified names without a prefix. Prefixed
+    // elements (createElementNS(ns, 'a:b')) only exist when a page made some.
+    if (qn !== '*' && (prefixedElements !== 0 || qn.includes(':'))) {
+      const lower = L.asciiLower(qn);
+      const compute = () => N.querySelectorAll(scopeId, '*').filter((id) => {
+        const w = wrap(id);
+        const q = qualifiedNameOf(w);
+        return nsOf(w) === HTML ? q === lower : q === qn;
+      });
+      return L.makeHTMLCollection({ kind: 3, compute }, false);
+    }
+    return queryCollection(scopeId, tagSelector(qn), false);
   }
   function getElementsByClassNameImpl(scopeId, names) {
     const sel = classSelector(names);
@@ -1742,8 +1987,22 @@
     }
     return null;
   }
+  // DOM "validate and extract" (https://dom.spec.whatwg.org/#validate-and-extract): the
+  // part before the first ':' must be a valid namespace prefix, the rest a valid element
+  // local name (the XML Name production is no longer required).
+  function validNamespacePrefix(s) { return s.length !== 0 && !/[\t\n\f\r \0/>]/.test(s); }
+  function validLocalName(s) {
+    if (s.length === 0) return false;
+    const c = s.codePointAt(0);
+    if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) return !/[\t\n\f\r \0/>]/.test(s);
+    if (c !== 0x3a && c !== 0x5f && c < 0x80) return false;
+    return /^.[-.0-9_:A-Za-z\u{80}-\u{10FFFF}]*$/su.test(s);
+  }
   function validateQName(qn, method) {
-    if (!/^[^\t\n\f\r \0/>=:]+(:[^\t\n\f\r \0/>=:]+)?$/.test(qn)) {
+    const i = qn.indexOf(':');
+    const prefix = i === -1 ? null : qn.slice(0, i);
+    const local = i === -1 ? qn : qn.slice(i + 1);
+    if ((prefix !== null && !validNamespacePrefix(prefix)) || !validLocalName(local)) {
       throw invalidChar(`Failed to execute '${method}': '${qn}' is not a valid qualified name.`);
     }
   }
@@ -1820,11 +2079,46 @@
     'ariaRelevant', 'ariaRequired', 'ariaRoleDescription', 'ariaRowCount', 'ariaRowIndex', 'ariaRowIndexText',
     'ariaRowSpan', 'ariaSelected', 'ariaSetSize', 'ariaSort', 'ariaValueMax', 'ariaValueMin', 'ariaValueNow',
     'ariaValueText'];
+  // ARIA 1.3 reflects these as enumerated attributes (w3c/aria#2484): [keywords, invalid
+  // value default, missing value default]; the getter returns the canonical keyword.
+  const ARIA_ENUM = {
+    ariaAtomic: [['true', 'false'], 'false', null],
+    ariaAutoComplete: [['inline', 'list', 'both', 'none'], 'none', 'none'],
+    ariaBusy: [['true', 'false'], 'false', 'false'],
+    ariaChecked: [['true', 'false', 'mixed'], null, null],
+    ariaCurrent: [['page', 'step', 'location', 'date', 'time', 'true', 'false'], 'true', 'false'],
+    ariaDisabled: [['true', 'false'], 'false', 'false'],
+    ariaExpanded: [['true', 'false'], null, null],
+    ariaHasPopup: [['true', 'false', 'menu', 'dialog', 'listbox', 'tree', 'grid'], 'false', null],
+    ariaHidden: [['true', 'false'], 'false', 'false'],
+    ariaInvalid: [['true', 'false', 'spelling', 'grammar'], 'true', 'false'],
+    ariaLive: [['polite', 'assertive', 'off'], 'off', 'off'],
+    ariaModal: [['true', 'false'], 'false', 'false'],
+    ariaMultiLine: [['true', 'false'], 'false', 'false'],
+    ariaMultiSelectable: [['true', 'false'], 'false', 'false'],
+    ariaOrientation: [['horizontal', 'vertical'], null, null],
+    ariaPressed: [['true', 'false', 'mixed'], null, null],
+    ariaReadOnly: [['true', 'false'], 'false', 'false'],
+    ariaRequired: [['true', 'false'], 'false', 'false'],
+    ariaSelected: [['true', 'false'], null, null],
+    ariaSort: [['ascending', 'descending', 'other', 'none'], 'none', 'none'],
+  };
+  // A missing attribute reflects as null (what shipping browsers do; the ARIA 1.3
+  // "missing value default" is not reflected), an unknown value as the invalid-value
+  // default.
+  L.ariaGet = function (id, p, attr) {
+    const v = N.getAttr(id, attr);
+    const en = ARIA_ENUM[p];
+    if (en === undefined || v === null) return v;
+    const lower = L.asciiLower(v);
+    for (const k of en[0]) if (lower === k) return k;
+    return en[1];
+  };
   for (const p of ARIA) {
     if (p.endsWith('Element')) continue;
     const attr = p === 'role' ? 'role' : 'aria-' + p.slice(4).toLowerCase();
     Object.defineProperty(Element.prototype, p, {
-      get() { return N.getAttr(idOf(this), attr); },
+      get() { return L.ariaGet(idOf(this), p, attr); },
       set(v) { L.setAttrOrRemove(this, attr, v === null || v === undefined ? null : `${v}`); },
       enumerable: true, configurable: true,
     });
@@ -1855,10 +2149,7 @@
     },
     get prefix() { return elementPrefix.get(this) || null; },
     get localName() { return lnOf(this); },
-    get tagName() {
-      const p = elementPrefix.get(this);
-      return p ? p + ':' + tagNameOf(this) : tagNameOf(this);
-    },
+    get tagName() { return tagNameOf(this); },
     get id() { const v = N.getAttr(idOf(this), 'id'); return v === null ? '' : v; },
     set id(v) { setAttrCore(this, idOf(this), 'id', `${v}`); },
     get className() { const v = N.getAttr(idOf(this), 'class'); return v === null ? '' : v; },
@@ -1868,6 +2159,7 @@
     get slot() { const v = N.getAttr(idOf(this), 'slot'); return v === null ? '' : v; },
     set slot(v) { setAttrCore(this, idOf(this), 'slot', `${v}`); },
     get part() { return L.tokenList(this, 'part'); },
+    set part(v) { this.part.value = v; },
     hasAttributes() { return N.attrNames(idOf(this)).length !== 0; },
     get attributes() { return namedNodeMap(this); },
     getAttributeNames() { return N.attrNames(idOf(this)); },
@@ -1990,6 +2282,7 @@
     },
     get assignedSlot() { return null; },
     closest(selectors) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'closest' on 'Element': 1 argument required, but only 0 present.");
       const sel = `${selectors}`;
       try { return wrap(N.closest(idOf(this), sel)); } catch (e) {
         const c = L.fromNative(e);
@@ -1997,8 +2290,14 @@
         throw c;
       }
     },
-    matches(selectors) { return elementMatchesImpl(idOf(this), `${selectors}`, 'matches'); },
-    webkitMatchesSelector(selectors) { return elementMatchesImpl(idOf(this), `${selectors}`, 'webkitMatchesSelector'); },
+    matches(selectors) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'matches' on 'Element': 1 argument required, but only 0 present.");
+      return elementMatchesImpl(idOf(this), `${selectors}`, 'matches');
+    },
+    webkitMatchesSelector(selectors) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'webkitMatchesSelector' on 'Element': 1 argument required, but only 0 present.");
+      return elementMatchesImpl(idOf(this), `${selectors}`, 'webkitMatchesSelector');
+    },
     getElementsByTagName(qn) { return getElementsByTagNameImpl(idOf(this), qn); },
     getElementsByTagNameNS(ns, local) { return getElementsByTagNameNSImpl(idOf(this), ns, local); },
     getElementsByClassName(names) { return getElementsByClassNameImpl(idOf(this), names); },
@@ -2064,8 +2363,17 @@
     scroll(a, b) { elementScroll(this, a, b, false); },
     scrollTo(a, b) { elementScroll(this, a, b, false); },
     scrollBy(a, b) { elementScroll(this, a, b, true); },
-    scrollIntoView(arg) { N.scrollIntoView(idOf(this)); },
-    scrollIntoViewIfNeeded(center) { N.scrollIntoView(idOf(this)); },
+    scrollIntoView(arg) {
+      let block = 'start', inline = 'nearest', behavior = 'auto';
+      if (arg === false) block = 'end';
+      else if (arg !== null && typeof arg === 'object') {
+        if (arg.block !== undefined) block = String(arg.block);
+        if (arg.inline !== undefined) inline = String(arg.inline);
+        if (arg.behavior !== undefined) behavior = String(arg.behavior);
+      }
+      N.scrollIntoView(idOf(this), block, inline, behavior);
+    },
+    scrollIntoViewIfNeeded(center) { N.scrollIntoView(idOf(this), 'nearest', 'nearest', 'auto'); },
     checkVisibility(options) {
       const id = idOf(this);
       if (!N.isConnected(id)) return false;
@@ -2089,11 +2397,13 @@
     },
     releasePointerCapture(pointerId) { const s = pointerCaptures.get(this); if (s) s.delete(Number(pointerId)); },
     hasPointerCapture(pointerId) { const s = pointerCaptures.get(this); return !!s && s.has(Number(pointerId)); },
-    getAnimations() { return []; },
+    getAnimations(options) { return L.elementAnimations(this, options); },
+    animate(keyframes, options) { return L.elementAnimate(this, keyframes, options); },
   });
   L.defineEventHandlers(Element.prototype, ['onfullscreenchange', 'onfullscreenerror', 'onbeforecopy', 'onbeforecut', 'onbeforepaste', 'onsearch']);
   const elementNsOther = new WeakMap();
   const elementPrefix = new WeakMap();
+  let prefixedElements = 0; // how many elements were ever given a prefix (see getElementsByTagName)
   L.elementNsOther = elementNsOther;
   L.elementPrefix = elementPrefix;
   const SHADOW_HOSTS = new Set(['article', 'aside', 'blockquote', 'body', 'div', 'footer', 'h1', 'h2', 'h3', 'h4',
@@ -2156,10 +2466,14 @@
       if (sr !== null) shadowDistribute(sr);
     },
     querySelector(selectors) {
-      return wrap(qs(idOf(this), `${selectors}`, 'querySelector', this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment'));
+      const iface = this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment';
+      if (arguments.length === 0) throw new TypeError(`Failed to execute 'querySelector' on '${iface}': 1 argument required, but only 0 present.`);
+      return wrap(qs(idOf(this), `${selectors}`, 'querySelector', iface));
     },
     querySelectorAll(selectors) {
-      return L.staticNodeList(qsa(idOf(this), `${selectors}`, 'querySelectorAll', this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment'));
+      const iface = this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment';
+      if (arguments.length === 0) throw new TypeError(`Failed to execute 'querySelectorAll' on '${iface}': 1 argument required, but only 0 present.`);
+      return L.staticNodeList(qsa(idOf(this), `${selectors}`, 'querySelectorAll', iface));
     },
   };
   const ChildNodeMixin = {
@@ -2234,27 +2548,31 @@
       checkOffset(d.length, o, 'substringData');
       return d.substr(o, count >>> 0);
     },
-    appendData(data) { const id = idOf(this); setDataCore(this, id, N.getText(id) + `${data}`); },
+    appendData(data) { const id = idOf(this); const d = N.getText(id); const s = `${data}`; setDataCore(this, id, d + s, d.length, 0, s.length); },
     insertData(offset, data) {
       const id = idOf(this);
       const d = N.getText(id);
       const o = offset >>> 0;
       checkOffset(d.length, o, 'insertData');
-      setDataCore(this, id, d.slice(0, o) + `${data}` + d.slice(o));
+      const s = `${data}`;
+      setDataCore(this, id, d.slice(0, o) + s + d.slice(o), o, 0, s.length);
     },
     deleteData(offset, count) {
       const id = idOf(this);
       const d = N.getText(id);
       const o = offset >>> 0;
       checkOffset(d.length, o, 'deleteData');
-      setDataCore(this, id, d.slice(0, o) + d.slice(o + (count >>> 0)));
+      const n = Math.min(count >>> 0, d.length - o);
+      setDataCore(this, id, d.slice(0, o) + d.slice(o + n), o, n, 0);
     },
     replaceData(offset, count, data) {
       const id = idOf(this);
       const d = N.getText(id);
       const o = offset >>> 0;
       checkOffset(d.length, o, 'replaceData');
-      setDataCore(this, id, d.slice(0, o) + `${data}` + d.slice(o + (count >>> 0)));
+      const n = Math.min(count >>> 0, d.length - o);
+      const s = `${data}`;
+      setDataCore(this, id, d.slice(0, o) + s + d.slice(o + n), o, n, s.length);
     },
   });
   L.mixin(Text.prototype, {
@@ -2265,8 +2583,12 @@
       if (o > d.length) throw new DOMException(`Failed to execute 'splitText' on 'Text': The offset ${o} is larger than the Text node's length.`, 'IndexSizeError');
       const newNode = makeWrapper(N.createText(d.slice(o)), 3, Text.prototype);
       const p = N.parent(id);
-      if (p !== 0) insertCore(p, undefined, newNode, idOf(newNode), N.nextSibling(id));
-      setDataCore(this, id, d.slice(0, o));
+      if (p !== 0) {
+        const index = indexOfNode(id);
+        insertCore(p, undefined, newNode, idOf(newNode), N.nextSibling(id));
+        if (liveRanges.size !== 0) rangesOnSplit(id, idOf(newNode), o, p, index);
+      }
+      setDataCore(this, id, d.slice(0, o), o, d.length - o, 0);
       return newNode;
     },
     get wholeText() {
@@ -2331,6 +2653,9 @@
     get fullscreenElement() { return null; },
     get pointerLockElement() { return null; },
     get pictureInPictureElement() { return null; },
+    get adoptedStyleSheets() { return L.adoptedStyleSheetsOf(this); },
+    set adoptedStyleSheets(v) { L.setAdoptedStyleSheets(this, v); },
+    get styleSheets() { return srInfo(this).sheets || (srInfo(this).sheets = new StyleSheetList(INTERNAL, this)); },
     getSelection() { return L.getSelection ? L.getSelection() : null; },
     elementFromPoint(x, y) { return document.elementFromPoint(x, y); },
     elementsFromPoint(x, y) { return document.elementsFromPoint(x, y); },
@@ -2472,6 +2797,8 @@
   const EMPTY_TITLE_DOC = '';
 
   L.mixin(Document.prototype, {
+    get timeline() { return L.documentTimeline; },
+    getAnimations() { return L.documentAnimations(this); },
     get implementation() {
       let m = docCollections.get(this);
       return docCollection(this, 'impl', () => new DOMImplementation(INTERNAL, this));
@@ -2508,15 +2835,15 @@
       if (html || info.contentType === 'application/xhtml+xml') {
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
         const def = ceDefs.get(name);
-        if (def !== undefined && !isOpt) return constructCE(def, name);
+        if (def !== undefined && !isOpt) return ownDoc(this, constructCE(def, name));
         const id = N.createElement(name, '');
         const w = wrap(id);
         if (name === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
         if (isOpt) createCustomizedBuiltin(w, id, name, `${options.is}`);
-        return w;
+        return ownDoc(this, w);
       }
       const id = N.createElement(name, '');
-      return L.wrapElementAs(id, Element.prototype, name, NONE);
+      return ownDoc(this, L.wrapElementAs(id, Element.prototype, name, NONE));
     },
     createElementNS(namespace, qualifiedName, options) {
       const nsv = namespace === null || namespace === undefined || namespace === '' ? null : `${namespace}`;
@@ -2532,7 +2859,7 @@
       if (code === HTML) {
         const def = ceDefs.get(local);
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
-        if (def !== undefined && !isOpt && prefix === null) return constructCE(def, local);
+        if (def !== undefined && !isOpt && prefix === null) return ownDoc(this, constructCE(def, local));
         const id = N.createElement(local, '');
         w = wrap(id);
         if (local === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
@@ -2544,39 +2871,46 @@
         w = L.wrapElementAs(id, Element.prototype, local, code);
         if (code === OTHER) elementNsOther.set(w, nsv);
       }
-      if (prefix !== null) elementPrefix.set(w, prefix);
-      return w;
+      if (prefix !== null) { elementPrefix.set(w, prefix); prefixedElements++; }
+      return ownDoc(this, w);
     },
-    createDocumentFragment() { return makeWrapper(N.createFragment(), 11, DocumentFragment.prototype); },
-    createTextNode(data) { return makeWrapper(N.createText(`${data}`), 3, Text.prototype); },
+    createDocumentFragment() { return ownDoc(this, makeWrapper(N.createFragment(), 11, DocumentFragment.prototype)); },
+    createTextNode(data) { return ownDoc(this, makeWrapper(N.createText(`${data}`), 3, Text.prototype)); },
     createCDATASection(data) {
       if (docInfo(this).contentType === 'text/html') throw new DOMException("Failed to execute 'createCDATASection' on 'Document': This operation is not supported for HTML documents.", 'NotSupportedError');
       const s = `${data}`;
       if (s.includes(']]>')) throw invalidChar("Failed to execute 'createCDATASection' on 'Document': String cannot contain ']]>' since that is the end delimiter of a CData section.");
-      return makeWrapper(N.createText(s), 4, CDATASection.prototype);
+      return ownDoc(this, makeWrapper(N.createText(s), 4, CDATASection.prototype));
     },
-    createComment(data) { return makeWrapper(N.createComment(`${data}`), 8, Comment.prototype); },
+    createComment(data) { return ownDoc(this, makeWrapper(N.createComment(`${data}`), 8, Comment.prototype)); },
     createProcessingInstruction(target, data) {
       const t = `${target}`, d = `${data}`;
       validateElementName(t, 'createProcessingInstruction');
       if (d.includes('?>')) throw invalidChar("Failed to execute 'createProcessingInstruction' on 'Document': The data provided contains '?>'.");
       const w = makeWrapper(N.createComment(d), 7, ProcessingInstruction.prototype);
       piTarget.set(w, t);
-      return w;
+      return ownDoc(this, w);
     },
     importNode(node, deep = false) {
+      if (!isNode(node) && !L.isAttr(node) && L.foreignNodeType(node) !== 0) {
+        const n = adoptForeign(node, 'importNode', false);
+        const d = typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep;
+        return ownDoc(this, d ? n : n.cloneNode(false));
+      }
       if (!isNode(node) && !L.isAttr(node)) throw new TypeError("Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.");
       if (L.isAttr(node)) return node.cloneNode();
       if (typeOf(node) === 9 || isShadowRoot(node)) throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", 'NotSupportedError');
-      return cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep);
+      return ownDoc(this, cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep));
     },
     adoptNode(node) {
       if (L.isAttr(node)) { if (L.attrOwner(node)) L.attrOwner(node).removeAttributeNode(node); return node; }
+      if (!isNode(node) && L.foreignNodeType(node) !== 0) return ownDoc(this, adoptForeign(node, 'adoptNode', true));
       const nid = L.nodeArg(node, 'adoptNode', 1);
       if (typeOf(node) === 9) throw new DOMException("Failed to execute 'adoptNode' on 'Document': The node provided is a document, which may not be adopted.", 'NotSupportedError');
       if (isShadowRoot(node)) throw hier("Failed to execute 'adoptNode' on 'Document': The node provided is a shadow root, which may not be adopted.");
       const p = N.parent(nid);
       if (p !== 0) removeCore(p, undefined, nid);
+      if (this !== document) nodeDocs.set(node, this); else nodeDocs.delete(node);
       return node;
     },
     createAttribute(localName) {
@@ -2748,6 +3082,8 @@
     queryCommandSupported() { return false; },
     queryCommandValue() { return ''; },
     get styleSheets() { return docCollection(this, 'sheets', () => new StyleSheetList(INTERNAL, this)); },
+    get adoptedStyleSheets() { return L.adoptedStyleSheetsOf(this); },
+    set adoptedStyleSheets(v) { L.setAdoptedStyleSheets(this, v); },
     get fonts() { return this === document ? L.fonts : null; },
     getSelection() { return this === document && L.getSelection ? L.getSelection() : null; },
     elementFromPoint(x, y) {
@@ -2797,10 +3133,16 @@
   const dirtySheets = new Set();
   let sheetFlushQueued = false;
   L.flushSheets = function () {
-    if (dirtySheets.size === 0) return;
-    const list = Array.from(dirtySheets);
-    dirtySheets.clear();
-    for (const s of list) flushSheet(s);
+    if (dirtySheets.size !== 0) {
+      const list = Array.from(dirtySheets);
+      dirtySheets.clear();
+      for (const s of list) flushSheet(s);
+    }
+    if (adoptedDirty.size !== 0) {
+      const roots = Array.from(adoptedDirty);
+      adoptedDirty.clear();
+      for (const root of roots) flushAdopted(root);
+    }
   };
   function markSheetDirty(sheet) {
     dirtySheets.add(sheet);
@@ -2925,6 +3267,7 @@
       if (token !== INTERNAL) throw L.illegal();
       this.#el = el; this.#mode = mode; this.#pseudo = pseudo || ''; this.#decls = decls || null;
     }
+    *[Symbol.iterator]() { for (let i = 0, n = this.length; i < n; i++) yield this.item(i); }
     static {
       L.sdGet = (o, name) => {
         const m = o.#mode;
@@ -3243,6 +3586,7 @@
     set name(v) { const d = rd(this); d.prelude = '@keyframes ' + v; d.text = null; ruleChanged(this); }
     get cssRules() { return ruleList(this); }
     get length() { return rd(this).children.length; }
+    *[Symbol.iterator]() { yield* this.cssRules; }
     appendRule(rule) { insertRuleInto(rd(this), this, `${rule}`, rd(this).children.length, true); }
     deleteRule(select) { const d = rd(this); const i = d.children.findIndex((c) => rd(c).prelude === `${select}`); if (i >= 0) { deleteRuleFrom(d, i); ruleChanged(this); } }
     findRule(select) { return rd(this).children.find((c) => rd(c).prelude === `${select}`) || null; }
@@ -3259,6 +3603,18 @@
   class CSSLayerStatementRule extends CSSRule { get nameList() { return Object.freeze(rd(this).prelude.replace(/^@layer\s*/i, '').split(',').map((s) => s.trim())); } }
   class CSSPropertyRule extends CSSRule { get name() { return rd(this).prelude.replace(/^@property\s*/i, ''); } }
 
+  // At-rules browsers drop from the CSSOM: `@charset` and unknown ones.
+  const KNOWN_AT_RULES = /^@(-webkit-|-moz-)?(media|supports|container|layer|import|font-face|keyframes|namespace|page|counter-style|property|scope|font-feature-values|font-palette-values|starting-style|view-transition|position-try|document)\b/;
+  function keepsRule(item) {
+    const p = item.prelude;
+    if (p.charCodeAt(0) !== 64) return true;
+    return KNOWN_AT_RULES.test(p.toLowerCase());
+  }
+  function makeRules(items, sheet, parent) {
+    const out = [];
+    for (const item of items) if (keepsRule(item)) out.push(makeRule(item, sheet, parent));
+    return out;
+  }
   function makeRule(item, sheet, parent) {
     const prelude = item.prelude;
     const lower = prelude.toLowerCase();
@@ -3281,7 +3637,7 @@
     const d = { prelude, body: item.body, text: item.text, sheet, parent: parent || null, type, children: [], style: null, decls: null };
     ruleData.set(r, d);
     if (nested && item.body !== null) {
-      for (const sub of splitRules(item.body)) d.children.push(makeRule(sub, sheet, r));
+      d.children = makeRules(splitRules(item.body), sheet, r);
     }
     return r;
   }
@@ -3317,7 +3673,7 @@
     #get;
     constructor(token, get) { if (token !== INTERNAL) throw L.illegal(); this.#get = get; }
     static { L.crlItems = (o) => o.#get(); }
-    get length() { return L.crlItems(this).length; }
+    get length() { const n = L.crlItems(this).length; if (n > 256) L.ensureIndexed(CSSRuleList.prototype, n); return n; }
     item(i) { const v = L.crlItems(this)[Number(i) >>> 0]; return v === undefined ? null : v; }
     *[Symbol.iterator]() { yield* L.crlItems(this); }
   }
@@ -3350,6 +3706,7 @@
       const b = !!v;
       if (d.disabled === b) return;
       d.disabled = b;
+      if (d.adopters) for (const root of d.adopters) adoptedChanged(root);
       if (d.owner && lnOf(d.owner) === 'style') {
         // approximate: disabling a <style> sheet empties its rendered text
         if (b) { d.savedText = N.textContent(idOf(d.owner)); N.setTextContent(idOf(d.owner), ''); d.text = ''; }
@@ -3362,10 +3719,16 @@
     constructor(options) {
       super(INTERNAL);
       const o = options || {};
-      sheetData.set(this, { owner: null, rules: [], text: '', rewrite: false, pending: '', disabled: !!o.disabled, href: null, constructed: true, media: o.media ? `${o.media}` : '' });
+      let baseURL = null;
+      if (o.baseURL !== undefined) {
+        baseURL = L.resolveURL(`${o.baseURL}`);
+        if (baseURL === null || baseURL === '') throw new DOMException("Failed to construct 'CSSStyleSheet': Invalid base URL.", 'NotAllowedError');
+      }
+      sheetData.set(this, { owner: null, rules: [], text: '', rewrite: false, pending: '', disabled: !!o.disabled, href: null, constructed: true, media: o.media ? `${o.media}` : '', adopters: new Set(), baseURL });
     }
     get ownerRule() { return null; }
     get cssRules() {
+      checkSheetAccess(this, 'cssRules');
       syncSheet(this);
       let l = ruleLists.get(this);
       if (l === undefined) { l = new CSSRuleList(INTERNAL, () => { syncSheet(this); return sheetDataOf(this).rules; }); ruleLists.set(this, l); }
@@ -3373,6 +3736,7 @@
     }
     get rules() { return this.cssRules; }
     insertRule(rule, index = 0) {
+      checkSheetAccess(this, 'insertRule');
       syncSheet(this);
       const d = sheetDataOf(this);
       const idx = index >>> 0;
@@ -3380,6 +3744,7 @@
       const text = `${rule}`;
       const items = splitRules(text);
       if (items.length !== 1) throw new DOMException(`Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '${text}'.`, 'SyntaxError');
+      if (d.constructed && /^@import\b/i.test(items[0].prelude)) throw new DOMException("Failed to execute 'insertRule' on 'CSSStyleSheet': Can't insert @import rules into a constructed stylesheet.", 'SyntaxError');
       const r = makeRule(items[0], this, null);
       d.rules.splice(idx, 0, r);
       if (idx === d.rules.length - 1 && !d.rewrite) d.pending += (d.pending ? '\n' : '') + ruleText(r);
@@ -3388,6 +3753,7 @@
       return idx;
     }
     deleteRule(index) {
+      checkSheetAccess(this, 'deleteRule');
       syncSheet(this);
       const d = sheetDataOf(this);
       const idx = index >>> 0;
@@ -3408,24 +3774,49 @@
     replaceSync(text) {
       const d = sheetDataOf(this);
       if (!d.constructed) throw new DOMException("Failed to execute 'replaceSync' on 'CSSStyleSheet': Can't call replaceSync on non-constructed CSSStyleSheets.", 'NotAllowedError');
-      d.rules = splitRules(`${text}`).filter((i) => !/^@import/i.test(i.prelude)).map((i) => makeRule(i, this, null));
+      d.rules = makeRules(splitRules(`${text}`).filter((i) => !/^@import/i.test(i.prelude)), this, null);
       d.rewrite = true;
       markSheetDirty(this);
     }
   }
-  // Bring the JS rule list in sync with the owner <style>'s text (if it changed externally).
+  // Bring the JS rule list in sync with the owner <style>'s text (if it changed externally),
+  // or parse a <link>'s sheet once it has loaded.
   function syncSheet(s) {
     const d = sheetDataOf(s);
-    if (d.owner === null || d.linked) return;
+    if (d.owner === null) return;
+    if (d.linked) {
+      if (d.text !== null) return;
+      const text = N.linkSheetText(idOf(d.owner));
+      if (text === null) return;
+      d.text = text;
+      d.rules = makeRules(splitRules(text), s, null);
+      return;
+    }
     if (d.pending !== '' || d.rewrite) return; // our own changes not flushed yet: JS state is authoritative
     const text = N.textContent(idOf(d.owner));
     if (text === d.text) return;
     d.text = text;
-    d.rules = splitRules(text).map((i) => makeRule(i, s, null));
+    d.rules = makeRules(splitRules(text), s, null);
+  }
+  // A linked sheet from another origin hides its rules (as in browsers).
+  function checkSheetAccess(s, what) {
+    const d = sheetDataOf(s);
+    if (!d.linked || d.href === null) return;
+    const p = N.urlParse(d.href, null);
+    const origin = p === null ? null : p[10];
+    if (origin !== null && origin !== 'null' && origin === L.location.origin) return;
+    throw new DOMException(`Failed to ${what === 'cssRules' ? "read the 'cssRules' property from" : `execute '${what}' on`} 'CSSStyleSheet': Cannot access rules`, 'SecurityError');
   }
   function flushSheet(s) {
     const d = sheetData.get(s);
-    if (d === undefined || d.owner === null || d.linked) { if (d) { d.pending = ''; d.rewrite = false; } return; }
+    if (d === undefined || d.owner === null || d.linked) {
+      if (d) {
+        d.pending = ''; d.rewrite = false;
+        // A constructed sheet applies through the roots that adopted it.
+        if (d.adopters) for (const root of d.adopters) adoptedDirty.add(root);
+      }
+      return;
+    }
     const id = idOf(d.owner);
     if (d.rewrite) {
       const text = d.rules.map(ruleText).join('\n');
@@ -3452,6 +3843,108 @@
     }
     return s;
   };
+
+  // --- adoptedStyleSheets: an ObservableArray<CSSStyleSheet> per document / shadow root ---
+  // Mutations (index and length writes, the attribute setter) are validated like the
+  // WebIDL set/delete algorithms and re-apply the root's adopted sheets natively (their
+  // rule text, after every <style>/<link> sheet; scoped to the host for a shadow root).
+  const adoptedArrays = new WeakMap(); // document or shadow root -> proxy
+  const adoptedTargets = new WeakMap(); // proxy -> backing array
+  const adoptedDirty = new Set();
+  const isIndexKey = (key) => typeof key === 'string' && /^(?:0|[1-9]\d*)$/.test(key) && Number(key) < 4294967295;
+  function checkAdoptable(v) {
+    if (!(v instanceof CSSStyleSheet)) throw new TypeError("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': Failed to convert value to 'CSSStyleSheet'.");
+    if (!sheetDataOf(v).constructed) throw new DOMException("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': Can't adopt non-constructed stylesheets.", 'NotAllowedError');
+  }
+  function adoptedChanged(root) {
+    adoptedDirty.add(root);
+    if (!sheetFlushQueued) {
+      sheetFlushQueued = true;
+      L.microtask(() => { sheetFlushQueued = false; L.flushSheets(); });
+    }
+  }
+  function adoptedHostId(root) {
+    if (root === document) return 0;
+    if (isShadowRoot(root)) return idOf(shadowInfo.get(root).host);
+    return -1; // other documents render nothing
+  }
+  function flushAdopted(root) {
+    const hostId = adoptedHostId(root);
+    if (hostId < 0) return;
+    const sheets = Array.from(adoptedTargets.get(adoptedArrays.get(root)), (s) => {
+      const d = sheetDataOf(s);
+      d.adopters.add(root);
+      if (d.disabled) return null;
+      const text = d.rules.map(ruleText).join('\n');
+      return [d.media ? `@media ${d.media} {\n${text}\n}` : text, d.baseURL];
+    }).filter((x) => x !== null);
+    N.setAdoptedSheets(hostId, sheets.map((x) => x[0]), sheets.map((x) => x[1]));
+  }
+  L.adoptedStyleSheetsOf = function (root) {
+    let p = adoptedArrays.get(root);
+    if (p !== undefined) return p;
+    const t = [];
+    const setIndexed = (key, value) => {
+      const i = Number(key);
+      if (i > t.length) throw new RangeError("Failed to set an indexed property on 'ObservableArray': The index is out of range.");
+      checkAdoptable(value);
+      // Own data property, not [[Set]]: an accessor on Array.prototype must never see
+      // the backing array.
+      Object.defineProperty(t, i, { value, writable: true, enumerable: true, configurable: true });
+      adoptedChanged(root);
+      return true;
+    };
+    const setLength = (value) => {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 0 || n > 4294967295) throw new RangeError('Invalid array length');
+      if (n > t.length) throw new RangeError("Failed to set the 'length' property on 'ObservableArray': The provided value is larger than the current length.");
+      if (n !== t.length) { t.length = n; adoptedChanged(root); }
+      return true;
+    };
+    p = new Proxy(t, {
+      set(target, key, value) {
+        if (isIndexKey(key)) return setIndexed(key, value);
+        if (key === 'length') return setLength(value);
+        return Reflect.set(target, key, value);
+      },
+      defineProperty(target, key, desc) {
+        if (isIndexKey(key) || key === 'length') {
+          if (!('value' in desc) || desc.get !== undefined || desc.set !== undefined) return false;
+          return key === 'length' ? setLength(desc.value) : setIndexed(key, desc.value);
+        }
+        return Reflect.defineProperty(target, key, desc);
+      },
+      deleteProperty(target, key) {
+        if (isIndexKey(key)) {
+          if (Number(key) !== t.length - 1) return false;
+          t.length -= 1;
+          adoptedChanged(root);
+          return true;
+        }
+        return Reflect.deleteProperty(target, key);
+      },
+    });
+    adoptedArrays.set(root, p);
+    adoptedTargets.set(p, t);
+    return p;
+  };
+  L.setAdoptedStyleSheets = function (root, value) {
+    if (value === null || value === undefined || typeof value[Symbol.iterator] !== 'function') {
+      throw new TypeError("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': The provided value cannot be converted to a sequence.");
+    }
+    // (Array.from, not push: setters installed on Array.prototype must not observe the list.)
+    const items = Array.from(value, (v) => {
+      if (!(v instanceof CSSStyleSheet)) throw new TypeError("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': Failed to convert value to 'CSSStyleSheet'.");
+      return v;
+    });
+    const t = adoptedTargets.get(L.adoptedStyleSheetsOf(root));
+    t.length = 0;
+    adoptedChanged(root);
+    for (const v of items) {
+      checkAdoptable(v);
+      Object.defineProperty(t, t.length, { value: v, writable: true, enumerable: true, configurable: true });
+    }
+  };
   class StyleSheetList {
     #doc;
     constructor(token, doc) { if (token !== INTERNAL) throw L.illegal(); this.#doc = doc; }
@@ -3467,7 +3960,7 @@
         return out;
       };
     }
-    get length() { return L.sslItems(this).length; }
+    get length() { const n = L.sslItems(this).length; if (n > 32) L.ensureIndexed(StyleSheetList.prototype, n); return n; }
     item(i) { const v = L.sslItems(this)[Number(i) >>> 0]; return v === undefined ? null : v; }
     *[Symbol.iterator]() { yield* L.sslItems(this); }
   }
@@ -3901,23 +4394,24 @@
     get collapsed() { return this.#sc === this.#ec && this.#so === this.#eo; }
   }
   class Range extends AbstractRange {
-    #sc; #so = 0; #ec; #eo = 0;
+    #s; // live-range state {sc, so, ec, eo}, indexed by container (see rangeIndex)
     constructor() {
       super(INTERNAL);
-      this.#sc = mainDocId; this.#ec = mainDocId;
+      this.#s = newRangeState(this, mainDocId, 0, mainDocId, 0);
     }
     static {
-      L.rangeGet = (r) => [r.#sc, r.#so, r.#ec, r.#eo];
-      L.rangeSet = (r, sc, so, ec, eo) => { r.#sc = sc; r.#so = so; r.#ec = ec; r.#eo = eo; };
+      L.rangeGet = (r) => { const s = r.#s; return [s.sc, s.so, s.ec, s.eo]; };
+      L.rangeSet = (r, sc, so, ec, eo) => { setRangeState(r.#s, sc, so, ec, eo); };
     }
-    get startContainer() { return wrap(this.#sc); }
-    get startOffset() { return this.#so; }
-    get endContainer() { return wrap(this.#ec); }
-    get endOffset() { return this.#eo; }
-    get collapsed() { return this.#sc === this.#ec && this.#so === this.#eo; }
+    get startContainer() { return wrap(this.#s.sc); }
+    get startOffset() { return this.#s.so; }
+    get endContainer() { return wrap(this.#s.ec); }
+    get endOffset() { return this.#s.eo; }
+    get collapsed() { const s = this.#s; return s.sc === s.ec && s.so === s.eo; }
     get commonAncestorContainer() {
-      let a = this.#sc;
-      while (a !== 0 && !N.contains(a, this.#ec)) a = N.parent(a);
+      const s = this.#s;
+      let a = s.sc;
+      while (a !== 0 && !N.contains(a, s.ec)) a = N.parent(a);
       return wrap(a);
     }
     #setBoundary(node, offset, start, method) {
@@ -3925,13 +4419,12 @@
       if (typeOf(node) === 10) throw new DOMException(`Failed to execute '${method}' on 'Range': The node provided is of type 'DocumentType'.`, 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException(`Failed to execute '${method}' on 'Range': The offset ${off} is larger than the node's length (${nodeLength(id)}).`, 'IndexSizeError');
+      const s = this.#s;
       if (start) {
-        this.#sc = id; this.#so = off;
-        if (rootOf(id) !== rootOf(this.#ec) || bpCompare(id, off, this.#ec, this.#eo) > 0) { this.#ec = id; this.#eo = off; }
-      } else {
-        this.#ec = id; this.#eo = off;
-        if (rootOf(id) !== rootOf(this.#sc) || bpCompare(id, off, this.#sc, this.#so) < 0) { this.#sc = id; this.#so = off; }
-      }
+        if (rootOf(id) !== rootOf(s.ec) || bpCompare(id, off, s.ec, s.eo) > 0) setRangeState(s, id, off, id, off);
+        else setRangeState(s, id, off, s.ec, s.eo);
+      } else if (rootOf(id) !== rootOf(s.sc) || bpCompare(id, off, s.sc, s.so) < 0) setRangeState(s, id, off, id, off);
+      else setRangeState(s, s.sc, s.so, id, off);
     }
     setStart(node, offset) { this.#setBoundary(node, offset, true, 'setStart'); }
     setEnd(node, offset) { this.#setBoundary(node, offset, false, 'setEnd'); }
@@ -3946,61 +4439,69 @@
     setEndBefore(node) { const [p, i] = this.#parentOf(node, 'setEndBefore'); this.#setBoundary(wrap(p), i, false, 'setEndBefore'); }
     setEndAfter(node) { const [p, i] = this.#parentOf(node, 'setEndAfter'); this.#setBoundary(wrap(p), i + 1, false, 'setEndAfter'); }
     collapse(toStart = false) {
-      if (toStart) { this.#ec = this.#sc; this.#eo = this.#so; } else { this.#sc = this.#ec; this.#so = this.#eo; }
+      const s = this.#s;
+      if (toStart) setRangeState(s, s.sc, s.so, s.sc, s.so); else setRangeState(s, s.ec, s.eo, s.ec, s.eo);
     }
     selectNode(node) {
       const [p, i] = this.#parentOf(node, 'selectNode');
-      this.#sc = p; this.#so = i; this.#ec = p; this.#eo = i + 1;
+      setRangeState(this.#s, p, i, p, i + 1);
     }
     selectNodeContents(node) {
       const id = L.nodeArg(node, 'selectNodeContents', 1);
       if (typeOf(node) === 10) throw new DOMException("Failed to execute 'selectNodeContents' on 'Range': The node provided is of type 'DocumentType'.", 'InvalidNodeTypeError');
-      this.#sc = id; this.#so = 0; this.#ec = id; this.#eo = nodeLength(id);
+      setRangeState(this.#s, id, 0, id, nodeLength(id));
     }
     compareBoundaryPoints(how, sourceRange) {
-      const h = Number(how);
+      // WebIDL `unsigned short`: ToNumber, truncate, modulo 2^16 (NaN/±Infinity → 0).
+      let h = Number(how);
+      h = Number.isFinite(h) ? Math.trunc(h) % 65536 : 0;
+      if (h < 0) h += 65536;
+      if (!(sourceRange instanceof Range)) throw new TypeError("Failed to execute 'compareBoundaryPoints' on 'Range': parameter 2 is not of type 'Range'.");
       if (h !== 0 && h !== 1 && h !== 2 && h !== 3) throw new DOMException("Failed to execute 'compareBoundaryPoints' on 'Range': The comparison method provided must be one of 'START_TO_START', 'START_TO_END', 'END_TO_END', or 'END_TO_START'.", 'NotSupportedError');
       const [ssc, sso, sec, seo] = L.rangeGet(sourceRange);
-      if (rootOf(this.#sc) !== rootOf(ssc)) throw new DOMException("Failed to execute 'compareBoundaryPoints' on 'Range': The source range is in a different document than this range.", 'WrongDocumentError');
+      if (rootOf(this.#s.sc) !== rootOf(ssc)) throw new DOMException("Failed to execute 'compareBoundaryPoints' on 'Range': The source range is in a different document than this range.", 'WrongDocumentError');
       switch (h) {
-        case 0: return bpCompare(this.#sc, this.#so, ssc, sso);
-        case 1: return bpCompare(this.#ec, this.#eo, ssc, sso);
-        case 2: return bpCompare(this.#ec, this.#eo, sec, seo);
-        default: return bpCompare(this.#sc, this.#so, sec, seo);
+        case 0: return bpCompare(this.#s.sc, this.#s.so, ssc, sso);
+        case 1: return bpCompare(this.#s.ec, this.#s.eo, ssc, sso);
+        case 2: return bpCompare(this.#s.ec, this.#s.eo, sec, seo);
+        default: return bpCompare(this.#s.sc, this.#s.so, sec, seo);
       }
     }
     comparePoint(node, offset) {
       const id = L.nodeArg(node, 'comparePoint', 1);
-      if (rootOf(id) !== rootOf(this.#sc)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.", 'WrongDocumentError');
+      if (rootOf(id) !== rootOf(this.#s.sc)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.", 'WrongDocumentError');
+      // (Doctypes are comment-backed natively: check the wrapper's type.)
+      if (typeOf(node) === 10) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The offset is larger than the node's length.", 'IndexSizeError');
-      if (bpCompare(id, off, this.#sc, this.#so) < 0) return -1;
-      if (bpCompare(id, off, this.#ec, this.#eo) > 0) return 1;
+      if (bpCompare(id, off, this.#s.sc, this.#s.so) < 0) return -1;
+      if (bpCompare(id, off, this.#s.ec, this.#s.eo) > 0) return 1;
       return 0;
     }
     isPointInRange(node, offset) {
       const id = L.nodeArg(node, 'isPointInRange', 1);
-      if (rootOf(id) !== rootOf(this.#sc)) return false;
+      if (rootOf(id) !== rootOf(this.#s.sc)) return false;
+      if (typeOf(node) === 10) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The offset is larger than the node's length.", 'IndexSizeError');
-      return bpCompare(id, off, this.#sc, this.#so) >= 0 && bpCompare(id, off, this.#ec, this.#eo) <= 0;
+      return bpCompare(id, off, this.#s.sc, this.#s.so) >= 0 && bpCompare(id, off, this.#s.ec, this.#s.eo) <= 0;
     }
     intersectsNode(node) {
       const id = L.nodeArg(node, 'intersectsNode', 1);
-      if (rootOf(id) !== rootOf(this.#sc)) return false;
+      if (rootOf(id) !== rootOf(this.#s.sc)) return false;
       const p = N.parent(id);
       if (p === 0) return true;
       const i = indexOfNode(id);
-      return bpCompare(p, i, this.#ec, this.#eo) < 0 && bpCompare(p, i + 1, this.#sc, this.#so) > 0;
+      return bpCompare(p, i, this.#s.ec, this.#s.eo) < 0 && bpCompare(p, i + 1, this.#s.sc, this.#s.so) > 0;
     }
     cloneRange() {
       const r = new Range();
-      L.rangeSet(r, this.#sc, this.#so, this.#ec, this.#eo);
+      L.rangeSet(r, this.#s.sc, this.#s.so, this.#s.ec, this.#s.eo);
       return r;
     }
     detach() { }
     toString() {
-      const sc = this.#sc, so = this.#so, ec = this.#ec, eo = this.#eo;
+      const sc = this.#s.sc, so = this.#s.so, ec = this.#s.ec, eo = this.#s.eo;
       if (sc === ec && N.nodeType(sc) === 3) return N.getText(sc).slice(so, eo);
       let s = '';
       if (N.nodeType(sc) === 3) s += N.getText(sc).slice(so);
@@ -4018,6 +4519,7 @@
     deleteContents() { rangeDelete(this); }
     insertNode(node) { rangeInsert(this, node); }
     surroundContents(newParent) {
+      newParent = L.adoptArg(newParent, 'surroundContents');
       const npid = L.nodeArg(newParent, 'surroundContents', 1);
       const [sc, , ec] = L.rangeGet(this);
       const ptrs = [sc, ec];
@@ -4035,13 +4537,16 @@
     getBoundingClientRect() {
       const rects = rangeRects(this);
       if (rects.length === 0) return new DOMRect(0, 0, 0, 0);
+      // Like Element.getBoundingClientRect: the union of the non-empty rects.
+      const sized = rects.filter((r) => r[2] !== 0 || r[3] !== 0);
+      if (sized.length === 0) return new DOMRect(rects[0][0], rects[0][1], rects[0][2], rects[0][3]);
       let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-      for (const r of rects) { x1 = Math.min(x1, r[0]); y1 = Math.min(y1, r[1]); x2 = Math.max(x2, r[0] + r[2]); y2 = Math.max(y2, r[1] + r[3]); }
+      for (const r of sized) { x1 = Math.min(x1, r[0]); y1 = Math.min(y1, r[1]); x2 = Math.max(x2, r[0] + r[2]); y2 = Math.max(y2, r[1] + r[3]); }
       return new DOMRect(x1, y1, x2 - x1, y2 - y1);
     }
     getClientRects() { return new DOMRectList(INTERNAL, rangeRects(this).map((r) => new DOMRect(r[0], r[1], r[2], r[3]))); }
     createContextualFragment(fragment) {
-      let ctx = this.#sc;
+      let ctx = this.#s.sc;
       if (N.nodeType(ctx) !== 1) ctx = N.parent(ctx);
       const ctxW = ctx === 0 || N.nodeType(ctx) !== 1 ? null : wrap(ctx);
       const frag = parseFragment(ctxW, `${fragment}`);
@@ -4061,23 +4566,29 @@
     const a = N.contains(id, sc), b = N.contains(id, ec);
     return a !== b;
   }
+  // CSSOM View: the border boxes of the elements the range selects (whose parent it
+  // doesn't), and the rects of the selected parts of text nodes.
   function rangeRects(r) {
+    L.layoutRead();
     const [sc, so, ec, eo] = L.rangeGet(r);
     const out = [];
-    const push = (id) => { const e = N.nodeType(id) === 1 ? id : N.parent(id); if (e !== 0 && N.nodeType(e) === 1) out.push(N.getBoundingClientRect(e)); };
-    if (sc === ec && N.nodeType(sc) !== 1) { push(sc); return out; }
-    if (sc === ec) {
-      const kids = N.childIds(sc);
-      if (so === eo) { push(kids[so] !== undefined ? kids[so] : sc); return out; }
-      for (let i = so; i < eo && i < kids.length; i++) push(kids[i]);
-      return out;
-    }
-    push(sc);
+    const pushFlat = (f) => { if (f) for (let i = 0; i + 3 < f.length; i += 4) out.push([f[i], f[i + 1], f[i + 2], f[i + 3]]); };
+    const isText = (id) => N.nodeType(id) === 3;
+    const text = (id, a, b) => pushFlat(nativeCall(() => N.textRects(id, a, b)));
+    const elem = (id) => pushFlat(nativeCall(() => N.getClientRects(id)));
+    if (sc === ec && isText(sc)) { text(sc, so, eo); return out; }
+    if (isText(sc)) text(sc, so, nodeLength(sc));
     const root = rootOf(sc);
     for (let n = followingInRoot(sc, root); n !== 0 && n !== ec; n = followingInRoot(n, root)) {
-      if (N.nodeType(n) === 1 && rangeContains(r, n)) push(n);
+      if (bpCompare(n, 0, ec, eo) >= 0) break; // past the end
+      if (!rangeContains(r, n)) continue;
+      if (isText(n)) text(n, 0, nodeLength(n));
+      else if (N.nodeType(n) === 1) {
+        const p = N.parent(n);
+        if (p === 0 || !rangeContains(r, p)) elem(n);
+      }
     }
-    push(ec);
+    if (ec !== sc && isText(ec)) text(ec, 0, eo);
     return out;
   }
   // Clone or extract range contents into a new fragment (returns fragment id)
@@ -4091,7 +4602,7 @@
       const data = N.getText(sc);
       N.setText(clone, data.slice(so, eo));
       N.appendChild(frag, clone);
-      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so) + data.slice(eo));
+      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so) + data.slice(eo), so, eo - so, 0);
       return frag;
     }
     let ca = sc;
@@ -4113,7 +4624,7 @@
       const data = N.getText(sc);
       N.setText(clone, data.slice(so));
       N.appendChild(frag, clone);
-      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so));
+      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so), so, data.length - so, 0);
     } else if (firstPC !== 0) {
       const clone = N.cloneNode(firstPC, false);
       N.appendChild(frag, clone);
@@ -4135,7 +4646,7 @@
       const data = N.getText(ec);
       N.setText(clone, data.slice(0, eo));
       N.appendChild(frag, clone);
-      if (extract) setDataCore(wrap(ec), ec, data.slice(eo));
+      if (extract) setDataCore(wrap(ec), ec, data.slice(eo), 0, eo, 0);
     } else if (lastPC !== 0) {
       const clone = N.cloneNode(lastPC, false);
       N.appendChild(frag, clone);
@@ -4153,7 +4664,7 @@
     if (sc === ec && so === eo) return;
     if (sc === ec && isCharData(sc)) {
       const d = N.getText(sc);
-      setDataCore(wrap(sc), sc, d.slice(0, so) + d.slice(eo));
+      setDataCore(wrap(sc), sc, d.slice(0, so) + d.slice(eo), so, eo - so, 0);
       return;
     }
     const toRemove = [];
@@ -4172,12 +4683,13 @@
       while (N.parent(ref) !== 0 && !N.contains(N.parent(ref), ec)) ref = N.parent(ref);
       newNode = N.parent(ref); newOffset = indexOfNode(ref) + 1;
     }
-    if (isCharData(sc)) { const d = N.getText(sc); setDataCore(wrap(sc), sc, d.slice(0, so)); }
+    if (isCharData(sc)) { const d = N.getText(sc); setDataCore(wrap(sc), sc, d.slice(0, so), so, d.length - so, 0); }
     for (const c of toRemove) { const p = N.parent(c); if (p !== 0) removeCore(p, undefined, c); }
-    if (isCharData(ec) && ec !== sc) { const d = N.getText(ec); setDataCore(wrap(ec), ec, d.slice(eo)); }
+    if (isCharData(ec) && ec !== sc) { const d = N.getText(ec); setDataCore(wrap(ec), ec, d.slice(eo), 0, eo, 0); }
     L.rangeSet(r, newNode, newOffset, newNode, newOffset);
   }
   function rangeInsert(r, node) {
+    node = L.adoptArg(node, 'insertNode');
     const nid = L.nodeArg(node, 'insertNode', 1);
     const [sc, so, ec, eo] = L.rangeGet(r);
     const st = N.nodeType(sc);
@@ -4207,6 +4719,11 @@
     get anchorOffset() { const r = this.#range; return r === null ? 0 : (this.#backward ? r.endOffset : r.startOffset); }
     get focusNode() { const r = this.#range; return r === null ? null : (this.#backward ? r.startContainer : r.endContainer); }
     get focusOffset() { const r = this.#range; return r === null ? 0 : (this.#backward ? r.startOffset : r.endOffset); }
+    // Legacy aliases (WebKit/Blink).
+    get baseNode() { return this.anchorNode; }
+    get baseOffset() { return this.anchorOffset; }
+    get extentNode() { return this.focusNode; }
+    get extentOffset() { return this.focusOffset; }
     get isCollapsed() { return this.#range === null || this.#range.collapsed; }
     get rangeCount() { return this.#range === null ? 0 : 1; }
     get type() { return this.#range === null ? 'None' : this.#range.collapsed ? 'Caret' : 'Range'; }
@@ -4729,7 +5246,7 @@
           w = L.wrapElementAs(id, code === HTML ? L.elementProtoFor(local, HTML) : Element.prototype, local, code === HTML ? HTML : code);
           if (code === OTHER) elementNsOther.set(w, nsURI);
         }
-        if (prefix !== null) elementPrefix.set(w, prefix);
+        if (prefix !== null) { elementPrefix.set(w, prefix); prefixedElements++; }
         for (const [an, av] of attrs) N.setAttr(id, an, av);
         N.appendChild(parent.id, id);
         if (stack.length === 1) sawRoot = true;
@@ -4914,8 +5431,9 @@
     constructor(token, doc) { if (token !== INTERNAL) throw L.illegal(); this.#doc = doc; }
     createDocumentType(qualifiedName, publicId, systemId) {
       const qn = `${qualifiedName}`;
-      validateQName(qn, 'createDocumentType');
-      return makeDoctype(qn, `${publicId}`, `${systemId}`);
+      // A valid doctype name: no ASCII whitespace, NUL or '>' (the empty name is valid).
+      if (/[\t\n\f\r \0>]/.test(qn)) throw invalidChar(`Failed to execute 'createDocumentType' on 'DOMImplementation': The qualified name provided ('${qn}') contains an invalid character.`);
+      return ownDoc(this.#doc, makeDoctype(qn, `${publicId}`, `${systemId}`));
     }
     createDocument(namespace, qualifiedName, doctype = null) {
       const ns = namespace === null || namespace === undefined || namespace === '' ? null : `${namespace}`;

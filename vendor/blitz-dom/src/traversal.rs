@@ -310,8 +310,12 @@ impl BaseDocument {
         let mut ancestors = Vec::with_capacity(12);
         let mut maybe_id = Some(node_id);
         while let Some(id) = maybe_id {
+            // PATCH: the hover/active node or a `layout_parent` may have been dropped by
+            // script since the last layout (a native click lands between a DOM mutation
+            // and the next resolve); stop at the first missing id instead of panicking.
+            let Some(node) = self.nodes.get(id) else { break };
             ancestors.push(id);
-            maybe_id = self.nodes[id].layout_parent.get();
+            maybe_id = node.layout_parent.get();
         }
         ancestors.reverse();
         ancestors

@@ -548,6 +548,7 @@
   const PageTransitionEvent = simpleEvent('PageTransitionEvent', Event, { persisted: false });
   const AnimationEvent = simpleEvent('AnimationEvent', Event, { animationName: '', elapsedTime: 0, pseudoElement: '' });
   const TransitionEvent = simpleEvent('TransitionEvent', Event, { propertyName: '', elapsedTime: 0, pseudoElement: '' });
+  const AnimationPlaybackEvent = simpleEvent('AnimationPlaybackEvent', Event, { currentTime: null, timelineTime: null });
   const SubmitEvent = simpleEvent('SubmitEvent', Event, { submitter: null });
   const FormDataEvent = simpleEvent('FormDataEvent', Event, { formData: null });
   const PromiseRejectionEvent = simpleEvent('PromiseRejectionEvent', Event, { promise: null, reason: undefined });
@@ -588,6 +589,8 @@
       this.#m = { data, origin: `${origin}`, lastEventId: `${lastEventId}`, source, ports: Object.freeze(Array.from(ports || [])) };
     }
   }
+
+  const CloseEvent = simpleEvent('CloseEvent', Event, { wasClean: false, code: 0, reason: '' });
 
   class BeforeUnloadEvent extends Event {
     #rv = '';
@@ -968,6 +971,7 @@
   L.currentEvent = undefined; // window.event
   L.eventParent = function () { return null; }; // replaced by 20_dom.js
   L.activation = null; // click activation behaviour, installed by 30_html.js
+  L.lastActivation = 0; // Date.now() of the last trusted activation event (0: none yet)
 
   function buildPath(target, event) {
     const path = [target];
@@ -1026,6 +1030,11 @@
     // Inline handler discovery (content attributes set by the parser / innerHTML / clone)
     if (TYPE_TO_ATTR.has(type)) {
       for (let i = 0; i < path.length; i++) discoverInline(path[i], type);
+    }
+
+    // User activation (navigator.userActivation): a trusted activation-triggering event.
+    if (event.isTrusted && (type === 'click' || type === 'mousedown' || type === 'pointerdown' || type === 'keydown' || type === 'touchend')) {
+      L.lastActivation = Date.now();
     }
 
     let act = null;
@@ -1169,16 +1178,16 @@
   Object.assign(L, {
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
-    HashChangeEvent, PageTransitionEvent, AnimationEvent, TransitionEvent, SubmitEvent, FormDataEvent,
+    HashChangeEvent, PageTransitionEvent, AnimationEvent, AnimationPlaybackEvent, TransitionEvent, SubmitEvent, FormDataEvent,
     PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
-    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController,
+    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   });
   for (const [name, C] of Object.entries({
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
-    HashChangeEvent, PageTransitionEvent, AnimationEvent, TransitionEvent, SubmitEvent, FormDataEvent,
+    HashChangeEvent, PageTransitionEvent, AnimationEvent, AnimationPlaybackEvent, TransitionEvent, SubmitEvent, FormDataEvent,
     PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
-    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController,
+    BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   })) L.expose(name, C);
   L.expose('DOMException', L.DOMException);
 

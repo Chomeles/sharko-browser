@@ -12,8 +12,9 @@ use cursor_icon::CursorIcon;
 use netstack::NetClient;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 /// State shared between the event loop and the providers (thread-safe parts).
 pub struct Shared {
@@ -23,8 +24,11 @@ pub struct Shared {
     pub browser: IpcSender<FromRenderer>,
     /// Something requested a new frame.
     pub redraw: AtomicBool,
-    /// Blitz subresource requests in flight (stylesheets, images, fonts).
+    /// Blitz subresource requests in flight (stylesheets, images, fonts) of the current
+    /// document.
     pub pending_resources: AtomicUsize,
+    /// Bumped on navigation: requests of an earlier document no longer count.
+    pub resource_generation: AtomicU64,
     /// Last cursor sent to the browser (avoid spamming identical messages).
     pub cursor: std::sync::Mutex<Option<CursorKind>>,
 }
@@ -51,6 +55,7 @@ pub struct CountingNetProvider {
 struct CountingHandler {
     inner: Option<Box<dyn NetHandler>>,
     shared: Arc<Shared>,
+    generation: u64,
 }
 
 impl NetHandler for CountingHandler {
@@ -64,7 +69,11 @@ impl NetHandler for CountingHandler {
 
 impl Drop for CountingHandler {
     fn drop(&mut self) {
-        self.shared.pending_resources.fetch_sub(1, Ordering::SeqCst);
+        // A request of the previous document finishing after a navigation must not
+        // count against the new one (the counter wrapped and `load` never fired).
+        if self.shared.resource_generation.load(Ordering::SeqCst) == self.generation {
+            let _ = self.shared.pending_resources.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+        }
         self.shared.redraw.store(true, Ordering::SeqCst);
         self.shared.wake();
     }
@@ -80,10 +89,12 @@ impl NetProvider for CountingNetProvider {
             self.shared.wake();
             return;
         }
+        let generation = self.shared.resource_generation.load(Ordering::SeqCst);
         self.shared.pending_resources.fetch_add(1, Ordering::SeqCst);
         let wrapped = Box::new(CountingHandler {
             inner: Some(handler),
             shared: self.shared.clone(),
+            generation,
         });
         self.inner.fetch(doc_id, request, wrapped);
     }
@@ -192,6 +203,19 @@ impl ShellProvider for Shell {
 // ScriptHost
 // ---------------------------------------------------------------------------
 
+/// A `postMessage` between two frames of the page (see `ScriptHost::post_message`).
+pub struct FrameMessage {
+    /// Sender: its frame path (the `<iframe>` node ids from the page down; `[]`: the page).
+    pub from: Vec<u64>,
+    /// Receiver: its frame path.
+    pub to: Vec<u64>,
+    /// `*` or the origin the receiver must have.
+    pub target_origin: String,
+    /// The sender's origin.
+    pub origin: String,
+    pub data: Vec<u8>,
+}
+
 /// Per-document script host. Lives on the renderer's main thread.
 pub struct RendererHost {
     pub shared: Arc<Shared>,
@@ -200,10 +224,59 @@ pub struct RendererHost {
     pub generation: u64,
     /// JS request id -> network request id (for aborts).
     pub inflight: RefCell<HashMap<u64, u64>>,
+    /// Script socket id -> network socket id of the page's open WebSockets.
+    pub sockets: RefCell<HashMap<u64, u64>>,
     pub referrer: String,
     pub verbose_console: bool,
     pub title: RefCell<String>,
     pub history: Cell<(u32, u32)>,
+    /// The frame path of the iframe document this host serves (the `<iframe>` node ids,
+    /// `NodeId::as_u64`, from the page down); `None` for the page itself.
+    pub frame: Option<Vec<u64>>,
+    /// The document's origin (sender of its `postMessage`s).
+    pub origin: String,
+    /// The initial `window.name` (an iframe document's `<iframe name>`).
+    pub window_name: String,
+    /// `postMessage`s between the page and its iframes, delivered by the renderer.
+    pub messages: Rc<RefCell<Vec<FrameMessage>>>,
+    /// The `<iframe>`s of each document of the page (by frame path) in tree order as
+    /// `(node id, name)`, refreshed by the renderer; shared by all hosts of the page.
+    pub frame_lists: Rc<RefCell<HashMap<Vec<u64>, Vec<(u64, String)>>>>,
+    /// Hosts of frame realms the runtime created on demand (`ScriptHost::frame_host`),
+    /// picked up by the renderer (`sync_frames`); shared by all hosts of the page.
+    pub frame_hosts: Rc<RefCell<HashMap<Vec<u64>, Rc<RendererHost>>>>,
+}
+
+impl RendererHost {
+    /// A host for the document of the frame at `path` (URL `url`) of the same page.
+    pub fn for_frame(&self, path: Vec<u64>, url: &str, window_name: String) -> Rc<RendererHost> {
+        Rc::new(RendererHost {
+            shared: self.shared.clone(),
+            net: self.net.clone(),
+            generation: self.generation,
+            inflight: RefCell::new(HashMap::new()),
+            sockets: RefCell::new(HashMap::new()),
+            referrer: self.referrer.clone(),
+            verbose_console: self.verbose_console,
+            title: RefCell::new(String::new()),
+            history: Cell::new((0, 1)),
+            frame: Some(path),
+            origin: super::renderer::origin_of(url),
+            window_name,
+            messages: self.messages.clone(),
+            frame_lists: self.frame_lists.clone(),
+            frame_hosts: self.frame_hosts.clone(),
+        })
+    }
+}
+
+impl Drop for RendererHost {
+    /// The document is gone (navigation, tab closed): close its sockets ("going away").
+    fn drop(&mut self) {
+        for (_, net_id) in self.sockets.borrow_mut().drain() {
+            self.net.ws_close(net_id, Some(1001), "");
+        }
+    }
 }
 
 impl script::ScriptHost for RendererHost {
@@ -211,19 +284,57 @@ impl script::ScriptHost for RendererHost {
         let js_id = req.id;
         let tx = self.shared.loop_tx.clone();
         let generation = self.generation;
-        let net_id = self.net.fetch(
-            req,
-            Box::new(move |mut resp: NetResponse| {
-                resp.id = js_id;
-                let _ = tx.send(LoopMsg::ScriptFetch { generation, resp });
-            }),
-        );
+        let frame = self.frame.clone();
+        let progress_frame = self.frame.clone();
+        let on_done = Box::new(move |mut resp: NetResponse| {
+            resp.id = js_id;
+            let _ = tx.send(LoopMsg::ScriptFetch { generation, frame, resp });
+        });
+        let net_id = if req.progress {
+            let tx = self.shared.loop_tx.clone();
+            let on_progress: netstack::ProgressCallback = Arc::new(move |loaded, total, upload| {
+                let frame = progress_frame.clone();
+                let _ = tx.send(LoopMsg::ScriptFetchProgress { generation, frame, id: js_id, loaded, total, upload });
+            });
+            self.net.fetch_with_progress(req, on_progress, on_done)
+        } else {
+            self.net.fetch(req, on_done)
+        };
         self.inflight.borrow_mut().insert(js_id, net_id);
     }
 
     fn abort_fetch(&self, id: u64) {
         if let Some(net_id) = self.inflight.borrow_mut().remove(&id) {
             self.net.abort(net_id);
+        }
+    }
+
+    fn ws_open(&self, id: u64, url: &str, protocols: Vec<String>, origin: &str) -> bool {
+        let tx = self.shared.loop_tx.clone();
+        let generation = self.generation;
+        let frame = self.frame.clone();
+        let net_id = self.net.ws_open(
+            url,
+            protocols,
+            origin,
+            Box::new(move |event| {
+                let frame = frame.clone();
+                let _ = tx.send(LoopMsg::ScriptWs { generation, frame, id, event });
+            }),
+        );
+        self.sockets.borrow_mut().insert(id, net_id);
+        true
+    }
+
+    fn ws_send(&self, id: u64, data: common::protocol::WsData) {
+        if let Some(&net_id) = self.sockets.borrow().get(&id) {
+            self.net.ws_send(net_id, data);
+        }
+    }
+
+    fn ws_close(&self, id: u64, code: Option<u16>, reason: &str) {
+        if let Some(&net_id) = self.sockets.borrow().get(&id) {
+            self.net.ws_close(net_id, code, reason);
         }
     }
 
@@ -243,6 +354,12 @@ impl script::ScriptHost for RendererHost {
         body: Option<Vec<u8>>,
         content_type: Option<String>,
     ) {
+        if self.frame.is_some() {
+            // Navigating an iframe from its own script isn't supported yet (it must not
+            // navigate the tab).
+            self.console("warn", &format!("iframe navigation to {url} is not supported"));
+            return;
+        }
         self.shared.send(FromRenderer::OpenUrl {
             url: url.to_string(),
             method: method.to_string(),
@@ -265,11 +382,15 @@ impl script::ScriptHost for RendererHost {
     }
 
     fn history_go(&self, delta: i32) {
-        self.shared.send(FromRenderer::HistoryGo(delta));
+        if self.frame.is_none() {
+            self.shared.send(FromRenderer::HistoryGo(delta));
+        }
     }
 
     fn url_changed(&self, url: &str) {
-        self.shared.send(FromRenderer::UrlChanged(url.to_string()));
+        if self.frame.is_none() {
+            self.shared.send(FromRenderer::UrlChanged(url.to_string()));
+        }
     }
 
     fn title_changed(&self, title: &str) {
@@ -313,6 +434,9 @@ impl script::ScriptHost for RendererHost {
     }
 
     fn history_push(&self, url: &str, replace: bool) {
+        if self.frame.is_some() {
+            return;
+        }
         self.shared.send(FromRenderer::HistoryPush {
             url: url.to_string(),
             replace,
@@ -323,5 +447,46 @@ impl script::ScriptHost for RendererHost {
         if let Ok(mut c) = arboard::Clipboard::new() {
             let _ = c.set_text(text.to_string());
         }
+    }
+
+    fn post_message(&self, target: &[u64], target_origin: &str, data: Vec<u8>) {
+        let from = self.frame.clone().unwrap_or_default();
+        if target == from.as_slice() {
+            return;
+        }
+        self.messages.borrow_mut().push(FrameMessage {
+            from,
+            to: target.to_vec(),
+            target_origin: target_origin.to_string(),
+            origin: self.origin.clone(),
+            data,
+        });
+        self.shared.redraw.store(true, Ordering::SeqCst);
+    }
+
+    fn window_name(&self) -> String {
+        self.window_name.clone()
+    }
+
+    fn frame_path(&self) -> Vec<u64> {
+        self.frame.clone().unwrap_or_default()
+    }
+
+    fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
+        self.frame_lists.borrow().get(path).cloned()
+    }
+
+    fn frame_host(&self, path: &[u64], url: &str) -> Option<Rc<dyn script::ScriptHost>> {
+        let name = self
+            .frame_lists
+            .borrow()
+            .get(&path[..path.len().saturating_sub(1)])
+            .and_then(|l| l.iter().find(|(id, _)| Some(id) == path.last()).map(|(_, n)| n.clone()))
+            .unwrap_or_default();
+        let host = self.for_frame(path.to_vec(), url, name);
+        self.frame_hosts
+            .borrow_mut()
+            .insert(path.to_vec(), host.clone());
+        Some(host)
     }
 }

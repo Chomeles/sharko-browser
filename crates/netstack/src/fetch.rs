@@ -15,7 +15,7 @@
 use bytes::Bytes;
 use common::protocol::{CacheMode, Destination, NetRequest};
 use http::header::{
-    ALT_SVC, AUTHORIZATION, CACHE_CONTROL, CONTENT_LOCATION, COOKIE, LOCATION, PRAGMA, RANGE,
+    ALT_SVC, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_LOCATION, COOKIE, LOCATION, PRAGMA, RANGE,
 };
 use http::{HeaderMap, HeaderValue, Method, Version};
 use std::sync::Arc;
@@ -34,6 +34,22 @@ use crate::util::{MAX_BODY_BYTES, Response, concat_chunks, find_header, headers_
 
 const MAX_REDIRECTS: usize = 20;
 
+/// Transfer progress callback: `(loaded, total (0 = unknown), upload)`.
+#[derive(Clone)]
+pub(crate) struct Progress(pub(crate) Arc<dyn Fn(u64, u64, bool) + Send + Sync>);
+
+impl std::fmt::Debug for Progress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Progress")
+    }
+}
+
+/// Minimum time between two progress reports of one direction (like Chrome's XHR).
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
+/// Upload bodies are handed to the connection in chunks of this size, so that progress
+/// follows what the connection actually accepted.
+const UPLOAD_CHUNK: usize = 64 * 1024;
+
 /// One request of a (possibly redirected) fetch.
 #[derive(Clone, Debug)]
 pub(crate) struct Hop {
@@ -46,6 +62,7 @@ pub(crate) struct Hop {
     referrer: Option<Url>,
     credentials: bool,
     cache_mode: CacheMode,
+    progress: Option<Progress>,
 }
 
 impl Hop {
@@ -133,9 +150,16 @@ fn origin_parts(url: &Url) -> (String, u16, String) {
     (host, port, origin)
 }
 
-async fn read_body(mut resp: reqwest::Response, idle: Duration) -> Result<Bytes, NetError> {
+async fn read_body(
+    mut resp: reqwest::Response,
+    idle: Duration,
+    progress: Option<&Progress>,
+) -> Result<Bytes, NetError> {
     let mut chunks = Vec::new();
     let mut total = 0usize;
+    let close_delimited = resp.content_length().is_none();
+    let expected = resp.content_length().unwrap_or(0);
+    let mut last_report: Option<std::time::Instant> = None;
     loop {
         match tokio::time::timeout(idle, resp.chunk()).await {
             Err(_) => {
@@ -144,6 +168,10 @@ async fn read_body(mut resp: reqwest::Response, idle: Duration) -> Result<Bytes,
                     idle.as_secs()
                 )));
             }
+            // A body delimited by the connection closing, on a TLS connection the peer
+            // shut down without `close_notify` (Python's ssl servers, some CDNs): the
+            // data received so far is the whole body, like other browsers treat it.
+            Ok(Err(e)) if close_delimited && is_unexpected_eof(&e) => break,
             Ok(Err(e)) => return Err(NetError::from_reqwest(&e)),
             Ok(Ok(Some(chunk))) => {
                 total += chunk.len();
@@ -151,6 +179,12 @@ async fn read_body(mut resp: reqwest::Response, idle: Duration) -> Result<Bytes,
                     return Err(NetError::too_big());
                 }
                 chunks.push(chunk);
+                if let Some(progress) = progress
+                    && last_report.is_none_or(|t| t.elapsed() >= PROGRESS_INTERVAL)
+                {
+                    last_report = Some(std::time::Instant::now());
+                    (progress.0)(total as u64, expected, false);
+                }
             }
             Ok(Ok(None)) => break,
         }
@@ -158,9 +192,68 @@ async fn read_body(mut resp: reqwest::Response, idle: Duration) -> Result<Bytes,
     Ok(concat_chunks(chunks, total))
 }
 
+/// Whether a body read failed only because the connection ended without a proper TLS
+/// close (an `UnexpectedEof` / missing `close_notify` somewhere in the error chain).
+fn is_unexpected_eof(err: &reqwest::Error) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(io) = e.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::UnexpectedEof
+        {
+            return true;
+        }
+        if e.to_string().contains("close_notify") {
+            return true;
+        }
+        cur = e.source();
+    }
+    false
+}
+
+/// The request body as a stream of chunks that reports how much of it the connection
+/// took so far.
+fn upload_stream(
+    body: Bytes,
+    progress: Progress,
+) -> impl futures_util::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+    let total = body.len() as u64;
+    futures_util::stream::unfold(
+        (body, 0usize, None::<std::time::Instant>),
+        move |(body, offset, last)| {
+            let progress = progress.clone();
+            async move {
+                if offset >= body.len() {
+                    return None;
+                }
+                let end = (offset + UPLOAD_CHUNK).min(body.len());
+                let now = std::time::Instant::now();
+                // Pulling the next chunk means the previous ones were accepted. The last
+                // chunk is reported when handed over: with a Content-Length the connection
+                // never polls past it.
+                let last = if end == body.len() {
+                    (progress.0)(total, total, true);
+                    Some(now)
+                } else if offset > 0 && last.is_none_or(|t| now - t >= PROGRESS_INTERVAL) {
+                    (progress.0)(offset as u64, total, true);
+                    Some(now)
+                } else {
+                    last
+                };
+                let chunk = body.slice(offset..end);
+                Some((Ok(chunk), (body, end, last)))
+            }
+        },
+    )
+}
+
 impl NetworkCore {
     /// Main fetch for http(s) URLs, including the redirect loop.
-    pub(crate) async fn http_fetch(self: &Arc<Self>, req: NetRequest, url: Url) -> Result<Response, NetError> {
+    pub(crate) async fn http_fetch(
+        self: &Arc<Self>,
+        req: NetRequest,
+        url: Url,
+        progress: Option<Progress>,
+    ) -> Result<Response, NetError> {
         let method = parse_method(&req.method)?;
         let (client_headers, header_referrer) = headers::sanitize(&req.headers);
         let referrer = req
@@ -178,6 +271,7 @@ impl NetworkCore {
             referrer,
             credentials: req.credentials,
             cache_mode: req.cache_mode,
+            progress,
         };
         let mut redirects = 0;
         loop {
@@ -430,7 +524,8 @@ impl NetworkCore {
             return;
         }
         let core = Arc::clone(self);
-        let hop = hop.clone();
+        // The page already has its (stale) response: no progress for the revalidation.
+        let hop = Hop { progress: None, ..hop.clone() };
         let headers = headers.clone();
         let stored = Arc::clone(stored);
         tokio::spawn(async move {
@@ -484,7 +579,22 @@ impl NetworkCore {
             builder = builder.version(version);
         }
         if let Some(body) = &hop.body {
-            builder = builder.body(body.clone());
+            match &hop.progress {
+                Some(progress) if !body.is_empty() => {
+                    builder = builder
+                        .header(CONTENT_LENGTH, body.len())
+                        .body(reqwest::Body::wrap_stream(upload_stream(body.clone(), progress.clone())));
+                }
+                _ if body.is_empty() && matches!(hop.method, Method::POST | Method::PUT | Method::PATCH) => {
+                    // An empty body is sent without a length otherwise.
+                    builder = builder.header(CONTENT_LENGTH, 0).body(body.clone());
+                }
+                _ => builder = builder.body(body.clone()),
+            }
+        } else if matches!(hop.method, Method::POST | Method::PUT | Method::PATCH) {
+            // Like browsers: a bodyless POST says so. Some servers (nginx in front of
+            // fast.com's test servers) answer 400 without a length.
+            builder = builder.header(CONTENT_LENGTH, 0);
         }
         builder
     }
@@ -564,7 +674,7 @@ impl NetworkCore {
         let body = if no_body {
             Bytes::new()
         } else {
-            read_body(response, self.config.read_idle_timeout).await?
+            read_body(response, self.config.read_idle_timeout, hop.progress.as_ref()).await?
         };
         drop(permit);
         log::debug!("{} {} -> {status} ({}, {} bytes)", hop.method, hop.url, version_str(version), body.len());
@@ -695,6 +805,7 @@ mod tests {
             referrer: None,
             credentials: true,
             cache_mode: CacheMode::Default,
+            progress: None,
         }
     }
 

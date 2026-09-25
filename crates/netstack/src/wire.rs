@@ -10,7 +10,7 @@
 //! mirrored here fails loudly.
 
 use bytes::Bytes;
-use common::protocol::{CacheMode, Destination, NetRequest, NetResponse};
+use common::protocol::{CacheMode, Destination, NetRequest, NetResponse, WsData, WsEvent};
 use serde::{Deserialize, Serialize};
 
 /// Mirror of `ToNetwork` (client → service).
@@ -21,6 +21,9 @@ pub(crate) enum WireToNetwork {
     GetCookies { id: u64, url: String },
     SetCookie { url: String, cookie: String },
     Shutdown,
+    WsOpen { id: u64, url: String, protocols: Vec<String>, origin: String },
+    WsSend { id: u64, data: WsData },
+    WsClose { id: u64, code: Option<u16>, reason: String },
 }
 
 /// Mirror of `NetRequest`.
@@ -37,6 +40,7 @@ pub(crate) struct WireRequest {
     credentials: bool,
     follow_redirects: bool,
     cache_mode: CacheMode,
+    progress: bool,
 }
 
 impl From<NetRequest> for WireRequest {
@@ -52,6 +56,7 @@ impl From<NetRequest> for WireRequest {
             credentials: r.credentials,
             follow_redirects: r.follow_redirects,
             cache_mode: r.cache_mode,
+            progress: r.progress,
         }
     }
 }
@@ -69,6 +74,7 @@ impl From<WireRequest> for NetRequest {
             credentials: r.credentials,
             follow_redirects: r.follow_redirects,
             cache_mode: r.cache_mode,
+            progress: r.progress,
         }
     }
 }
@@ -79,6 +85,8 @@ impl From<WireRequest> for NetRequest {
 pub(crate) enum WireFromNetworkOut {
     Response(WireResponseOut),
     Cookies { id: u64, cookies: String },
+    Ws { id: u64, event: WsEvent },
+    Progress { id: u64, loaded: u64, total: u64, upload: bool },
 }
 
 /// Mirror of `NetResponse` for sending.
@@ -101,6 +109,8 @@ pub(crate) struct WireResponseOut {
 pub(crate) enum WireFromNetworkIn {
     Response(WireResponseIn),
     Cookies { id: u64, cookies: String },
+    Ws { id: u64, event: WsEvent },
+    Progress { id: u64, loaded: u64, total: u64, upload: bool },
 }
 
 /// Mirror of `NetResponse` for receiving.
@@ -153,6 +163,7 @@ mod tests {
             credentials: false,
             follow_redirects: false,
             cache_mode: CacheMode::OnlyIfCached,
+            progress: true,
         }
     }
 
@@ -181,6 +192,18 @@ mod tests {
                 ToNetwork::SetCookie { url: "u".into(), cookie: "c".into() },
             ),
             (WireToNetwork::Shutdown, ToNetwork::Shutdown),
+            (
+                WireToNetwork::WsOpen { id: 3, url: "wss://a/".into(), protocols: vec!["p".into()], origin: "https://a".into() },
+                ToNetwork::WsOpen { id: 3, url: "wss://a/".into(), protocols: vec!["p".into()], origin: "https://a".into() },
+            ),
+            (
+                WireToNetwork::WsSend { id: 3, data: WsData::Binary(vec![1, 2]) },
+                ToNetwork::WsSend { id: 3, data: WsData::Binary(vec![1, 2]) },
+            ),
+            (
+                WireToNetwork::WsClose { id: 3, code: Some(1000), reason: "bye".into() },
+                ToNetwork::WsClose { id: 3, code: Some(1000), reason: "bye".into() },
+            ),
         ];
         for (ours, theirs) in pairs {
             assert_eq!(postcard::to_allocvec(&ours).unwrap(), postcard::to_allocvec(&theirs).unwrap());
@@ -232,6 +255,19 @@ mod tests {
         assert!(matches!(
             postcard::from_bytes::<WireFromNetworkIn>(&theirs).unwrap(),
             WireFromNetworkIn::Cookies { id: 9, .. }
+        ));
+
+        let ours = postcard::to_allocvec(&WireFromNetworkOut::Progress { id: 5, loaded: 10, total: 20, upload: true }).unwrap();
+        let theirs = postcard::to_allocvec(&FromNetwork::Progress { id: 5, loaded: 10, total: 20, upload: true }).unwrap();
+        assert_eq!(ours, theirs);
+
+        let event = WsEvent::Message(WsData::Text("hi".into()));
+        let ours = postcard::to_allocvec(&WireFromNetworkOut::Ws { id: 4, event: event.clone() }).unwrap();
+        let theirs = postcard::to_allocvec(&FromNetwork::Ws { id: 4, event: event.clone() }).unwrap();
+        assert_eq!(ours, theirs);
+        assert!(matches!(
+            postcard::from_bytes::<WireFromNetworkIn>(&theirs).unwrap(),
+            WireFromNetworkIn::Ws { id: 4, event: e } if e == event
         ));
     }
 }

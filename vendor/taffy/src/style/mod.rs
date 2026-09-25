@@ -137,6 +137,12 @@ pub trait CoreStyle {
     fn position(&self) -> Position {
         Style::<Self::CustomIdent>::DEFAULT.position
     }
+    /// PATCH: `position: fixed` (laid out as `Absolute`). Fixed boxes are positioned
+    /// against the viewport and don't add to their parent's scrollable overflow.
+    #[inline(always)]
+    fn is_fixed_position(&self) -> bool {
+        false
+    }
     /// How should the position of this element be tweaked relative to the layout defined?
     #[inline(always)]
     fn inset(&self) -> Rect<LengthPercentageAuto> {
@@ -630,6 +636,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     // Position properties
     /// What should the `position` value of this struct use as a base offset?
     pub position: Position,
+    /// PATCH: `position: fixed` (laid out as [`Position::Absolute`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub is_fixed_position: bool,
     /// How should the position of this element be tweaked relative to the layout defined?
     #[cfg_attr(feature = "serde", serde(default = "style_helpers::auto"))]
     pub inset: Rect<LengthPercentageAuto>,
@@ -776,6 +785,7 @@ impl<S: CheapCloneStr> Style<S> {
         #[cfg(feature = "float_layout")]
         clear: Clear::None,
         position: Position::Relative,
+        is_fixed_position: false,
         inset: Rect::auto(),
         margin: Rect::zero(),
         padding: Rect::zero(),
@@ -885,6 +895,10 @@ impl<S: CheapCloneStr> CoreStyle for Style<S> {
         self.position
     }
     #[inline(always)]
+    fn is_fixed_position(&self) -> bool {
+        self.is_fixed_position
+    }
+    #[inline(always)]
     fn inset(&self) -> Rect<LengthPercentageAuto> {
         self.inset
     }
@@ -956,6 +970,10 @@ impl<T: CoreStyle> CoreStyle for &'_ T {
     #[inline(always)]
     fn position(&self) -> Position {
         (*self).position()
+    }
+    #[inline(always)]
+    fn is_fixed_position(&self) -> bool {
+        (*self).is_fixed_position()
     }
     #[inline(always)]
     fn inset(&self) -> Rect<LengthPercentageAuto> {

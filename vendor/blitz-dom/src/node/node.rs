@@ -1,5 +1,5 @@
 use crate::Document;
-use crate::layout::damage::HoistedPaintChildren;
+use crate::layout::damage::{HoistedPaintChild, HoistedPaintChildren};
 use bitflags::bitflags;
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, DomEventData, HitResult, PointerCoords,
@@ -139,6 +139,9 @@ pub struct Node {
     pub sticky_offset: Cell<(f32, f32)>,
     /// PATCH: the parent's absolute position used when this node's layout was last rounded.
     pub round_origin: Cell<(f32, f32)>,
+    /// PATCH: last known index in the parent's `children` (validated on use), so sibling
+    /// lookups during selector matching are O(1) instead of a scan of the child list.
+    child_idx_hint: std::sync::atomic::AtomicUsize,
     pub stacking_context: Option<Box<HoistedPaintChildren>>,
 
     // Flags
@@ -328,6 +331,7 @@ impl Node {
             stacking_context: None,
             sticky_offset: Cell::new((0.0, 0.0)),
             round_origin: Cell::new((f32::NAN, f32::NAN)),
+            child_idx_hint: std::sync::atomic::AtomicUsize::new(0),
 
             flags: NodeFlags::empty(),
             data,
@@ -849,8 +853,85 @@ impl Node {
     }
 
     #[track_caller]
+    /// PATCH: where this hoisted (z-indexed) box sits in the coordinate space of its
+    /// stacking context root `root` (the root's children space, i.e. after the root's own
+    /// scroll offset), from the current layout and scroll offsets of the boxes in between,
+    /// plus the overflow clip of those boxes that applies to it (`[x0, y0, x1, y1]`).
+    /// The positions recorded in [`HoistedPaintChild`](crate::layout::damage::HoistedPaintChild)
+    /// are taken while styles are flushed, before layout, and miss later scrolling and
+    /// the clips of non-stacking-context ancestors (carousels drawn at the page origin,
+    /// unclipped). `None` if `root` is not a layout ancestor.
+    pub fn hoisted_placement(&self, root: NodeId) -> Option<(crate::util::Point<f32>, Option<[f32; 4]>)> {
+        let mut chain: Vec<&Node> = Vec::new();
+        let mut cur = self.layout_parent.get();
+        loop {
+            let id = cur?;
+            if id == root {
+                break;
+            }
+            let node = self.try_with(id)?;
+            chain.push(node);
+            if chain.len() > 1024 {
+                return None;
+            }
+            cur = node.layout_parent.get();
+        }
+
+        // Which ancestors' overflow clips apply: all for in-flow/relative boxes; for an
+        // absolutely positioned box only its containing block (the nearest positioned
+        // ancestor) and above; none for a fixed box.
+        let position = |node: &Node| node.primary_styles().map(|s| s.clone_position());
+        let first_clip = match position(self) {
+            Some(Position::Absolute) => chain
+                .iter()
+                .position(|n| position(n).is_some_and(|p| p != Position::Static))
+                .unwrap_or(chain.len()),
+            Some(Position::Fixed) => chain.len(),
+            _ => 0,
+        };
+
+        let (mut ox, mut oy) = (0.0f32, 0.0f32);
+        let mut clip: Option<[f32; 4]> = None;
+        for (i, node) in chain.iter().enumerate().rev() {
+            let layout = node.final_layout();
+            let (bx, by) = (ox + layout.location.x, oy + layout.location.y);
+            if i >= first_clip {
+                if let Some(styles) = node.primary_styles() {
+                    use style::values::computed::Overflow;
+                    let clips_x = styles.get_box().overflow_x != Overflow::Visible;
+                    let clips_y = styles.get_box().overflow_y != Overflow::Visible;
+                    if clips_x || clips_y {
+                        let b = layout.border;
+                        let (x0, x1) = match clips_x {
+                            true => (bx + b.left, bx + layout.size.width - b.right),
+                            false => (f32::NEG_INFINITY, f32::INFINITY),
+                        };
+                        let (y0, y1) = match clips_y {
+                            true => (by + b.top, by + layout.size.height - b.bottom),
+                            false => (f32::NEG_INFINITY, f32::INFINITY),
+                        };
+                        clip = Some(match clip {
+                            None => [x0, y0, x1, y1],
+                            Some(c) => [c[0].max(x0), c[1].max(y0), c[2].min(x1), c[3].min(y1)],
+                        });
+                    }
+                }
+            }
+            let scroll = node.scroll_offset();
+            ox = bx - scroll.x as f32;
+            oy = by - scroll.y as f32;
+        }
+        Some((crate::util::Point { x: ox, y: oy }, clip))
+    }
+
     pub fn with(&self, id: NodeId) -> &Node {
         self.tree().get(id).unwrap()
+    }
+
+    /// PATCH: like [`with`](Self::with) for ids that may be stale (a `layout_parent`
+    /// recorded before its anonymous box was rebuilt): `None` for a dropped node.
+    pub fn try_with(&self, id: NodeId) -> Option<&Node> {
+        self.tree().get(id)
     }
 
     pub fn print_tree(&self, level: usize) {
@@ -876,10 +957,15 @@ impl Node {
 
     // Get the index of the current node in the parents child list
     pub fn child_index(&self) -> Option<usize> {
-        self.tree()[self.parent?]
-            .children
-            .iter()
-            .position(|id| *id == self.id)
+        use std::sync::atomic::Ordering::Relaxed;
+        let children = &self.tree()[self.parent?].children;
+        let hint = self.child_idx_hint.load(Relaxed);
+        if children.get(hint) == Some(&self.id) {
+            return Some(hint);
+        }
+        let idx = children.iter().position(|id| *id == self.id)?;
+        self.child_idx_hint.store(idx, Relaxed);
+        Some(idx)
     }
 
     // Get the nth node in the parents child list
@@ -1260,16 +1346,14 @@ impl Node {
             || y < 0.0
             || y > overflow_rect.bottom + self.scroll_offset().y as f32);
 
-        let matches_hoisted_content = match &self.stacking_context {
-            Some(sc) => {
-                let content_area = sc.content_area;
-                x >= content_area.left + self.scroll_offset().x as f32
-                    && x <= content_area.right + self.scroll_offset().x as f32
-                    && y >= content_area.top + self.scroll_offset().y as f32
-                    && y <= content_area.bottom + self.scroll_offset().y as f32
-            }
-            None => false,
-        };
+        // PATCH: hoisted children are always tested (each rejects points outside its own
+        // box and overflow). The stacking context's `content_area` is computed when styles
+        // are flushed, before layout, so it was stale or empty: a consent dialog nested in
+        // a positioned, z-indexed container could not be clicked.
+        let matches_hoisted_content = self
+            .stacking_context
+            .as_ref()
+            .is_some_and(|sc| !sc.children.is_empty());
 
         // `scrollable_overflow` is stored in device (scaled) pixels, whereas the
         // coordinates here are in CSS pixels, so unscale it before comparing.
@@ -1295,6 +1379,23 @@ impl Node {
             *scrollbar = Some(sb);
         }
 
+        // Hoisted children are placed relative to this box (after its scroll offset).
+        let (hoisted_x, hoisted_y) = (x, y);
+        let hit_hoisted = |child: &HoistedPaintChild,
+                           scrollbar: &mut Option<crate::node::ScrollbarRef>|
+         -> Option<HitResult> {
+            let node = self.with(child.node_id);
+            let (pos, clip) = node
+                .hoisted_placement(self.id)
+                .unwrap_or((crate::util::Point { x: child.position.x, y: child.position.y }, None));
+            if let Some([x0, y0, x1, y1]) = clip {
+                if hoisted_x < x0 || hoisted_x > x1 || hoisted_y < y0 || hoisted_y > y1 {
+                    return None;
+                }
+            }
+            node.hit_inner(hoisted_x - pos.x, hoisted_y - pos.y, scale, scrollbar)
+        };
+
         if self.flags.is_inline_root() {
             let content_box_offset = taffy::Point {
                 x: self.final_layout().padding.left + self.final_layout().border.left,
@@ -1308,12 +1409,7 @@ impl Node {
         if matches_hoisted_content {
             if let Some(hoisted) = &self.stacking_context {
                 for hoisted_child in hoisted.pos_z_hoisted_children().rev() {
-                    let x = x - hoisted_child.position.x;
-                    let y = y - hoisted_child.position.y;
-                    if let Some(hit) = self
-                        .with(hoisted_child.node_id)
-                        .hit_inner(x, y, scale, scrollbar)
-                    {
+                    if let Some(hit) = hit_hoisted(hoisted_child, scrollbar) {
                         return Some(hit);
                     }
                 }
@@ -1331,12 +1427,7 @@ impl Node {
         if matches_hoisted_content {
             if let Some(hoisted) = &self.stacking_context {
                 for hoisted_child in hoisted.neg_z_hoisted_children().rev() {
-                    let x = x - hoisted_child.position.x;
-                    let y = y - hoisted_child.position.y;
-                    if let Some(hit) = self
-                        .with(hoisted_child.node_id)
-                        .hit_inner(x, y, scale, scrollbar)
-                    {
+                    if let Some(hit) = hit_hoisted(hoisted_child, scrollbar) {
                         return Some(hit);
                     }
                 }
@@ -1393,7 +1484,7 @@ impl Node {
                 return Some(node);
             }
             let id = node.layout_parent.get()?;
-            node = self.with(id);
+            node = self.try_with(id)?;
         }
     }
 
@@ -1444,7 +1535,8 @@ impl Node {
         // Recurse up the layout hierarchy
         self.layout_parent
             .get()
-            .map(|i| self.with(i).absolute_position(x, y))
+            .and_then(|i| self.try_with(i))
+            .map(|parent| parent.absolute_position(x, y))
             .unwrap_or(crate::util::Point { x, y })
     }
 
@@ -1477,7 +1569,7 @@ impl Node {
     pub fn offset_parent(&self) -> Option<&Node> {
         let mut node = self;
         loop {
-            node = self.with(node.layout_parent.get()?);
+            node = self.try_with(node.layout_parent.get()?)?;
             if node.is_offset_parent() {
                 return Some(node);
             }
@@ -1498,7 +1590,9 @@ impl Node {
             let Some(parent_id) = current.layout_parent.get() else {
                 break;
             };
-            let parent = self.with(parent_id);
+            let Some(parent) = self.try_with(parent_id) else {
+                break;
+            };
             if parent.is_offset_parent() && !parent.is_static_body() {
                 let border = parent.final_layout().border;
                 x -= border.left;
