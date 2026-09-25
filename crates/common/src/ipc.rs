@@ -370,6 +370,11 @@ impl<T: Serialize> IpcSender<T> {
     pub fn send(&self, msg: &T) -> io::Result<()> {
         let bytes = postcard::to_allocvec(msg)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        // The peer would drop the whole connection on an oversized frame: refuse just
+        // this message instead.
+        if bytes.len() > MAX_FRAME {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "message too large for ipc"));
+        }
         let mut st = lock_state(&self.inner);
         match &mut *st {
             SendState::Pending(queue) => {

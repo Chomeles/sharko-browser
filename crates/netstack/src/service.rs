@@ -275,9 +275,17 @@ fn serve_client(shared: &Arc<Shared>, connection: Connection, client_no: u64) {
         .spawn(move || {
             // Ends when the client is gone (all senders dropped) or the pipe breaks.
             for msg in out_rx {
-                if let Err(e) = sender.send(&msg) {
-                    log::debug!("network client {client_no} write failed: {e}");
-                    break;
+                match sender.send(&msg) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
+                        // Oversized (not sent; the connection is fine). A response that
+                        // big is capped by MAX_BODY_BYTES, so this is an event.
+                        log::warn!("network client {client_no}: dropped an oversized message");
+                    }
+                    Err(e) => {
+                        log::debug!("network client {client_no} write failed: {e}");
+                        break;
+                    }
                 }
             }
         });

@@ -353,8 +353,19 @@ impl NetClient {
                 if let Some(on_progress) = on_progress {
                     ipc.shared.progress.lock().insert(id, on_progress);
                 }
+                let url = req.url.clone();
                 let sent = ipc.sender.send(&WireToNetwork::Fetch(WireRequest::from(req)));
                 if let Err(e) = &sent {
+                    if e.kind() == io::ErrorKind::InvalidInput {
+                        // Too big for one IPC frame (a >256 MiB upload): fail this request.
+                        ipc.shared.progress.lock().remove(&id);
+                        if let Some(callback) = ipc.shared.pending.lock().remove(&id) {
+                            let error = NetError::new("ERR_FILE_TOO_BIG", "request body too large");
+                            let response = error_response(id, &url, &error, 0.0);
+                            self.inner.callbacks.run(move || callback(response));
+                        }
+                        return id;
+                    }
                     log::warn!("cannot send request to the network service: {e}");
                 }
                 // Also covers a disconnect that raced with the registration above (the

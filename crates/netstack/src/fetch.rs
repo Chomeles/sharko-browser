@@ -562,8 +562,16 @@ impl NetworkCore {
                         .header(CONTENT_LENGTH, body.len())
                         .body(reqwest::Body::wrap_stream(upload_stream(body.clone(), progress.clone())));
                 }
+                _ if body.is_empty() && matches!(hop.method, Method::POST | Method::PUT | Method::PATCH) => {
+                    // An empty body is sent without a length otherwise.
+                    builder = builder.header(CONTENT_LENGTH, 0).body(body.clone());
+                }
                 _ => builder = builder.body(body.clone()),
             }
+        } else if matches!(hop.method, Method::POST | Method::PUT | Method::PATCH) {
+            // Like browsers: a bodyless POST says so. Some servers (nginx in front of
+            // fast.com's test servers) answer 400 without a length.
+            builder = builder.header(CONTENT_LENGTH, 0);
         }
         builder
     }

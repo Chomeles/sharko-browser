@@ -423,3 +423,22 @@ fn progress_reports_upload_and_download() {
     let up: Vec<_> = reports.lock().unwrap().iter().filter(|r| r.2).cloned().collect();
     assert_eq!(up.last(), Some(&(3 * 1024 * 1024, 3 * 1024 * 1024, true)), "{up:?}");
 }
+
+#[test]
+fn bodyless_post_sends_content_length_zero() {
+    let server = TestServer::start();
+    let (client, _dir) = client();
+    for method in ["POST", "PUT", "PATCH"] {
+        let mut req = NetRequest::get(0, server.url("/echo-headers"), Destination::Fetch);
+        req.method = method.into();
+        let r = fetch(&client, req);
+        assert!(body_str(&r).contains("content-length: 0"), "{method}: {}", body_str(&r));
+    }
+    let mut req = NetRequest::get(0, server.url("/echo-headers"), Destination::Fetch);
+    req.method = "POST".into();
+    req.body = Some(Vec::new());
+    let r = fetch(&client, req);
+    assert!(body_str(&r).contains("content-length: 0"), "empty body: {}", body_str(&r));
+    let r = get(&client, &server.url("/echo-headers"));
+    assert!(!body_str(&r).contains("content-length"), "GET has no length: {}", body_str(&r));
+}
