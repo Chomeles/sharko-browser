@@ -1352,6 +1352,13 @@ fn push_spacer(builder: &mut TreeBuilder<TextBrush>, flag: u64, node_id: NodeId,
     }
 }
 
+thread_local! {
+    /// PATCH: the layout text byte range of each text node, collected while building an
+    /// inline layout (see `TextLayout::text_nodes`).
+    static TEXT_NODE_RANGES: std::cell::RefCell<Vec<(NodeId, usize, usize)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 pub(crate) fn build_inline_layout_into(
     nodes: &crate::NodeTree,
     layout_ctx: &mut LayoutContext<TextBrush>,
@@ -1380,6 +1387,7 @@ pub(crate) fn build_inline_layout_into(
 
     // Create a parley tree builder
     let mut builder = layout_ctx.tree_builder(font_ctx, scale, true, &parley_style);
+    TEXT_NODE_RANGES.with(|r| r.borrow_mut().clear());
 
     // Set whitespace collapsing mode
     let collapse_mode = root_node_style
@@ -1456,6 +1464,13 @@ pub(crate) fn build_inline_layout_into(
     }
 
     text_layout.text = builder.build_into(&mut text_layout.layout);
+    let text_len = text_layout.text.len();
+    text_layout.text_nodes = TEXT_NODE_RANGES.with(|r| {
+        r.borrow_mut()
+            .drain(..)
+            .map(|(id, start, end)| (id, start.min(text_len), end.min(text_len)))
+            .collect()
+    });
     return;
 
     #[allow(clippy::too_many_arguments)]
@@ -1670,6 +1685,7 @@ pub(crate) fn build_inline_layout_into(
             NodeData::Text(data) => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                 // dbg!(&data.content);
+                let start = builder.committed_text_len();
 
                 // TODO: optimize case transforms to be non-allocating
                 match parent_text_transform {
@@ -1683,6 +1699,8 @@ pub(crate) fn build_inline_layout_into(
                         builder.push_text(&data.content);
                     }
                 }
+                let end = builder.committed_text_len();
+                TEXT_NODE_RANGES.with(|r| r.borrow_mut().push((node_id, start, end)));
             }
             NodeData::Comment { .. } => {
                 // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);

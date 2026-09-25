@@ -161,6 +161,7 @@ natives_table! {
     // Layout / geometry
     "getBoundingClientRect" => crate::layout::n_get_bounding_client_rect,
     "getClientRects" => crate::layout::n_get_client_rects,
+    "textRects" => crate::layout::n_text_rects,
     "offsetMetrics" => crate::layout::n_offset_metrics,
     "clientMetrics" => crate::layout::n_client_metrics,
     "scrollMetrics" => crate::layout::n_scroll_metrics,

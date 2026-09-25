@@ -32,6 +32,9 @@ pub struct TextLayout {
     /// PATCH: a size measurement re-broke the lines at another width after the last
     /// final layout (see `BaseDocument::relayout_stale_inline_roots`).
     pub(crate) lines_stale: bool,
+    /// PATCH: the byte range of `text` each DOM text node of this inline formatting context
+    /// produced (after white-space collapsing), for text range geometry.
+    pub text_nodes: Vec<(NodeId, usize, usize)>,
 }
 
 impl TextLayout {

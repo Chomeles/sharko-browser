@@ -745,3 +745,30 @@ fn js_layer_compression_streams() {
         r#"[["gzip",true,true],["deflate",true,true],["deflate-raw",true,true],"TypeError","TypeError",true]"#
     );
 }
+
+/// Range.getClientRects()/getBoundingClientRect() of text measure the selected text (not
+/// its element), one rect per line; a trailing <br> adds no empty line.
+#[test]
+fn js_layer_text_range_rects() {
+    let mut e = js_env(
+        r#"<!DOCTYPE html><html><body style="margin:0;font:16px sans-serif">
+        <div id="a" style="padding-left:30px">hello world</div>
+        <div id="w" style="width:90px">one two three four five six seven</div>
+        <div id="br">text<br></div><div id="nobr">text</div>
+        </body></html>"#,
+    );
+    let r = e.eval(
+        r#"
+        const t = document.getElementById('a').firstChild;
+        const all = document.createRange(); all.selectNodeContents(t);
+        const part = document.createRange(); part.setStart(t, 0); part.setEnd(t, 5);
+        const caret = document.createRange(); caret.setStart(t, 5); caret.collapse(true);
+        const a = all.getBoundingClientRect(), p = part.getBoundingClientRect(), c = caret.getBoundingClientRect();
+        const w = document.createRange(); w.selectNodeContents(document.getElementById('w').firstChild);
+        const h = (id) => document.getElementById(id).getBoundingClientRect().height;
+        [a.x, a.width > 0 && a.width < 200, p.width > 0 && p.width < a.width, c.width, c.x === p.x + p.width,
+         all.getClientRects().length, w.getClientRects().length > 2, h('br') === h('nobr')]
+    "#,
+    );
+    assert_eq!(r, "[30,true,true,0,true,1,true,true]");
+}

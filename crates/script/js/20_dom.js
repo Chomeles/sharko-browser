@@ -4045,8 +4045,11 @@
     getBoundingClientRect() {
       const rects = rangeRects(this);
       if (rects.length === 0) return new DOMRect(0, 0, 0, 0);
+      // Like Element.getBoundingClientRect: the union of the non-empty rects.
+      const sized = rects.filter((r) => r[2] !== 0 || r[3] !== 0);
+      if (sized.length === 0) return new DOMRect(rects[0][0], rects[0][1], rects[0][2], rects[0][3]);
       let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-      for (const r of rects) { x1 = Math.min(x1, r[0]); y1 = Math.min(y1, r[1]); x2 = Math.max(x2, r[0] + r[2]); y2 = Math.max(y2, r[1] + r[3]); }
+      for (const r of sized) { x1 = Math.min(x1, r[0]); y1 = Math.min(y1, r[1]); x2 = Math.max(x2, r[0] + r[2]); y2 = Math.max(y2, r[1] + r[3]); }
       return new DOMRect(x1, y1, x2 - x1, y2 - y1);
     }
     getClientRects() { return new DOMRectList(INTERNAL, rangeRects(this).map((r) => new DOMRect(r[0], r[1], r[2], r[3]))); }
@@ -4071,23 +4074,29 @@
     const a = N.contains(id, sc), b = N.contains(id, ec);
     return a !== b;
   }
+  // CSSOM View: the border boxes of the elements the range selects (whose parent it
+  // doesn't), and the rects of the selected parts of text nodes.
   function rangeRects(r) {
+    L.layoutRead();
     const [sc, so, ec, eo] = L.rangeGet(r);
     const out = [];
-    const push = (id) => { const e = N.nodeType(id) === 1 ? id : N.parent(id); if (e !== 0 && N.nodeType(e) === 1) out.push(N.getBoundingClientRect(e)); };
-    if (sc === ec && N.nodeType(sc) !== 1) { push(sc); return out; }
-    if (sc === ec) {
-      const kids = N.childIds(sc);
-      if (so === eo) { push(kids[so] !== undefined ? kids[so] : sc); return out; }
-      for (let i = so; i < eo && i < kids.length; i++) push(kids[i]);
-      return out;
-    }
-    push(sc);
+    const pushFlat = (f) => { if (f) for (let i = 0; i + 3 < f.length; i += 4) out.push([f[i], f[i + 1], f[i + 2], f[i + 3]]); };
+    const isText = (id) => N.nodeType(id) === 3;
+    const text = (id, a, b) => pushFlat(nativeCall(() => N.textRects(id, a, b)));
+    const elem = (id) => pushFlat(nativeCall(() => N.getClientRects(id)));
+    if (sc === ec && isText(sc)) { text(sc, so, eo); return out; }
+    if (isText(sc)) text(sc, so, nodeLength(sc));
     const root = rootOf(sc);
     for (let n = followingInRoot(sc, root); n !== 0 && n !== ec; n = followingInRoot(n, root)) {
-      if (N.nodeType(n) === 1 && rangeContains(r, n)) push(n);
+      if (bpCompare(n, 0, ec, eo) >= 0) break; // past the end
+      if (!rangeContains(r, n)) continue;
+      if (isText(n)) text(n, 0, nodeLength(n));
+      else if (N.nodeType(n) === 1) {
+        const p = N.parent(n);
+        if (p === 0 || !rangeContains(r, p)) elem(n);
+      }
     }
-    push(ec);
+    if (ec !== sc && isText(ec)) text(ec, 0, eo);
     return out;
   }
   // Clone or extract range contents into a new fragment (returns fragment id)

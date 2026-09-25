@@ -2823,6 +2823,101 @@ impl BaseDocument {
         Some(rects)
     }
 
+    /// PATCH: the client rects of the text of text node `node_id` between the UTF-16
+    /// offsets `start` and `end` (CSSOM `Range.getClientRects()` for text): one rect per
+    /// line box the text is on, or a zero-width caret rect for an empty range. `None` when
+    /// the text isn't laid out (hidden, or not in an inline formatting context).
+    pub fn text_range_client_rects(
+        &self,
+        node_id: NodeId,
+        start: usize,
+        end: usize,
+    ) -> Option<Vec<BoundingRect>> {
+        use parley::{Affinity, Cursor, Selection};
+
+        let node = self.get_node(node_id)?;
+        let content = match &node.data {
+            NodeData::Text(t) => t.content.as_str(),
+            _ => return None,
+        };
+        let inline_root = node.inline_root_ancestor()?;
+        let inline_layout = inline_root.element_data()?.inline_layout_data.as_ref()?;
+        let &(_, lstart, lend) = inline_layout.text_nodes.iter().find(|(id, _, _)| *id == node_id)?;
+        let layout_text = inline_layout.text.get(lstart..lend)?;
+
+        // Map UTF-16 offsets in the DOM text to byte offsets in the layout text, which
+        // may have lost collapsed white space (or changed case).
+        let map = |offset: usize| -> usize {
+            let mut units = 0;
+            let mut li = 0;
+            let mut layout_chars = layout_text.char_indices().peekable();
+            let mut prev_ws = false;
+            for ch in content.chars() {
+                if units >= offset {
+                    break;
+                }
+                units += ch.len_utf16();
+                let ws = ch.is_ascii_whitespace();
+                match layout_chars.peek().copied() {
+                    Some((i, lc)) if ws && lc == ' ' && !prev_ws => {
+                        layout_chars.next();
+                        li = i + lc.len_utf8();
+                    }
+                    Some(_) if ws => {}
+                    Some((i, lc)) => {
+                        layout_chars.next();
+                        li = i + lc.len_utf8();
+                    }
+                    None => {}
+                }
+                prev_ws = ws;
+            }
+            lstart + li
+        };
+        let (a, b) = (map(start.min(end)), map(end.max(start)));
+
+        let layout = &inline_layout.layout;
+        let scale = layout.scale() as f64;
+        let root_layout = inline_root.final_layout();
+        let root_pos = inline_root.absolute_position(0.0, 0.0);
+        let origin_x = root_pos.x as f64
+            + (root_layout.padding.left + root_layout.border.left) as f64
+            - self.viewport_scroll.x;
+        let origin_y = root_pos.y as f64
+            + (root_layout.padding.top + root_layout.border.top) as f64
+            - self.viewport_scroll.y;
+        let to_rect = |x0: f64, y0: f64, x1: f64, y1: f64| BoundingRect {
+            x: origin_x + x0 / scale,
+            y: origin_y + y0 / scale,
+            width: (x1 - x0) / scale,
+            height: (y1 - y0) / scale,
+        };
+
+        let mut rects = Vec::new();
+        if a == b {
+            let cursor = Cursor::from_byte_index(layout, a, Affinity::Downstream);
+            let r = cursor.geometry(layout, 0.0);
+            rects.push(to_rect(r.x0, r.y0, r.x0, r.y1));
+        } else {
+            let selection = Selection::new(
+                Cursor::from_byte_index(layout, a, Affinity::Downstream),
+                Cursor::from_byte_index(layout, b, Affinity::Upstream),
+            );
+            selection.geometry_with(layout, |r, line| {
+                // White space hanging at the end of a wrapped line takes no room.
+                let mut x1 = r.x1;
+                if let Some(m) = layout.get(line).map(|l| *l.metrics()) {
+                    let line_end = (m.offset + m.advance) as f64;
+                    if m.trailing_whitespace > 0.0 && x1 >= line_end - 0.5 {
+                        x1 = (line_end - m.trailing_whitespace as f64).max(r.x0);
+                    }
+                }
+                rects.push(to_rect(r.x0, r.y0, x1, r.y1));
+            });
+        }
+        Some(rects)
+    }
+
     /// The first element in tree order with the given tag name. The root element and
     /// its children are checked first as a fast path before a full tree search, making
     /// this suitable for the `documentElement`/`head`/`body` document accessors.

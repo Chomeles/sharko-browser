@@ -113,6 +113,28 @@ pub(crate) fn n_get_client_rects(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.textRects(textId, start, end)` -> flat `[x, y, w, h, ...]` client rects of
+/// a text node's text between two UTF-16 offsets (one per line box; a zero-width rect for
+/// an empty range), or `null` when the text isn't laid out.
+pub(crate) fn n_text_rects(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    let start = cx.num(1).max(0.0) as usize;
+    let end = cx.num(2).max(0.0) as usize;
+    ensure_layout(cx.st, doc);
+    match doc.text_range_client_rects(id, start, end) {
+        Some(rects) => {
+            let mut out = Vec::with_capacity(rects.len() * 4);
+            for r in rects {
+                out.extend_from_slice(&[r.x, r.y, r.width, r.height]);
+            }
+            cx.ret_f64s(&out);
+        }
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
 pub(crate) fn n_offset_metrics(cx: &mut Cx) -> NResult {
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;

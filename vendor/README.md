@@ -196,3 +196,7 @@ Patches so far:
     the cursor with an empty run) doesn't count toward the layout's height: `text<br>`,
     `<br>` and `<pre>a\n</pre>` are one line tall, as in browsers (every block ending in
     a `<br>` had an extra blank line).
+63. `parley/src/builder.rs`, `blitz-dom/src/layout/construct.rs`, `node/text.rs`,
+    `document.rs`: inline layouts record the text byte range of each DOM text node
+    (`TextLayout::text_nodes`), and `text_range_client_rects()` returns the line rects of
+    part of a text node (Range geometry), without hanging trailing spaces.

@@ -105,6 +105,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 |---|---|
 | `N.getBoundingClientRect(id)` | `[x, y, width, height]` viewport-relative CSS px |
 | `N.getClientRects(id)` | flat array `[x,y,w,h, x,y,w,h, ...]` |
+| `N.textRects(textId, start, end)` | Client rects `[x, y, w, h, ...]` of a text node's text between UTF-16 offsets (one per line box; zero width for an empty range), or `null` when not laid out |
 | `N.offsetMetrics(id)` | `[offsetLeft, offsetTop, offsetWidth, offsetHeight, offsetParentId]` |
 | `N.clientMetrics(id)` | `[clientLeft, clientTop, clientWidth, clientHeight]` |
 | `N.scrollMetrics(id)` | `[scrollLeft, scrollTop, scrollWidth, scrollHeight]` |
