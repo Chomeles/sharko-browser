@@ -10,7 +10,7 @@ name = "browser"
 path = "src/main.rs"
 
 [dependencies]
-libloading = "0.8"
+libloading = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
