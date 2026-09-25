@@ -146,6 +146,10 @@
   L.document = document;
   L.documentId = mainDocId;
   let detachedDocs = 0;
+  // Node document of detached nodes that belong to a document other than the main one
+  // (created, imported, cloned or adopted by it): keyed by the root of a detached subtree.
+  const nodeDocs = new WeakMap();
+  function ownDoc(doc, w) { if (doc !== document) nodeDocs.set(w, doc); return w; }
   L.registerDetachedDocument = function (w, backingId, info) {
     detachedDocs++;
     docState.set(w, info);
@@ -717,6 +721,14 @@
     if (liveRanges.size !== 0) rangesOnRemove(pid, nid, indexOfNode(nid));
     nativeCall(() => N.removeChild(pid, nid));
     childListChanged(pid, 0);
+    if (detachedDocs !== 0) {
+      // The removed subtree keeps the document it was in (its root now carries it).
+      const w = cache.get(nid);
+      if (w !== undefined) {
+        const od = ownerDocumentOf(parentW !== undefined ? parentW : wrap(pid));
+        if (od !== document) nodeDocs.set(w, od); else nodeDocs.delete(w);
+      }
+    }
     if (mo) queueMutation('childList', pid, null, null, null, [nid], prev, next);
     if (ceList !== null && ceList.length) ceDisconnected(ceList);
     childrenChanged(pid, parentW);
@@ -1055,7 +1067,11 @@
     let r = id, p;
     while ((p = N.parent(r)) !== 0) r = p;
     const rw = cache.get(r);
-    if (rw !== undefined && docState.has(rw)) return rw;
+    if (rw !== undefined) {
+      if (docState.has(rw)) return rw;
+      const od = nodeDocs.get(rw);
+      if (od !== undefined) return od;
+    }
     return document;
   }
   L.ownerDocumentOf = ownerDocumentOf;
@@ -1140,7 +1156,11 @@
     get textContent() { return textContentGet(this); },
     set textContent(v) { textContentSet(this, v); },
     normalize() { normalizeNode(idOf(this)); },
-    cloneNode(deep = false) { return cloneNodeImpl(this, !!deep); },
+    cloneNode(deep = false) {
+      const c = cloneNodeImpl(this, !!deep);
+      if (detachedDocs !== 0) ownDoc(ownerDocumentOf(this), c);
+      return c;
+    },
     isEqualNode(other) {
       if (other === null || other === undefined) return false;
       if (!isNode(other)) throw new TypeError("Failed to execute 'isEqualNode' on 'Node': parameter 1 is not of type 'Node'.");
@@ -2751,15 +2771,15 @@
       if (html || info.contentType === 'application/xhtml+xml') {
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
         const def = ceDefs.get(name);
-        if (def !== undefined && !isOpt) return constructCE(def, name);
+        if (def !== undefined && !isOpt) return ownDoc(this, constructCE(def, name));
         const id = N.createElement(name, '');
         const w = wrap(id);
         if (name === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
         if (isOpt) createCustomizedBuiltin(w, id, name, `${options.is}`);
-        return w;
+        return ownDoc(this, w);
       }
       const id = N.createElement(name, '');
-      return L.wrapElementAs(id, Element.prototype, name, NONE);
+      return ownDoc(this, L.wrapElementAs(id, Element.prototype, name, NONE));
     },
     createElementNS(namespace, qualifiedName, options) {
       const nsv = namespace === null || namespace === undefined || namespace === '' ? null : `${namespace}`;
@@ -2775,7 +2795,7 @@
       if (code === HTML) {
         const def = ceDefs.get(local);
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
-        if (def !== undefined && !isOpt && prefix === null) return constructCE(def, local);
+        if (def !== undefined && !isOpt && prefix === null) return ownDoc(this, constructCE(def, local));
         const id = N.createElement(local, '');
         w = wrap(id);
         if (local === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
@@ -2788,30 +2808,30 @@
         if (code === OTHER) elementNsOther.set(w, nsv);
       }
       if (prefix !== null) { elementPrefix.set(w, prefix); prefixedElements++; }
-      return w;
+      return ownDoc(this, w);
     },
-    createDocumentFragment() { return makeWrapper(N.createFragment(), 11, DocumentFragment.prototype); },
-    createTextNode(data) { return makeWrapper(N.createText(`${data}`), 3, Text.prototype); },
+    createDocumentFragment() { return ownDoc(this, makeWrapper(N.createFragment(), 11, DocumentFragment.prototype)); },
+    createTextNode(data) { return ownDoc(this, makeWrapper(N.createText(`${data}`), 3, Text.prototype)); },
     createCDATASection(data) {
       if (docInfo(this).contentType === 'text/html') throw new DOMException("Failed to execute 'createCDATASection' on 'Document': This operation is not supported for HTML documents.", 'NotSupportedError');
       const s = `${data}`;
       if (s.includes(']]>')) throw invalidChar("Failed to execute 'createCDATASection' on 'Document': String cannot contain ']]>' since that is the end delimiter of a CData section.");
-      return makeWrapper(N.createText(s), 4, CDATASection.prototype);
+      return ownDoc(this, makeWrapper(N.createText(s), 4, CDATASection.prototype));
     },
-    createComment(data) { return makeWrapper(N.createComment(`${data}`), 8, Comment.prototype); },
+    createComment(data) { return ownDoc(this, makeWrapper(N.createComment(`${data}`), 8, Comment.prototype)); },
     createProcessingInstruction(target, data) {
       const t = `${target}`, d = `${data}`;
       validateElementName(t, 'createProcessingInstruction');
       if (d.includes('?>')) throw invalidChar("Failed to execute 'createProcessingInstruction' on 'Document': The data provided contains '?>'.");
       const w = makeWrapper(N.createComment(d), 7, ProcessingInstruction.prototype);
       piTarget.set(w, t);
-      return w;
+      return ownDoc(this, w);
     },
     importNode(node, deep = false) {
       if (!isNode(node) && !L.isAttr(node)) throw new TypeError("Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.");
       if (L.isAttr(node)) return node.cloneNode();
       if (typeOf(node) === 9 || isShadowRoot(node)) throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", 'NotSupportedError');
-      return cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep);
+      return ownDoc(this, cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep));
     },
     adoptNode(node) {
       if (L.isAttr(node)) { if (L.attrOwner(node)) L.attrOwner(node).removeAttributeNode(node); return node; }
@@ -2820,6 +2840,7 @@
       if (isShadowRoot(node)) throw hier("Failed to execute 'adoptNode' on 'Document': The node provided is a shadow root, which may not be adopted.");
       const p = N.parent(nid);
       if (p !== 0) removeCore(p, undefined, nid);
+      if (this !== document) nodeDocs.set(node, this); else nodeDocs.delete(node);
       return node;
     },
     createAttribute(localName) {
@@ -4379,7 +4400,8 @@
     comparePoint(node, offset) {
       const id = L.nodeArg(node, 'comparePoint', 1);
       if (rootOf(id) !== rootOf(this.#s.sc)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.", 'WrongDocumentError');
-      if (N.nodeType(id) === 10) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
+      // (Doctypes are comment-backed natively: check the wrapper's type.)
+      if (typeOf(node) === 10) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The offset is larger than the node's length.", 'IndexSizeError');
       if (bpCompare(id, off, this.#s.sc, this.#s.so) < 0) return -1;
@@ -4389,7 +4411,7 @@
     isPointInRange(node, offset) {
       const id = L.nodeArg(node, 'isPointInRange', 1);
       if (rootOf(id) !== rootOf(this.#s.sc)) return false;
-      if (N.nodeType(id) === 10) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
+      if (typeOf(node) === 10) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The offset is larger than the node's length.", 'IndexSizeError');
       return bpCompare(id, off, this.#s.sc, this.#s.so) >= 0 && bpCompare(id, off, this.#s.ec, this.#s.eo) <= 0;
@@ -5339,7 +5361,7 @@
       const qn = `${qualifiedName}`;
       // A valid doctype name: no ASCII whitespace, NUL or '>' (the empty name is valid).
       if (/[\t\n\f\r \0>]/.test(qn)) throw invalidChar(`Failed to execute 'createDocumentType' on 'DOMImplementation': The qualified name provided ('${qn}') contains an invalid character.`);
-      return makeDoctype(qn, `${publicId}`, `${systemId}`);
+      return ownDoc(this.#doc, makeDoctype(qn, `${publicId}`, `${systemId}`));
     }
     createDocument(namespace, qualifiedName, doctype = null) {
       const ns = namespace === null || namespace === undefined || namespace === '' ? null : `${namespace}`;
