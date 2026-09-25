@@ -46,6 +46,7 @@ mod font_metrics;
 mod form;
 mod has_invalidation;
 mod html;
+mod image_source;
 /// Loading of `<iframe>` elements into sub-documents.
 mod iframe;
 /// Integration of taffy and the DOM.
@@ -92,6 +93,7 @@ pub use markup5ever::{
     LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
     namespace_prefix, namespace_url, ns,
 };
+pub use image_source::ImageSource;
 pub use mutator::DocumentMutator;
 pub use node::{Attribute, DocumentData, ElementData, Node, NodeData, TextNodeData};
 pub use parley::FontContext;

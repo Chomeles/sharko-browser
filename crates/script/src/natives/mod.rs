@@ -170,6 +170,7 @@ natives_table! {
     "viewport" => crate::layout::n_viewport,
     "scrollTo" => crate::layout::n_scroll_to,
     "imageSize" => crate::layout::n_image_size,
+    "imageCurrentSrc" => crate::layout::n_image_current_src,
     // Style
     "styleGet" => crate::style::n_style_get,
     "styleGetPriority" => crate::style::n_style_get_priority,

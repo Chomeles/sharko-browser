@@ -324,6 +324,12 @@ pub struct BaseDocument {
     pub(crate) stale_inline_roots: Vec<NodeId>,
     /// PATCH: the URL each `<img>` last loaded (a `load` event fires once per source).
     pub(crate) image_loaded_src: HashMap<NodeId, String>,
+    /// PATCH: the source each `<img>` selected from `src`/`srcset`/`<picture>`.
+    pub(crate) image_sources: HashMap<NodeId, crate::image_source::ImageSource>,
+    /// PATCH: `loading="lazy"` images waiting to come near the viewport.
+    pub(crate) lazy_images: HashSet<NodeId>,
+    /// PATCH: the viewport changed; responsive image sources are re-selected.
+    pub(crate) image_sources_viewport_dirty: bool,
     /// PATCH: nodes whose unrounded layout changed and whose layout ancestors are not yet
     /// flagged, and all nodes carrying layout-dirty flags (cleared after rounding).
     pub(crate) layout_dirty_pending: Vec<NodeId>,
@@ -529,6 +535,9 @@ impl BaseDocument {
             sub_document_nodes: HashSet::new(),
             stale_inline_roots: Vec::new(),
             image_loaded_src: HashMap::new(),
+            image_sources: HashMap::new(),
+            lazy_images: HashSet::new(),
+            image_sources_viewport_dirty: false,
             layout_dirty_pending: Vec::new(),
             layout_dirty_touched: Vec::new(),
             abspos_viewport: None,
@@ -923,6 +932,10 @@ impl BaseDocument {
     /// it so that stale NodeIds are never dereferenced after the slot is freed.
     pub(crate) fn remove_node_from_tree(&mut self, node_id: NodeId) -> Option<Node> {
         self.clear_interaction_state_for_removed_node(node_id);
+        // PATCH: per-image state of a freed slot must not leak to its next occupant.
+        self.image_sources.remove(&node_id);
+        self.image_loaded_src.remove(&node_id);
+        self.lazy_images.remove(&node_id);
         self.nodes.remove(node_id)
     }
 
@@ -1581,7 +1594,9 @@ impl BaseDocument {
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting = self.pending_images.get(url).cloned().unwrap_or_default();
                     for (node_id, image_type) in waiting {
-                        if matches!(image_type, ImageType::Image) {
+                        if matches!(image_type, ImageType::Image)
+                            && !self.image_sources.get(&node_id).is_some_and(|s| &s.url != url)
+                        {
                             self.push_element_load_event(node_id, false);
                         }
                     }
@@ -1736,6 +1751,13 @@ impl BaseDocument {
 
             match image_type {
                 ImageType::Image => {
+                    // PATCH: the `<img>` switched to another source meanwhile.
+                    if self.image_sources.get(&node_id).is_some_and(|s| s.url != url) {
+                        continue;
+                    }
+                    let Some(node) = self.get_node_mut(node_id) else {
+                        continue;
+                    };
                     node.element_data_mut().unwrap().special_data =
                         SpecialElementData::Image(Box::new(image.clone()));
 
@@ -2291,6 +2313,9 @@ impl BaseDocument {
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
         let scale_has_changed = viewport.scale_f64() != self.viewport.scale_f64();
+        if scale_has_changed || viewport.window_size != self.viewport.window_size {
+            self.image_sources_viewport_dirty = true;
+        }
         self.viewport = viewport;
         self.set_stylist_device(make_device(
             &self.viewport,
@@ -2643,6 +2668,14 @@ impl BaseDocument {
         // Only non-atomic inline elements lack their own layout box: they are
         // flattened into the containing inline root's text layout as style spans.
         if !node.is_element() || node.flags.is_inline_root() {
+            return None;
+        }
+        // PATCH: replaced elements (`<img>` etc.) are atomic even as `display: inline`
+        // (an image without data reported its line's height).
+        if node
+            .element_data()
+            .is_some_and(|el| crate::layout::replaced::is_replaced_element(&el.name.local))
+        {
             return None;
         }
         let display = node.primary_styles()?.clone_display();

@@ -1172,7 +1172,10 @@
     def(P, 'naturalWidth', function () { return naturalSize(this)[0]; });
     def(P, 'naturalHeight', function () { return naturalSize(this)[1]; });
     def(P, 'complete', function () { return imgComplete(this); });
-    def(P, 'currentSrc', function () { return imgState.get(this) === 'empty' ? '' : this.src; });
+    def(P, 'currentSrc', function () {
+      if (typeof N.imageCurrentSrc === 'function') { const u = N.imageCurrentSrc(idOf(this)); return u === null ? '' : u; }
+      return imgState.get(this) === 'empty' ? '' : this.src;
+    });
     def(P, 'x', function () { L.flushSheets(); return N.getBoundingClientRect(idOf(this))[0]; });
     def(P, 'y', function () { L.flushSheets(); return N.getBoundingClientRect(idOf(this))[1]; });
     L.mixin(P, {

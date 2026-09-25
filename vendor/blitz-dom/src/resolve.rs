@@ -111,6 +111,9 @@ impl BaseDocument {
         self.resolve_transforms(root_node_id);
         timer.record_time("transform");
 
+        // PATCH: lazy images near the viewport, responsive sources after resizes.
+        self.update_image_loads();
+
         // Clear all damage and dirty flags, walking only subtrees which are
         // marked as (potentially) containing damage.
         if self.incremental_layout {

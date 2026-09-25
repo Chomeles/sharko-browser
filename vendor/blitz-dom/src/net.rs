@@ -556,17 +556,21 @@ impl NetHandler for ResourceHandler<DocumentSrcHandler> {
 
 pub struct ImageHandler {
     kind: ImageType,
+    /// PATCH: the requested URL, which keys `pending_images` (the response carries the
+    /// final URL after redirects, so redirected images never reached their nodes).
+    url: String,
 }
 impl ImageHandler {
-    pub fn new(kind: ImageType) -> Self {
-        Self { kind }
+    pub fn new(kind: ImageType, url: String) -> Self {
+        Self { kind, url }
     }
 }
 
 impl NetHandler for ResourceHandler<ImageHandler> {
-    fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
+    fn bytes(self: Box<Self>, _resolved_url: String, bytes: Bytes) {
         let result = self.data.parse(bytes);
-        self.respond(resolved_url, result)
+        let url = self.data.url.clone();
+        self.respond(url, result)
     }
 }
 
@@ -578,11 +582,13 @@ impl ImageHandler {
             .decode()
         {
             Ok(image) => {
-                let raw_rgba8_data = image.clone().into_rgba8().into_raw();
+                let (width, height) = (image.width(), image.height());
+                // PATCH: no copy of the decoded image just to convert it.
+                let raw_rgba8_data = image.into_rgba8().into_raw();
                 return Ok(Resource::Image(
                     self.kind,
-                    image.width(),
-                    image.height(),
+                    width,
+                    height,
                     Arc::new(raw_rgba8_data),
                 ));
             }

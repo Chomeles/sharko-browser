@@ -334,6 +334,8 @@ pub(crate) fn n_image_size(cx: &mut Cx) -> NResult {
     use blitz_dom::node::ImageData;
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;
+    // Density-corrected, like Chromium's naturalWidth for `srcset` candidates.
+    let density = doc.image_density(id) as f64;
     let size = doc
         .get_node(id)
         .and_then(|n| n.element_data())
@@ -346,7 +348,20 @@ pub(crate) fn n_image_size(cx: &mut Cx) -> NResult {
             ImageData::None => None,
         });
     match size {
-        Some((w, h)) => cx.ret_f64s(&[w, h]),
+        Some((w, h)) => cx.ret_f64s(&[(w / density).round(), (h / density).round()]),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.imageCurrentSrc(id)` -> the URL an `<img>` selected from
+/// `src`/`srcset`/`<picture>` and requested, else `null` (nothing to load, or a lazy
+/// image not requested yet).
+pub(crate) fn n_image_current_src(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    match doc.image_current_src(id).map(str::to_string) {
+        Some(url) => cx.ret_str(&url),
         None => cx.ret_null(),
     }
     Ok(())

@@ -146,3 +146,15 @@ Patches so far:
     hoisted into an ancestor stacking context are painted and hit-tested at their real
     position (including scroll offsets) and clipped by the overflow of the ancestors
     between them and their containing block (carousels painted slides outside the box).
+49. `blitz-dom/src/image_source.rs` (new), `mutator.rs`, `document.rs`, `layout/mod.rs`,
+    `resolve.rs`: `<img>` source selection (`srcset` with `x`/`w` descriptors, `sizes`,
+    `<picture>`/`<source media type>`, Chromium's candidate choice), density-corrected
+    intrinsic sizes, re-selection on attribute and viewport changes, and
+    `loading="lazy"` (loads within 1250px of the viewport, never while
+    `display: none`). Before, only `src` loaded and every image of a page was fetched
+    and decoded up front (t-online.de: 1.4 GB).
+50. `blitz-dom/src/net.rs`, `layout/damage.rs`: image responses are keyed by the
+    requested URL, not the final URL after redirects (redirected images never showed);
+    decoded images are no longer copied before the RGBA conversion.
+51. `blitz-dom/src/document.rs`: `getBoundingClientRect()` of an `<img>` (and other
+    replaced elements) without data is its own box, not its line's fragment.

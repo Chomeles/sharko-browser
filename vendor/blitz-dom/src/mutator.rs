@@ -5,9 +5,8 @@ use std::ops::{Deref, DerefMut};
 
 use crate::document::make_device;
 use crate::layout::damage::ALL_DAMAGE;
-use crate::net::{ImageHandler, ResourceHandler, StylesheetHandler};
+use crate::net::{ResourceHandler, StylesheetHandler};
 use crate::node::{CanvasData, NodeFlags, SpecialElementData};
-use crate::util::ImageType;
 use crate::{
     Attribute, BaseDocument, Document, ElementData, Node, NodeData, QualName, local_name, qual_name,
 };
@@ -355,7 +354,7 @@ impl DocumentMutator<'_> {
         if !node.flags.is_in_document() {
             // PATCH: images load (and fire `load`) without being in the document
             // (`new Image().src = …`, preloading).
-            if (tag, attr) == tag_and_attr!("img", "src") {
+            if *tag == local_name!("img") && is_img_source_attr(attr) {
                 self.load_image(node_id);
             }
             return;
@@ -363,8 +362,10 @@ impl DocumentMutator<'_> {
 
         if (tag, attr) == tag_and_attr!("input", "checked") {
             set_input_checked_state(element, value.to_string());
-        } else if (tag, attr) == tag_and_attr!("img", "src") {
+        } else if *tag == local_name!("img") && is_img_source_attr(attr) {
             self.load_image(node_id);
+        } else if *tag == local_name!("source") && is_picture_source_attr(attr) {
+            self.reload_picture_images(node_id);
         } else if (tag, attr) == tag_and_attr!("canvas", "src") {
             self.load_custom_paint_src(node_id);
         } else if (tag, attr) == tag_and_attr!("link", "href") {
@@ -464,6 +465,10 @@ impl DocumentMutator<'_> {
         if *attr == local_name!("style") {
             element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
             node.mark_style_attr_updated();
+        } else if *tag == local_name!("img") && is_img_source_attr(attr) {
+            self.load_image(node_id);
+        } else if *tag == local_name!("source") && is_picture_source_attr(attr) {
+            self.reload_picture_images(node_id);
         } else if (tag, attr) == tag_and_attr!("canvas", "src") {
             self.recompute_is_animating = true;
         } else if (tag, attr) == tag_and_attr!("link", "href") {
@@ -948,6 +953,12 @@ impl<'doc> DocumentMutator<'doc> {
                 "title" => self.title_node = Some(node_id),
                 "link" => self.eager_op_queue.push(SpecialOp::LoadStylesheet(node_id)),
                 "img" => self.eager_op_queue.push(SpecialOp::LoadImage(node_id)),
+                // PATCH: a `<source>` added to a `<picture>` can change its image.
+                "source" => {
+                    for img in picture_images(doc, node_id) {
+                        self.eager_op_queue.push(SpecialOp::LoadImage(img));
+                    }
+                }
                 "iframe" => self.eager_op_queue.push(SpecialOp::LoadIframe(node_id)),
                 "canvas" => self
                     .eager_op_queue
@@ -1164,62 +1175,17 @@ impl<'doc> DocumentMutator<'doc> {
         self.doc.nodes_to_stylesheet.remove(&node_id);
     }
 
-    fn load_image(&mut self, target_id: NodeId) {
-        let node = &self.doc.nodes[target_id];
-        if let Some(raw_src) = node.attr(local_name!("src")) {
-            if !raw_src.is_empty() {
-                let src = self.doc.resolve_url(raw_src);
-                let src_string = src.as_str();
-
-                // Check cache first
-                if let Some(cached_image) = self.doc.image_cache.get(src_string) {
-                    #[cfg(feature = "tracing")]
-                    tracing::info!("Loading image {src_string} from cache");
-                    let node = &mut self.doc.nodes[target_id];
-                    let el = node.element_data_mut().unwrap();
-                    // PATCH: `load` event, once per source (a detached image loaded before
-                    // insertion already fired it for this URL).
-                    let already_loaded = matches!(el.special_data, SpecialElementData::Image(_))
-                        && self.doc.image_loaded_src.get(&target_id).map(String::as_str)
-                            == Some(src_string);
-                    el.special_data = SpecialElementData::Image(Box::new(cached_image.clone()));
-                    node.cache_mut().clear();
-                    node.insert_damage(ALL_DAMAGE);
-                    if !already_loaded {
-                        self.doc.image_loaded_src.insert(target_id, src_string.to_string());
-                        self.doc.element_load_events.push((target_id, true));
-                    }
-                    return;
-                }
-
-                // Check if there's already a pending request for this URL
-                if let Some(waiting_list) = self.doc.pending_images.get_mut(src_string) {
-                    #[cfg(feature = "tracing")]
-                    tracing::info!("Image {src_string} already pending, queueing node {target_id}");
-                    waiting_list.push((target_id, ImageType::Image));
-                    return;
-                }
-
-                // Start fetch and track as pending
-                #[cfg(feature = "tracing")]
-                tracing::info!("Fetching image {src_string}");
-                self.doc
-                    .pending_images
-                    .insert(src_string.to_string(), vec![(target_id, ImageType::Image)]);
-
-                self.doc.net_provider.fetch(
-                    self.doc.id(),
-                    self.doc.build_request(src),
-                    ResourceHandler::boxed(
-                        self.doc.tx.clone(),
-                        self.doc.id(),
-                        None, // Don't pass node_id, we'll handle it via pending_images
-                        self.doc.shell_provider.clone(),
-                        ImageHandler::new(ImageType::Image),
-                    ),
-                );
-            }
+    /// PATCH: a `<source>`'s attributes changed: its `<picture>` re-selects its image.
+    fn reload_picture_images(&mut self, source_id: NodeId) {
+        for img in picture_images(self.doc, source_id) {
+            self.load_image(img);
         }
+    }
+
+    fn load_image(&mut self, target_id: NodeId) {
+        // PATCH: source selection (`srcset`, `<picture>`) and lazy loading live in
+        // `image_source.rs`.
+        self.doc.load_image(target_id);
     }
 
     fn load_iframe(&mut self, target_id: NodeId) {
@@ -1766,4 +1732,31 @@ mod test {
             120.0
         );
     }
+}
+
+/// PATCH: attributes that change which image an `<img>` shows (or when it loads).
+fn is_img_source_attr(attr: &markup5ever::LocalName) -> bool {
+    matches!(attr.as_ref(), "src" | "srcset" | "sizes" | "loading")
+}
+
+/// PATCH: `<source>` attributes that take part in `<picture>` source selection.
+fn is_picture_source_attr(attr: &markup5ever::LocalName) -> bool {
+    matches!(attr.as_ref(), "srcset" | "sizes" | "media" | "type")
+}
+
+/// PATCH: the `<img>` children of the `<picture>` that is `source`'s parent.
+fn picture_images(doc: &BaseDocument, source: NodeId) -> Vec<NodeId> {
+    let Some(parent) = doc.nodes.get(source).and_then(|n| n.parent) else {
+        return Vec::new();
+    };
+    let picture = &doc.nodes[parent];
+    if !picture.data.is_element_with_tag_name(&local_name!("picture")) {
+        return Vec::new();
+    }
+    picture
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| doc.nodes[c].data.is_element_with_tag_name(&local_name!("img")))
+        .collect()
 }
