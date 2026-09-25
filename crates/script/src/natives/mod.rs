@@ -23,13 +23,19 @@ fn dispatch<'s, 'i>(
     f: NativeImpl,
     name: &'static str,
 ) {
-    let ptr = scope.get_data(crate::snapshot::STATE_SLOT) as *const RuntimeState;
+    // The realm whose JS called us is the current context (a page script calling a
+    // method of a same-origin iframe's document runs that iframe realm's JS layer, and
+    // its natives must see that iframe's document).
+    let ptr = match scope.get_current_context().get_slot::<crate::state::StatePtr>() {
+        Some(p) => p.0,
+        None => scope.get_data(crate::snapshot::STATE_SLOT) as *const RuntimeState,
+    };
     if ptr.is_null() {
         JsErr::dom("InvalidStateError", "the script runtime is gone").throw(scope);
         return;
     }
-    // SAFETY: the slot is set to the runtime's `RuntimeState` when the isolate is
-    // created; the state outlives the isolate (see `ScriptRuntime::drop`).
+    // SAFETY: the slots point at states the runtime keeps alive until its isolate is
+    // disposed (see `ScriptRuntime::drop`).
     let st: &RuntimeState = unsafe { &*ptr };
     if st.snapshotting.get()
         && st.snapshot_taint.get().is_none()
@@ -273,6 +279,13 @@ natives_table! {
     "framePost" => misc::n_frame_post,
     "framePath" => misc::n_frame_path,
     "frameList" => misc::n_frame_list,
+    "frameGlobal" => misc::n_frame_global,
+    "realmGlobal" => misc::n_realm_global,
+    "parentGlobal" => misc::n_parent_global,
+    "topGlobal" => misc::n_top_global,
+    "frameElement" => misc::n_frame_element,
+    "foreignNodeType" => misc::n_foreign_node_type,
+    "windowPostMessage" => misc::n_window_post_message,
     "cryptoDigest" => crypto::n_crypto_digest,
     "cryptoHmac" => crypto::n_crypto_hmac,
     "cryptoAes" => crypto::n_crypto_aes,

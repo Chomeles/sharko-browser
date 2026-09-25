@@ -171,7 +171,7 @@ browser --headless --wait-for="window.appReady" --eval="app.state()" https://exa
 `--eval`s run, so a test can wait for a harness or an app to finish instead of guessing a
 `--settle` time.
 
-`SHARKO_DEBUG_FRAMES=1` logs iframe runtimes and their `postMessage`s; with it,
+`SHARKO_DEBUG_FRAMES=1` logs iframe realms and their `postMessage`s; with it,
 `--eval="frames:JS"` evaluates in every iframe that runs script.
 
 `BLITZ_VERIFY_INCREMENTAL=1` re-checks every incremental layout pass against a full one
@@ -187,9 +187,12 @@ and reports differences (for layout development).
 - Canvas 2D has no shadows or filters, and there is no video/audio or WebGL yet; Web
   Workers run on the page's thread
   (no parallelism yet, no module workers or SharedWorker)
-- iframes (also nested ones) run JavaScript in their own runtime and talk to each other
-  with `postMessage` (enough for consent dialogs); a page can't reach into same-origin
-  iframes' documents yet; Shadow DOM is emulated (styles are scoped, `adoptedStyleSheets`
+- iframes (also nested ones) run JavaScript in their own realm of the page's isolate:
+  same-origin frames reach each other's windows and documents (`contentWindow`,
+  `contentDocument`, `parent`, `top`, `frameElement`, `postMessage` with the right
+  `source`); a node passed from one frame's document into another's mutating operation
+  is adopted by copy (a new wrapper, not the same object); cross-origin frames only get
+  `postMessage`; Shadow DOM is emulated (styles are scoped, `adoptedStyleSheets`
   and declarative shadow roots work, but the shadow tree is part of the normal DOM and
   document styles reach into it);
   `position: sticky` only vertically

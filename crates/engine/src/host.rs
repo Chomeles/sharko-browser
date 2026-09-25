@@ -242,6 +242,32 @@ pub struct RendererHost {
     /// The `<iframe>`s of each document of the page (by frame path) in tree order as
     /// `(node id, name)`, refreshed by the renderer; shared by all hosts of the page.
     pub frame_lists: Rc<RefCell<HashMap<Vec<u64>, Vec<(u64, String)>>>>,
+    /// Hosts of frame realms the runtime created on demand (`ScriptHost::frame_host`),
+    /// picked up by the renderer (`sync_frames`); shared by all hosts of the page.
+    pub frame_hosts: Rc<RefCell<HashMap<Vec<u64>, Rc<RendererHost>>>>,
+}
+
+impl RendererHost {
+    /// A host for the document of the frame at `path` (URL `url`) of the same page.
+    pub fn for_frame(&self, path: Vec<u64>, url: &str, window_name: String) -> Rc<RendererHost> {
+        Rc::new(RendererHost {
+            shared: self.shared.clone(),
+            net: self.net.clone(),
+            generation: self.generation,
+            inflight: RefCell::new(HashMap::new()),
+            sockets: RefCell::new(HashMap::new()),
+            referrer: self.referrer.clone(),
+            verbose_console: self.verbose_console,
+            title: RefCell::new(String::new()),
+            history: Cell::new((0, 1)),
+            frame: Some(path),
+            origin: super::renderer::origin_of(url),
+            window_name,
+            messages: self.messages.clone(),
+            frame_lists: self.frame_lists.clone(),
+            frame_hosts: self.frame_hosts.clone(),
+        })
+    }
 }
 
 impl Drop for RendererHost {
@@ -448,5 +474,19 @@ impl script::ScriptHost for RendererHost {
 
     fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
         self.frame_lists.borrow().get(path).cloned()
+    }
+
+    fn frame_host(&self, path: &[u64], url: &str) -> Option<Rc<dyn script::ScriptHost>> {
+        let name = self
+            .frame_lists
+            .borrow()
+            .get(&path[..path.len().saturating_sub(1)])
+            .and_then(|l| l.iter().find(|(id, _)| Some(id) == path.last()).map(|(_, n)| n.clone()))
+            .unwrap_or_default();
+        let host = self.for_frame(path.to_vec(), url, name);
+        self.frame_hosts
+            .borrow_mut()
+            .insert(path.to_vec(), host.clone());
+        Some(host)
     }
 }

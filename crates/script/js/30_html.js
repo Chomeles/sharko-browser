@@ -1172,8 +1172,10 @@
     R.strNE(P, 'marginHeight', 'marginheight'); R.strNE(P, 'marginWidth', 'marginwidth');
     R.url(P, 'longDesc', 'longdesc');
     R.bool(P, 'credentialless');
-    def(P, 'contentDocument', function () { return null; });
-    def(P, 'contentWindow', function () { return L.iframeWindow(this, idOf(this)); });
+    // A same-origin frame's real window/document (its realm shares this isolate); a
+    // cross-origin one is a remote window stand-in whose document is off limits.
+    def(P, 'contentDocument', function () { const g = L.frameGlobal(idOf(this)); return g === null ? null : g.document; });
+    def(P, 'contentWindow', function () { const g = L.frameGlobal(idOf(this)); return g !== null ? g : L.iframeWindow(this, idOf(this)); });
     L.mixin(P, { getSVGDocument() { return null; } });
     def(P, 'featurePolicy', function () { return undefined; });
   }
@@ -1182,8 +1184,8 @@
     const P = HTMLFrameElement.prototype;
     R.str(P, 'name'); R.str(P, 'scrolling'); R.url(P, 'src'); R.str(P, 'frameBorder', 'frameborder'); R.url(P, 'longDesc', 'longdesc');
     R.bool(P, 'noResize', 'noresize'); R.strNE(P, 'marginHeight', 'marginheight'); R.strNE(P, 'marginWidth', 'marginwidth');
-    def(P, 'contentDocument', function () { return null; });
-    def(P, 'contentWindow', function () { return null; });
+    def(P, 'contentDocument', function () { const g = L.frameGlobal(idOf(this)); return g === null ? null : g.document; });
+    def(P, 'contentWindow', function () { const g = L.frameGlobal(idOf(this)); return g !== null ? g : L.iframeWindow(this, idOf(this)); });
   }
   const HTMLEmbedElement = htmlClass('HTMLEmbedElement', ['embed']);
   {

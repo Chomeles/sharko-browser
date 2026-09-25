@@ -324,6 +324,9 @@ pub struct BaseDocument {
     pub(crate) controls_to_form: HashMap<NodeId, NodeId>,
     /// Nodes that contain sub documents
     pub(crate) sub_document_nodes: HashSet<NodeId>,
+    /// PATCH: sub-documents removed since the last `handle_messages()` (kept alive until
+    /// then, see `remove_sub_document`).
+    pub(crate) detached_sub_documents: Vec<Box<dyn Document>>,
     /// PATCH: inline roots whose line breaks a measurement overwrote after their final
     /// layout (see `relayout_stale_inline_roots`).
     pub(crate) stale_inline_roots: Vec<NodeId>,
@@ -540,6 +543,7 @@ impl BaseDocument {
             subdoc_is_animating: false,
             has_canvas: false,
             sub_document_nodes: HashSet::new(),
+            detached_sub_documents: Vec::new(),
             stale_inline_roots: Vec::new(),
             image_loaded_src: HashMap::new(),
             image_sources: HashMap::new(),
@@ -840,10 +844,16 @@ impl BaseDocument {
     }
 
     pub fn remove_sub_document(&mut self, node_id: NodeId) {
-        self.nodes[node_id]
-            .element_data_mut()
-            .unwrap()
-            .remove_sub_document();
+        // PATCH: the document stays alive until the next `handle_messages()`: a script
+        // may be running in it (an iframe removing itself), and other realms may reach it
+        // during the current task.
+        if let Some(el) = self.nodes[node_id].element_data_mut()
+            && let SpecialElementData::SubDocument(_) = &el.special_data
+            && let SpecialElementData::SubDocument(doc) =
+                std::mem::replace(&mut el.special_data, SpecialElementData::None)
+        {
+            self.detached_sub_documents.push(doc);
+        }
         self.sub_document_nodes.remove(&node_id);
         if let Some(load) = self.iframe_loads.remove(&node_id) {
             load.abort_controller.abort();
@@ -1597,6 +1607,8 @@ impl BaseDocument {
     }
 
     pub fn handle_messages(&mut self) {
+        // PATCH: sub-documents removed during the last task are gone now.
+        self.detached_sub_documents.clear();
         // Remove event Reciever from the Document so that we can process events
         // without holding a borrow to the Document
         let rx = self.rx.take().unwrap();
@@ -1640,7 +1652,7 @@ impl BaseDocument {
         std::mem::take(&mut self.element_load_events)
     }
 
-    fn push_element_load_event(&mut self, node_id: NodeId, ok: bool) {
+    pub(crate) fn push_element_load_event(&mut self, node_id: NodeId, ok: bool) {
         let fires = self.nodes.get(node_id).is_some_and(|n| {
             n.data.is_element_with_tag_name(&local_name!("img"))
                 || n.data.is_element_with_tag_name(&local_name!("link"))

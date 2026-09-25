@@ -119,6 +119,11 @@ impl BaseDocument {
         let signal = self.new_iframe_generation(node_id, None);
         let base_url = Some(self.url.to_string());
         self.attach_iframe_document(node_id, srcdoc, base_url, signal);
+        // PATCH: a `srcdoc` document loads like a fetched one (the `<iframe>`'s `load`
+        // event); the initial empty document of a src-less iframe fires none.
+        if !srcdoc.is_empty() {
+            self.push_element_load_event(node_id, true);
+        }
     }
 
     /// Start fetching HTML for an iframe from `url`. The parsed document is

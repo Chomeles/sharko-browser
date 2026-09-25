@@ -81,7 +81,7 @@ fn pointer(
 
 fn send(e: &mut Env, ev: UiEvent) {
     let doc: &mut dyn Document = &mut e.doc;
-    let mut driver = EventDriver::new(doc, JsEventHandler { runtime: &mut e.rt });
+    let mut driver = EventDriver::new(doc, JsEventHandler::new(&mut e.rt));
     driver.handle_ui_event(ev);
 }
 
@@ -391,7 +391,7 @@ fn microtasks_run_between_native_events() {
     "#,
     );
     let doc: &mut dyn Document = &mut e.doc;
-    let mut driver = EventDriver::new(doc, JsEventHandler { runtime: &mut e.rt });
+    let mut driver = EventDriver::new(doc, JsEventHandler::new(&mut e.rt));
     driver.handle_ui_event(UiEvent::PointerDown(pointer(
         10.0,
         250.0,

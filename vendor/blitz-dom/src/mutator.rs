@@ -1253,10 +1253,14 @@ impl<'doc> DocumentMutator<'doc> {
             return;
         }
 
-        let Some(raw_src) = element.attr(local_name!("src")) else {
-            return;
-        };
-        if raw_src.is_empty() {
+        // PATCH: an iframe without `src` shows the initial `about:blank` document right
+        // away (scripts write into it: `iframe.contentDocument.write(...)`), as in
+        // browsers. It is replaced when a `src` loads.
+        let raw_src = element.attr(local_name!("src")).unwrap_or("").trim();
+        if raw_src.is_empty() || raw_src.eq_ignore_ascii_case("about:blank") {
+            if node.subdoc().is_none() {
+                self.doc.load_iframe_srcdoc(target_id, "");
+            }
             return;
         }
         let Some(url) = self.doc.url.resolve_relative(raw_src) else {

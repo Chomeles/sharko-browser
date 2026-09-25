@@ -195,6 +195,11 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.framePath()` | This document's frame path: the `<iframe>` node ids from the page down (each in its parent's document); `[]` for the page |
 | `N.framePost(path, message, targetOrigin)` | `postMessage` to the window of the frame at `path`; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
 | `N.frameList(path)` | The frames of the document at `path` in tree order as `[id, name]` pairs (`parent.frames[name]`, `top.length`), or `null` if unknown |
+| `N.realmGlobal(path)` | The real `window` (global object) of the frame at `path` if it is same-origin and part of this page (its realm is created on demand, running that document's scripts), else `null` |
+| `N.frameGlobal(id)`, `N.parentGlobal()`, `N.topGlobal()` | `realmGlobal` for this document's `<iframe id>`, the parent frame and the page |
+| `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null` |
+| `N.foreignNodeType(o)` | `o`'s nodeType if it is a node wrapper of another realm of this page, else `0` (this realm's wrappers, non-nodes) |
+| `N.windowPostMessage(message, targetOrigin, transfer)` | `window.postMessage` itself (installed as the method, so V8 knows the calling realm): runs hook `windowPostMessage` of this realm with the caller's window as `source` |
 | `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
 | `N.cryptoAes(mode, encrypt, key, iv, aad, tagBits, data)` | ArrayBuffer; `mode` is `GCM`, `CBC`, `CTR` or `KW`; throws `OperationError` (e.g. failed authentication) |
 | `N.cryptoPbkdf2(hash, password, salt, iterations, bits)`, `N.cryptoHkdf(hash, ikm, salt, info, bits)` | ArrayBuffer |
@@ -223,6 +228,9 @@ Rust calls these; exceptions thrown inside hooks are reported to the console.
 | `onScroll()` | viewport scrolled → JS dispatches `scroll` on document (bubbling to window) | – |
 | `onPageHide()` | before navigating away → `pagehide`, `beforeunload` (ignore result), `unload` | – |
 | `onMessage(sourceOrNull, origin, data)` | (addition) a `postMessage` from another frame: `null` = from the parent window, else from the document of the `<iframe>` with that id; `data` is already deserialized | – |
+| `wrapNode(id)` | (addition) the wrapper of node `id` of this realm's document, for another realm (`frameElement`) | the wrapper |
+| `nodeTypeOf(o)` | (addition) `o`'s nodeType if it is a node wrapper of this realm, else `0` (asked by another realm's `N.foreignNodeType`) | number |
+| `windowPostMessage(message, targetOrigin, transfer, source)` | (addition) `window.postMessage` with `source` = the caller's window (`null`: this one); exceptions propagate to the caller | – |
 
 ## Script execution model (implemented in JS)
 After `onDocumentParsed`:

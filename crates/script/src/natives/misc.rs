@@ -7,7 +7,10 @@ use common::protocol::{CacheMode, Destination, NetRequest};
 use crate::activation;
 use crate::cx::{Cx, JsErr, NResult, array_buffer_from_vec, bytes_of, get_prop, v8_str};
 use crate::dom;
-use crate::runtime::{report_exception_ex, run_classic};
+use crate::runtime::{
+    RealmTable, call_hook, create_frame_realm, realm_document_parsed, report_exception_ex,
+    run_classic,
+};
 use crate::state::{Hook, Hooks, RuntimeState};
 use crate::storage::StorageError;
 
@@ -960,6 +963,315 @@ pub(crate) fn n_frame_list(cx: &mut Cx) -> NResult {
         .collect();
     let arr = v8::Array::new_with_elements(cx.scope, &elems);
     cx.ret_value(arr.into());
+    Ok(())
+}
+
+/// The global object of the realm of the frame at `path`, if that frame's document is
+/// same-origin with the current one (its realm is created on demand, running its
+/// scripts); `None` otherwise (the JS layer then uses a remote window stand-in).
+fn realm_global<'s>(
+    cx: &mut Cx<'_, 's, '_>,
+    path: &[u64],
+) -> Result<Option<v8::Local<'s, v8::Value>>, JsErr> {
+    let own = cx.st.host.frame_path();
+    if own == path {
+        let ctx = cx.scope.get_current_context();
+        let g: v8::Local<v8::Value> = ctx.global(cx.scope).into();
+        return Ok(Some(g));
+    }
+    let Some(table) = cx.scope.get_slot::<RealmTable>().cloned() else {
+        return Ok(None);
+    };
+    let origin = cx.st.origin();
+    if path.is_empty() {
+        let main = table.0.borrow().main.clone();
+        let Some((ctx, st)) = main else { return Ok(None) };
+        if st.origin() != origin {
+            return Ok(None);
+        }
+        let context = v8::Local::new(cx.scope, &ctx);
+        return Ok(Some(context.global(cx.scope).into()));
+    }
+    let root = table
+        .0
+        .borrow()
+        .main
+        .as_ref()
+        .map(|(_, s)| s.doc_ptr())
+        .unwrap_or(std::ptr::null_mut());
+    if root.is_null() {
+        return Ok(None);
+    }
+    // The frame's document, walking down from the page document (the reference is not
+    // held across anything that runs JS).
+    let (sub, doc_id, url) = {
+        // SAFETY: `root` is the page document of the current entry (see
+        // `ScriptRuntime::enter_in`); every realm's document hangs off it.
+        let mut cur: &mut blitz_dom::BaseDocument = unsafe { &mut *root };
+        for &id in path {
+            let Some(sub) = cur
+                .get_node_mut(blitz_dom::NodeId::from_u64(id))
+                .and_then(|n| n.subdoc_mut())
+            else {
+                return Ok(None);
+            };
+            match sub.inner_mut() {
+                blitz_dom::DocGuardMut::Ref(d) => cur = d,
+                _ => return Ok(None),
+            }
+        }
+        let id = blitz_dom::Document::id(&*cur);
+        (cur as *mut blitz_dom::BaseDocument, id, cur.url().to_string())
+    };
+    let sub_origin = url::Url::parse(&url)
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_else(|_| "null".to_string());
+    if sub_origin != origin {
+        return Ok(None);
+    }
+    let existing = table
+        .0
+        .borrow()
+        .frames
+        .get(path)
+        .filter(|r| r.doc_id == doc_id)
+        .map(|r| r.context.clone());
+    let ctx = match existing {
+        Some(c) => c,
+        None => {
+            let Some(host) = cx.st.host.frame_host(path, &url) else {
+                return Ok(None);
+            };
+            let st = create_frame_realm(cx.scope, &table, path.to_vec(), host, &url, doc_id);
+            st.set_doc(sub);
+            let ctx = table
+                .0
+                .borrow()
+                .frames
+                .get(path)
+                .map(|r| r.context.clone())
+                .expect("the realm was just created");
+            {
+                let context = v8::Local::new(cx.scope, &ctx);
+                let scope = &mut v8::ContextScope::new(cx.scope, context);
+                realm_document_parsed(scope, &st);
+            }
+            ctx
+        }
+    };
+    let context = v8::Local::new(cx.scope, &ctx);
+    Ok(Some(context.global(cx.scope).into()))
+}
+
+/// Addition: `N.frameGlobal(iframeId)` -> the `window` of the document of this document's
+/// `<iframe>`/`<frame>` `iframeId` if it is same-origin (its realm is created on demand),
+/// else `null`.
+pub(crate) fn n_frame_global(cx: &mut Cx) -> NResult {
+    let (id, is_frame) = {
+        let doc = cx.st.doc()?;
+        let id = cx.node(doc, 0)?;
+        let is_frame = doc
+            .get_node(id)
+            .and_then(|n| n.element_data())
+            .is_some_and(|e| {
+                e.name.local == blitz_dom::local_name!("iframe")
+                    || e.name.local == blitz_dom::local_name!("frame")
+            });
+        (id, is_frame)
+    };
+    if !is_frame {
+        cx.ret_null();
+        return Ok(());
+    }
+    let mut path = cx.st.host.frame_path();
+    path.push(id.as_u64());
+    match realm_global(cx, &path)? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.realmGlobal(path)` -> the `window` of the frame at `path` (see
+/// `N.framePath`) if same-origin, else `null`.
+pub(crate) fn n_realm_global(cx: &mut Cx) -> NResult {
+    let path = frame_path_arg(cx, 0)?;
+    match realm_global(cx, &path)? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.parentGlobal()` -> the parent document's `window` if same-origin, else
+/// `null` (also for the page).
+pub(crate) fn n_parent_global(cx: &mut Cx) -> NResult {
+    let own = cx.st.host.frame_path();
+    let Some((_, parent)) = own.split_last() else {
+        cx.ret_null();
+        return Ok(());
+    };
+    match realm_global(cx, parent)? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.topGlobal()` -> the page's `window` if same-origin, else `null`.
+pub(crate) fn n_top_global(cx: &mut Cx) -> NResult {
+    match realm_global(cx, &[])? {
+        Some(g) => cx.ret_value(g),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+/// Addition: `N.frameElement()` -> the `<iframe>` element (of the parent document) this
+/// document is in, if the parent is same-origin and has a realm, else `null`.
+pub(crate) fn n_frame_element(cx: &mut Cx) -> NResult {
+    let own = cx.st.host.frame_path();
+    let Some((&last, parent)) = own.split_last() else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let Some(table) = cx.scope.get_slot::<RealmTable>().cloned() else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let realm = {
+        let t = table.0.borrow();
+        if parent.is_empty() {
+            t.main.clone()
+        } else {
+            t.frames
+                .get(parent)
+                .map(|r| (r.context.clone(), r.state.clone()))
+        }
+    };
+    let Some((ctx, st)) = realm else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let node = blitz_dom::NodeId::from_u64(last);
+    if st.origin() != cx.st.origin() || !st.has_doc() {
+        cx.ret_null();
+        return Ok(());
+    }
+    if let Ok(doc) = st.doc() {
+        if doc.get_node(node).is_none() {
+            cx.ret_null();
+            return Ok(());
+        }
+        crate::dom::expose(doc, node);
+    }
+    let Some(js) = crate::cx::node_id_to_js(node) else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let r = {
+        let context = v8::Local::new(cx.scope, &ctx);
+        let scope = &mut v8::ContextScope::new(cx.scope, context);
+        let id = v8::Number::new(scope, js).into();
+        // (Not a complete task of the parent realm: no microtask checkpoint here.)
+        st.native_depth.set(st.native_depth.get() + 1);
+        let r = call_hook(scope, &st, Hook::WrapNode, &[id]);
+        st.native_depth.set(st.native_depth.get() - 1);
+        r
+    };
+    match r {
+        Some(v) => cx.ret_value(v),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
+unsafe extern "C" {
+    /// `v8::Isolate::GetIncumbentContext()`, which the v8 crate doesn't bind: the context
+    /// of the most recently entered author function, i.e. the realm whose script called
+    /// the running native (V8 keeps API functions off that count). A `Local<Context>` is
+    /// one pointer, returned in a register.
+    #[link_name = "_ZN2v87Isolate19GetIncumbentContextEv"]
+    fn v8_isolate_get_incumbent_context(isolate: *mut std::ffi::c_void) -> *const v8::Context;
+}
+
+/// The global object of the realm whose script called the running native, when it is a
+/// realm of this page with the callee's origin (the only kind that can call it);
+/// `None` when it is the callee's own realm or unknown.
+fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Object>> {
+    let isolate: *mut std::ffi::c_void = {
+        let i: &mut v8::Isolate = cx.scope;
+        // SAFETY: `UnsafeRawIsolatePtr` is `repr(transparent)` around the C++ isolate pointer.
+        unsafe { std::mem::transmute::<v8::UnsafeRawIsolatePtr, *mut std::ffi::c_void>(i.as_raw_isolate_ptr()) }
+    };
+    // SAFETY: the isolate is live and entered, and a handle scope is open (natives run
+    // inside one); the C++ method only reads V8's stack and context state.
+    let raw = unsafe { v8_isolate_get_incumbent_context(isolate) };
+    let nn = std::ptr::NonNull::new(raw as *mut v8::Context)?;
+    // SAFETY: `Local` is `repr(C)` around a `NonNull` handle, the representation V8's
+    // `Local<Context>` shares; the handle lives in the current handle scope.
+    let ctx: v8::Local<'s, v8::Context> = unsafe { std::mem::transmute(nn) };
+    let st = crate::state::state_of_context(cx.scope, Some(ctx))?;
+    if std::ptr::eq(st, cx.st) || st.origin() != cx.st.origin() {
+        return None;
+    }
+    Some(ctx.global(cx.scope))
+}
+
+/// Addition: `window.postMessage` itself (an API function, so V8 can tell which realm
+/// called it): runs hook `windowPostMessage(message, targetOrigin, transfer, source)`
+/// of the window's realm with the caller's window as `source` (`null`: itself).
+/// Exceptions of the hook (invalid target origin, uncloneable data) reach the caller.
+pub(crate) fn n_window_post_message(cx: &mut Cx) -> NResult {
+    if cx.args.length() == 0 {
+        return Err(JsErr::Type(
+            "Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.".into(),
+        ));
+    }
+    let (message, target_origin, transfer) = (cx.arg(0), cx.arg(1), cx.arg(2));
+    let source: v8::Local<v8::Value> = match incumbent_global(cx) {
+        Some(g) => g.into(),
+        None => v8::null(cx.scope).into(),
+    };
+    let st = cx.st;
+    if st.hooks.borrow().get(Hook::PostMessage).is_none() {
+        return Ok(());
+    }
+    let r = crate::runtime::call_hook_raw(cx.scope, st, Hook::PostMessage, &[message, target_origin, transfer, source]);
+    // `None`: the hook threw; the exception is pending for the JS caller.
+    if r.is_none() {
+        return Err(JsErr::Thrown);
+    }
+    Ok(())
+}
+
+/// `foreignNodeType(o)`: the nodeType of `o` when it is a node wrapper of another realm
+/// of this page (0 otherwise: no object, this realm's, not a node).
+pub(crate) fn n_foreign_node_type(cx: &mut Cx) -> NResult {
+    let Ok(obj) = v8::Local::<v8::Object>::try_from(cx.arg(0)) else {
+        cx.ret_i32(0);
+        return Ok(());
+    };
+    let Some(ctx) = obj.get_creation_context(cx.scope) else {
+        cx.ret_i32(0);
+        return Ok(());
+    };
+    let Some(st) = crate::state::state_of_context(cx.scope, Some(ctx)) else {
+        cx.ret_i32(0);
+        return Ok(());
+    };
+    if std::ptr::eq(st, cx.st) || st.origin() != cx.st.origin() {
+        cx.ret_i32(0);
+        return Ok(());
+    }
+    let r = {
+        let scope = &mut v8::ContextScope::new(cx.scope, ctx);
+        st.native_depth.set(st.native_depth.get() + 1);
+        let r = call_hook(scope, st, Hook::NodeType, &[obj.into()]);
+        st.native_depth.set(st.native_depth.get() - 1);
+        r.and_then(|v| v.int32_value(scope))
+    };
+    cx.ret_i32(r.unwrap_or(0));
     Ok(())
 }
 

@@ -246,3 +246,14 @@ Patches so far:
     stayed stale from an earlier layout of the element as a block, so an inline-block's
     `scrollWidth` reported the former block width), and where their `overflow` is visible
     it escapes into the inline container's scrollable overflow.
+74. `blitz-dom/src/mutator.rs`, `iframe.rs`: an `<iframe>` without `src` (or with
+    `about:blank`) gets an empty document right away (the initial `about:blank` document
+    of the HTML spec, with the parent's base URL), so scripts can `contentDocument.write`
+    into it or fill it through `contentWindow.document` before it ever loads anything.
+    A `srcdoc` document records the `<iframe>`'s `load` event like a fetched one (the
+    initial empty document records none).
+75. `blitz-dom/src/document.rs`: `remove_sub_document` keeps the removed iframe document
+    alive until the next `handle_messages()`. Script realms hold raw pointers to the
+    documents of their frames for the duration of a script entry; a frame removed during
+    that entry (a script removing its own `<iframe>`) must not free the document under a
+    realm that is still finishing its task.

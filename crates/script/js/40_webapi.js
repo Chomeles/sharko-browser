@@ -260,11 +260,11 @@
     static { L.bcClosed = (c) => c.#closed; }
   }
   L.defineEventHandlers(BroadcastChannel.prototype, ['onmessage', 'onmessageerror']);
-  // Windows of other frames (stand-ins for cross-origin WindowProxy objects): an iframe's
-  // contentWindow, parent/top, and the frames reachable from them. Each document with
-  // script runs in its own isolate, so only postMessage reaches the other window. A
-  // window is named by its frame path: the <iframe> node ids from the page down (the
-  // page is []).
+  // Windows of other frames. The documents of a page and its frames run in one isolate,
+  // each in its own realm (context): a same-origin frame's window is its real global
+  // object (`N.realmGlobal`), so its document and functions are reachable. A cross-origin
+  // frame gets a stand-in for its WindowProxy (only postMessage reaches it). A window is
+  // named by its frame path: the <iframe> node ids from the page down (the page is []).
   const REMOTE = new WeakMap(); // RemoteWindow -> frame path
   const remoteByPath = new Map(); // path key -> RemoteWindow
   const pathKey = (p) => p.join(',');
@@ -277,10 +277,23 @@
     if (!REMOTE.has(w)) throw L.illegal();
     return REMOTE.get(w);
   }
-  // The window of the frame at `path`: this window, or a remote one (one object per frame).
+  // The real window of a same-origin frame (its realm is created on demand), else null.
+  function realmGlobal(path) {
+    if (typeof N.realmGlobal !== 'function') return null;
+    try { return N.realmGlobal(path); } catch (_) { return null; }
+  }
+  // The real window of this document's same-origin <iframe> `id`, else null.
+  L.frameGlobal = function (id) {
+    if (typeof N.frameGlobal !== 'function' || !N.isConnected(id)) return null;
+    try { return N.frameGlobal(id); } catch (_) { return null; }
+  };
+  // The window of the frame at `path`: this window, the real one of a same-origin frame,
+  // or a remote stand-in (one object per frame).
   L.windowAt = function (path) {
     const key = pathKey(path);
     if (key === pathKey(selfPath())) return L.window;
+    const g = realmGlobal(path);
+    if (g !== null) return g;
     let w = remoteByPath.get(key);
     if (w === undefined) {
       w = new Proxy(new RemoteWindow(INTERNAL, path), remoteHandler);
@@ -381,9 +394,23 @@
   L.remoteWindowFor = (id) => L.windowAt([...selfPath(), id]);
   L.parentWindow = function () {
     const own = selfPath();
-    return own.length === 0 ? L.window : L.windowAt(own.slice(0, -1));
+    if (own.length === 0) return L.window;
+    if (typeof N.parentGlobal === 'function') {
+      let g = null;
+      try { g = N.parentGlobal(); } catch (_) { g = null; }
+      if (g !== null) return g;
+    }
+    return L.windowAt(own.slice(0, -1));
   };
-  L.windowTop = () => L.windowAt([]);
+  L.windowTop = () => {
+    if (selfPath().length === 0) return L.window;
+    if (typeof N.topGlobal === 'function') {
+      let g = null;
+      try { g = N.topGlobal(); } catch (_) { g = null; }
+      if (g !== null) return g;
+    }
+    return L.windowAt([]);
+  };
   L.iframeWindow = function (el, id) {
     if (!N.isConnected(id)) return null;
     return L.remoteWindowFor(id);
@@ -401,7 +428,8 @@
   L.onMessage = function (source, origin, data) {
     L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports: [], lastEventId: '' }, L.MessageEvent);
   };
-  L.windowPostMessage = function (message, targetOrigin, transfer) {
+  // `source`: the caller's window (another realm of this page), null for this one.
+  L.windowPostMessage = function (message, targetOrigin, transfer, source) {
     let target = '/';
     let list = [];
     if (targetOrigin !== null && typeof targetOrigin === 'object') {
@@ -419,7 +447,10 @@
     }
     const data = cloneValue(message);
     const ports = list.filter((x) => x instanceof MessagePort);
-    L.postTask(() => L.fire(L.window, 'message', { data, origin, source: L.window, ports }, L.MessageEvent));
+    const src = source !== null && source !== undefined ? source : L.window;
+    let srcOrigin = origin;
+    if (src !== L.window) { try { srcOrigin = src.location.origin; } catch (_) { /* keep ours */ } }
+    L.postTask(() => L.fire(L.window, 'message', { data, origin: srcOrigin, source: src, ports }, L.MessageEvent));
   };
 
   // =======================================================================================

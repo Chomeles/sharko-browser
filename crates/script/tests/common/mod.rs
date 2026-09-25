@@ -129,6 +129,12 @@ impl ScriptHost for MockHost {
     fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
         self.frame_lists.borrow().get(path).cloned()
     }
+    fn frame_host(&self, path: &[u64], _url: &str) -> Option<Rc<dyn ScriptHost>> {
+        let host = MockHost::default();
+        *host.frame_path.borrow_mut() = path.to_vec();
+        *host.frame_lists.borrow_mut() = self.frame_lists.borrow().clone();
+        Some(Rc::new(host))
+    }
     fn fetch_sync(&self, req: NetRequest) -> Option<NetResponse> {
         let resp = self.respond(&req);
         self.sync_fetches.borrow_mut().push(req);

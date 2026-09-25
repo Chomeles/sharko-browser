@@ -136,7 +136,12 @@
   defGetter('closed', () => false);
   defGetter('length', () => L.childFrames().length, { replaceable: true });
   defGetter('opener', () => null, { replaceable: true });
-  defGetter('frameElement', () => null);
+  // The <iframe> in the parent realm hosting this window (null at the top
+  // or across origins).
+  defGetter('frameElement', () => {
+    if (typeof N.frameElement !== 'function') return null;
+    try { return N.frameElement() ?? null; } catch (_) { return null; }
+  });
   let windowName = null; // read from the host on first use (not while snapshotting)
   const getWindowName = () => {
     if (windowName === null) {
@@ -179,10 +184,17 @@
     if (arguments.length === 0) throw new TypeError("Failed to execute 'reportError' on 'Window': 1 argument required, but only 0 present.");
     L.reportException(e);
   });
-  defMethod('postMessage', function postMessage(message, targetOrigin, transfer) {
-    if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-    L.windowPostMessage(message, targetOrigin, transfer);
-  });
+  // The native itself (an API function): V8 then knows the calling realm, so a message
+  // from another frame's script has that frame as its source (see hook windowPostMessage).
+  const postMessageFn = typeof N.windowPostMessage === 'function'
+    ? N.windowPostMessage
+    : function postMessage(message, targetOrigin, transfer) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+      L.windowPostMessage(message, targetOrigin, transfer, null);
+    };
+  Object.defineProperty(postMessageFn, 'name', { value: 'postMessage', configurable: true });
+  Object.defineProperty(postMessageFn, 'length', { value: 1, configurable: true });
+  defMethod('postMessage', postMessageFn);
   defMethod('getSelection', function getSelection() { return L.getSelection(); });
   function scrollArgs(a, b, relative) {
     const v = N.viewport();
@@ -960,6 +972,12 @@
     onFetchProgress: guard(L.onFetchProgress),
     onAnimationEvent: guard(onAnimationEvent),
     onMessage: guard(L.onMessage),
+    // Wrapper for a node of this realm's document (used by `frameElement`
+    // of a child realm).
+    wrapNode: (id) => wrap(id),
+    nodeTypeOf: (o) => (isNode(o) ? typeOf(o) : 0),
+    // Not guarded: its exceptions are the caller's (invalid target origin, DataCloneError).
+    windowPostMessage: (message, targetOrigin, transfer, source) => L.windowPostMessage(message, targetOrigin, transfer, source),
   });
 
   // =======================================================================================

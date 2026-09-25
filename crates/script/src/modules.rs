@@ -12,7 +12,7 @@ use common::protocol::{CacheMode, Destination, NetRequest, NetResponse};
 
 use crate::cx::{self, v8_str};
 use crate::runtime::MODULE_FETCH_BIT;
-use crate::state::{RuntimeState, StatePtr};
+use crate::state::RuntimeState;
 
 enum Entry {
     Fetching,
@@ -203,7 +203,9 @@ impl ModuleLoader {
 }
 
 fn state_of(scope: &v8::PinScope) -> Option<&'static RuntimeState> {
-    scope.get_slot::<StatePtr>().copied().map(|p| p.get())
+    // The realm of the module being resolved/imported is the current context.
+    let context = scope.get_current_context();
+    crate::state::state_of_context(scope, Some(context))
 }
 
 /// Resolve a module specifier from the script or module with base URL `base`: through

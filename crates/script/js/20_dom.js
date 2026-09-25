@@ -807,8 +807,50 @@
     return idOf(parentW);
   }
 
+  // A node of another realm (a same-origin frame) passed to a mutating operation of
+  // this one: adopted by copy — an equivalent node of this document (its own wrapper),
+  // the original removed from its tree when `remove`. Identity is not preserved (see
+  // README "Known gaps").
+  function adoptForeign(o, method, remove) {
+    const t = L.foreignNodeType(o);
+    if (t === 0) throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
+    let n;
+    switch (t) {
+      case 1: {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = o.outerHTML;
+        n = tpl.content.firstChild;
+        if (n === null) throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
+        tpl.content.removeChild(n);
+        document.adoptNode(n);
+        break;
+      }
+      case 3: n = document.createTextNode(o.data); break;
+      case 4: n = document.createCDATASection(o.data); break;
+      case 7: n = document.createProcessingInstruction(o.target, o.data); break;
+      case 8: n = document.createComment(o.data); break;
+      case 10: n = document.implementation.createDocumentType(o.name, o.publicId, o.systemId); break;
+      case 11: {
+        n = document.createDocumentFragment();
+        for (const c of Array.from(o.childNodes)) n.appendChild(adoptForeign(c, method, remove));
+        return n;
+      }
+      case 9: throw new DOMException(`Failed to execute '${method}': The node provided is a document, which may not be adopted.`, 'NotSupportedError');
+      default: throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
+    }
+    if (remove && o.parentNode !== null) o.parentNode.removeChild(o);
+    return n;
+  }
+  L.adoptForeign = adoptForeign;
+  // The node argument of a mutating operation: a node of this realm, or a foreign one
+  // adopted (by copy).
+  L.adoptArg = function (o, method) {
+    return isNode(o) || L.foreignNodeType(o) === 0 ? o : adoptForeign(o, method, true);
+  };
+
   function preInsert(parentW, nodeW, childW, method) {
     const pid = realParent(parentW);
+    nodeW = L.adoptArg(nodeW, method);
     const nid = L.nodeArg(nodeW, method, 1);
     let refId = childW === null || childW === undefined ? 0 : L.nodeArg(childW, method, 2);
     const sr = isShadowRoot(parentW) ? parentW : null;
@@ -857,6 +899,7 @@
 
   function replaceChildImpl(parentW, nodeW, childW) {
     const pid = idOf(parentW);
+    nodeW = L.adoptArg(nodeW, 'replaceChild');
     const nid = L.nodeArg(nodeW, 'replaceChild', 1);
     const cid = L.nodeArg(childW, 'replaceChild', 2);
     const pt = typeOf(parentW);
@@ -900,12 +943,13 @@
   // Convert (Node or string)... into a single node (ParentNode/ChildNode helpers)
   function convertNodes(args, method) {
     if (args.length === 1) {
-      const a = args[0];
+      const a = L.adoptArg(args[0], method);
       if (isNode(a) && !isShadowRoot(a)) return a;
       if (!isNode(a)) return makeWrapper(N.createText(`${a}`), 3, Text.prototype);
     }
     const frag = N.createFragment();
-    for (const a of args) {
+    for (let a of args) {
+      a = L.adoptArg(a, method);
       if (isNode(a)) {
         const nid = L.nodeArg(a, method, 1);
         if (typeOf(a) === 11) {
@@ -1163,11 +1207,16 @@
     },
     isEqualNode(other) {
       if (other === null || other === undefined) return false;
-      if (!isNode(other)) throw new TypeError("Failed to execute 'isEqualNode' on 'Node': parameter 1 is not of type 'Node'.");
+      if (!isNode(other)) {
+        if (L.foreignNodeType(other) !== 0) return false;
+        throw new TypeError("Failed to execute 'isEqualNode' on 'Node': parameter 1 is not of type 'Node'.");
+      }
       return nodesEqual(idOf(this), idOf(other));
     },
     isSameNode(other) { return this === other; },
     compareDocumentPosition(other) {
+      // A node of another realm: disconnected, implementation-specific, preceding.
+      if (!isNode(other) && L.foreignNodeType(other) !== 0) return 1 | 32 | 2;
       const oid = L.nodeArg(other, 'compareDocumentPosition', 1);
       const id = idOf(this);
       if (oid === id) return 0;
@@ -1175,6 +1224,7 @@
     },
     contains(other) {
       if (other === null || other === undefined) return false;
+      if (!isNode(other) && L.foreignNodeType(other) !== 0) return false;
       const oid = L.nodeArg(other, 'contains', 1);
       if (isShadowRoot(other) && other !== this) return false;
       return N.contains(idOf(this), oid);
@@ -2053,10 +2103,13 @@
     ariaSelected: [['true', 'false'], null, null],
     ariaSort: [['ascending', 'descending', 'other', 'none'], 'none', 'none'],
   };
+  // A missing attribute reflects as null (what shipping browsers do; the ARIA 1.3
+  // "missing value default" is not reflected), an unknown value as the invalid-value
+  // default.
   L.ariaGet = function (id, p, attr) {
     const v = N.getAttr(id, attr);
     const en = ARIA_ENUM[p];
-    if (en === undefined || v === null) return en === undefined ? v : (v === null ? en[2] : v);
+    if (en === undefined || v === null) return v;
     const lower = L.asciiLower(v);
     for (const k of en[0]) if (lower === k) return k;
     return en[1];
@@ -2229,6 +2282,7 @@
     },
     get assignedSlot() { return null; },
     closest(selectors) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'closest' on 'Element': 1 argument required, but only 0 present.");
       const sel = `${selectors}`;
       try { return wrap(N.closest(idOf(this), sel)); } catch (e) {
         const c = L.fromNative(e);
@@ -2236,8 +2290,14 @@
         throw c;
       }
     },
-    matches(selectors) { return elementMatchesImpl(idOf(this), `${selectors}`, 'matches'); },
-    webkitMatchesSelector(selectors) { return elementMatchesImpl(idOf(this), `${selectors}`, 'webkitMatchesSelector'); },
+    matches(selectors) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'matches' on 'Element': 1 argument required, but only 0 present.");
+      return elementMatchesImpl(idOf(this), `${selectors}`, 'matches');
+    },
+    webkitMatchesSelector(selectors) {
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'webkitMatchesSelector' on 'Element': 1 argument required, but only 0 present.");
+      return elementMatchesImpl(idOf(this), `${selectors}`, 'webkitMatchesSelector');
+    },
     getElementsByTagName(qn) { return getElementsByTagNameImpl(idOf(this), qn); },
     getElementsByTagNameNS(ns, local) { return getElementsByTagNameNSImpl(idOf(this), ns, local); },
     getElementsByClassName(names) { return getElementsByClassNameImpl(idOf(this), names); },
@@ -2406,10 +2466,14 @@
       if (sr !== null) shadowDistribute(sr);
     },
     querySelector(selectors) {
-      return wrap(qs(idOf(this), `${selectors}`, 'querySelector', this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment'));
+      const iface = this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment';
+      if (arguments.length === 0) throw new TypeError(`Failed to execute 'querySelector' on '${iface}': 1 argument required, but only 0 present.`);
+      return wrap(qs(idOf(this), `${selectors}`, 'querySelector', iface));
     },
     querySelectorAll(selectors) {
-      return L.staticNodeList(qsa(idOf(this), `${selectors}`, 'querySelectorAll', this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment'));
+      const iface = this instanceof Element ? 'Element' : typeOf(this) === 9 ? 'Document' : 'DocumentFragment';
+      if (arguments.length === 0) throw new TypeError(`Failed to execute 'querySelectorAll' on '${iface}': 1 argument required, but only 0 present.`);
+      return L.staticNodeList(qsa(idOf(this), `${selectors}`, 'querySelectorAll', iface));
     },
   };
   const ChildNodeMixin = {
@@ -2828,6 +2892,11 @@
       return ownDoc(this, w);
     },
     importNode(node, deep = false) {
+      if (!isNode(node) && !L.isAttr(node) && L.foreignNodeType(node) !== 0) {
+        const n = adoptForeign(node, 'importNode', false);
+        const d = typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep;
+        return ownDoc(this, d ? n : n.cloneNode(false));
+      }
       if (!isNode(node) && !L.isAttr(node)) throw new TypeError("Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.");
       if (L.isAttr(node)) return node.cloneNode();
       if (typeOf(node) === 9 || isShadowRoot(node)) throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", 'NotSupportedError');
@@ -2835,6 +2904,7 @@
     },
     adoptNode(node) {
       if (L.isAttr(node)) { if (L.attrOwner(node)) L.attrOwner(node).removeAttributeNode(node); return node; }
+      if (!isNode(node) && L.foreignNodeType(node) !== 0) return ownDoc(this, adoptForeign(node, 'adoptNode', true));
       const nid = L.nodeArg(node, 'adoptNode', 1);
       if (typeOf(node) === 9) throw new DOMException("Failed to execute 'adoptNode' on 'Document': The node provided is a document, which may not be adopted.", 'NotSupportedError');
       if (isShadowRoot(node)) throw hier("Failed to execute 'adoptNode' on 'Document': The node provided is a shadow root, which may not be adopted.");
@@ -4449,6 +4519,7 @@
     deleteContents() { rangeDelete(this); }
     insertNode(node) { rangeInsert(this, node); }
     surroundContents(newParent) {
+      newParent = L.adoptArg(newParent, 'surroundContents');
       const npid = L.nodeArg(newParent, 'surroundContents', 1);
       const [sc, , ec] = L.rangeGet(this);
       const ptrs = [sc, ec];
@@ -4618,6 +4689,7 @@
     L.rangeSet(r, newNode, newOffset, newNode, newOffset);
   }
   function rangeInsert(r, node) {
+    node = L.adoptArg(node, 'insertNode');
     const nid = L.nodeArg(node, 'insertNode', 1);
     const [sc, so, ec, eo] = L.rangeGet(r);
     const st = N.nodeType(sc);
