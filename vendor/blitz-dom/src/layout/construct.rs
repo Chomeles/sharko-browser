@@ -1155,7 +1155,10 @@ fn write_svg_markup(doc: &BaseDocument, node_id: NodeId, out: &mut String) {
         NodeData::Element(el) => {
             out.push('<');
             out.push_str(&el.name.local);
-            let css = svg_css_paint(doc, node_id);
+            // PATCH: usvg cannot resolve `var()`: an element that uses it gets its
+            // computed paint as well (it comes last in `style`, so it wins).
+            let uses_var = el.attrs.iter().any(|a| a.value.contains("var("));
+            let css = svg_css_paint(doc, node_id, uses_var);
             let mut wrote_style = false;
             for attr in el.attrs.iter() {
                 out.push(' ');
@@ -1220,7 +1223,7 @@ fn srgb_css(color: &style::color::AbsoluteColor) -> String {
 /// `fill`/`stroke`/`stroke-width` declarations for SVG paint that differs from the
 /// parent's computed values (i.e. was set by a CSS rule on this element).
 #[cfg(feature = "svg")]
-fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
+fn svg_css_paint(doc: &BaseDocument, node_id: NodeId, force: bool) -> Option<String> {
     use style_traits::ToCss as _;
     let node = &doc.nodes[node_id];
     let styles = node.primary_styles()?;
@@ -1228,10 +1231,10 @@ fn svg_css_paint(doc: &BaseDocument, node_id: NodeId) -> Option<String> {
     let (own, parent) = (styles.get_inherited_svg(), parent_styles.get_inherited_svg());
     let current_color = styles.clone_color();
     let mut decls = String::new();
-    if own.fill != parent.fill {
+    if force || own.fill != parent.fill {
         decls.push_str(&format!("fill:{};", svg_paint_css(&own.fill, &current_color)));
     }
-    if own.stroke != parent.stroke {
+    if force || own.stroke != parent.stroke {
         decls.push_str(&format!("stroke:{};", svg_paint_css(&own.stroke, &current_color)));
     }
     if own.stroke_width != parent.stroke_width {

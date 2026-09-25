@@ -1,5 +1,5 @@
 use crate::Document;
-use crate::layout::damage::HoistedPaintChildren;
+use crate::layout::damage::{HoistedPaintChild, HoistedPaintChildren};
 use bitflags::bitflags;
 use blitz_traits::events::{
     BlitzPointerEvent, BlitzPointerId, DomEventData, HitResult, PointerCoords,
@@ -853,6 +853,77 @@ impl Node {
     }
 
     #[track_caller]
+    /// PATCH: where this hoisted (z-indexed) box sits in the coordinate space of its
+    /// stacking context root `root` (the root's children space, i.e. after the root's own
+    /// scroll offset), from the current layout and scroll offsets of the boxes in between,
+    /// plus the overflow clip of those boxes that applies to it (`[x0, y0, x1, y1]`).
+    /// The positions recorded in [`HoistedPaintChild`](crate::layout::damage::HoistedPaintChild)
+    /// are taken while styles are flushed, before layout, and miss later scrolling and
+    /// the clips of non-stacking-context ancestors (carousels drawn at the page origin,
+    /// unclipped). `None` if `root` is not a layout ancestor.
+    pub fn hoisted_placement(&self, root: NodeId) -> Option<(crate::util::Point<f32>, Option<[f32; 4]>)> {
+        let mut chain: Vec<&Node> = Vec::new();
+        let mut cur = self.layout_parent.get();
+        loop {
+            let id = cur?;
+            if id == root {
+                break;
+            }
+            let node = self.with(id);
+            chain.push(node);
+            if chain.len() > 1024 {
+                return None;
+            }
+            cur = node.layout_parent.get();
+        }
+
+        // Which ancestors' overflow clips apply: all for in-flow/relative boxes; for an
+        // absolutely positioned box only its containing block (the nearest positioned
+        // ancestor) and above; none for a fixed box.
+        let position = |node: &Node| node.primary_styles().map(|s| s.clone_position());
+        let first_clip = match position(self) {
+            Some(Position::Absolute) => chain
+                .iter()
+                .position(|n| position(n).is_some_and(|p| p != Position::Static))
+                .unwrap_or(chain.len()),
+            Some(Position::Fixed) => chain.len(),
+            _ => 0,
+        };
+
+        let (mut ox, mut oy) = (0.0f32, 0.0f32);
+        let mut clip: Option<[f32; 4]> = None;
+        for (i, node) in chain.iter().enumerate().rev() {
+            let layout = node.final_layout();
+            let (bx, by) = (ox + layout.location.x, oy + layout.location.y);
+            if i >= first_clip {
+                if let Some(styles) = node.primary_styles() {
+                    use style::values::computed::Overflow;
+                    let clips_x = styles.get_box().overflow_x != Overflow::Visible;
+                    let clips_y = styles.get_box().overflow_y != Overflow::Visible;
+                    if clips_x || clips_y {
+                        let b = layout.border;
+                        let (x0, x1) = match clips_x {
+                            true => (bx + b.left, bx + layout.size.width - b.right),
+                            false => (f32::NEG_INFINITY, f32::INFINITY),
+                        };
+                        let (y0, y1) = match clips_y {
+                            true => (by + b.top, by + layout.size.height - b.bottom),
+                            false => (f32::NEG_INFINITY, f32::INFINITY),
+                        };
+                        clip = Some(match clip {
+                            None => [x0, y0, x1, y1],
+                            Some(c) => [c[0].max(x0), c[1].max(y0), c[2].min(x1), c[3].min(y1)],
+                        });
+                    }
+                }
+            }
+            let scroll = node.scroll_offset();
+            ox = bx - scroll.x as f32;
+            oy = by - scroll.y as f32;
+        }
+        Some((crate::util::Point { x: ox, y: oy }, clip))
+    }
+
     pub fn with(&self, id: NodeId) -> &Node {
         self.tree().get(id).unwrap()
     }
@@ -1304,6 +1375,23 @@ impl Node {
             *scrollbar = Some(sb);
         }
 
+        // Hoisted children are placed relative to this box (after its scroll offset).
+        let (hoisted_x, hoisted_y) = (x, y);
+        let hit_hoisted = |child: &HoistedPaintChild,
+                           scrollbar: &mut Option<crate::node::ScrollbarRef>|
+         -> Option<HitResult> {
+            let node = self.with(child.node_id);
+            let (pos, clip) = node
+                .hoisted_placement(self.id)
+                .unwrap_or((crate::util::Point { x: child.position.x, y: child.position.y }, None));
+            if let Some([x0, y0, x1, y1]) = clip {
+                if hoisted_x < x0 || hoisted_x > x1 || hoisted_y < y0 || hoisted_y > y1 {
+                    return None;
+                }
+            }
+            node.hit_inner(hoisted_x - pos.x, hoisted_y - pos.y, scale, scrollbar)
+        };
+
         if self.flags.is_inline_root() {
             let content_box_offset = taffy::Point {
                 x: self.final_layout().padding.left + self.final_layout().border.left,
@@ -1317,12 +1405,7 @@ impl Node {
         if matches_hoisted_content {
             if let Some(hoisted) = &self.stacking_context {
                 for hoisted_child in hoisted.pos_z_hoisted_children().rev() {
-                    let x = x - hoisted_child.position.x;
-                    let y = y - hoisted_child.position.y;
-                    if let Some(hit) = self
-                        .with(hoisted_child.node_id)
-                        .hit_inner(x, y, scale, scrollbar)
-                    {
+                    if let Some(hit) = hit_hoisted(hoisted_child, scrollbar) {
                         return Some(hit);
                     }
                 }
@@ -1340,12 +1423,7 @@ impl Node {
         if matches_hoisted_content {
             if let Some(hoisted) = &self.stacking_context {
                 for hoisted_child in hoisted.neg_z_hoisted_children().rev() {
-                    let x = x - hoisted_child.position.x;
-                    let y = y - hoisted_child.position.y;
-                    if let Some(hit) = self
-                        .with(hoisted_child.node_id)
-                        .hit_inner(x, y, scale, scrollbar)
-                    {
+                    if let Some(hit) = hit_hoisted(hoisted_child, scrollbar) {
                         return Some(hit);
                     }
                 }

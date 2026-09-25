@@ -727,6 +727,7 @@ pub fn to_taffy_style(style: &stylo::ComputedValues) -> taffy::Style<Atom> {
         item_is_table: display.inside() == stylo::DisplayInside::Table,
         item_is_replaced: false,
         position: self::position(style.clone_position()),
+        is_fixed_position: style.clone_position() == stylo::Position::Fixed,
         overflow: taffy::Point {
             x: self::overflow(style.clone_overflow_x()),
             y: self::overflow(style.clone_overflow_y()),

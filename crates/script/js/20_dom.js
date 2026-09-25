@@ -1868,6 +1868,7 @@
     get slot() { const v = N.getAttr(idOf(this), 'slot'); return v === null ? '' : v; },
     set slot(v) { setAttrCore(this, idOf(this), 'slot', `${v}`); },
     get part() { return L.tokenList(this, 'part'); },
+    set part(v) { this.part.value = v; },
     hasAttributes() { return N.attrNames(idOf(this)).length !== 0; },
     get attributes() { return namedNodeMap(this); },
     getAttributeNames() { return N.attrNames(idOf(this)); },

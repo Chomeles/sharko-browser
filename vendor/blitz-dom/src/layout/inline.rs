@@ -541,6 +541,11 @@ impl BaseDocument {
             inline_layout.layout.break_all_lines(Some(width));
         }
 
+        // PATCH: floats placed by this inline layout extend its scrollable overflow (a tall
+        // float next to an inline-block made otto.de end after the first screen).
+        #[allow(unused_mut)]
+        let mut float_overflow: Option<taffy::Rect<f32>> = None;
+
         // Perform inline layout
         #[cfg(feature = "floats")]
         {
@@ -645,7 +650,23 @@ impl BaseDocument {
                         layout.size = output.size;
                         layout.location.x = pos.x + margin.left + container_pb.left;
                         layout.location.y = pos.y + margin.top + container_pb.top;
+                        let (x, y) = (layout.location.x, layout.location.y);
                         self.mark_layout_dirty(node_id);
+                        let rect = taffy::Rect {
+                            left: x,
+                            top: y,
+                            right: x + output.size.width.max(output.scrollable_overflow_rect.right) + margin.right,
+                            bottom: y + output.size.height.max(output.scrollable_overflow_rect.bottom) + margin.bottom,
+                        };
+                        float_overflow = Some(match float_overflow {
+                            None => rect,
+                            Some(r) => taffy::Rect {
+                                left: r.left.min(rect.left),
+                                top: r.top.min(rect.top),
+                                right: r.right.max(rect.right),
+                                bottom: r.bottom.max(rect.bottom),
+                            },
+                        });
 
                         // dbg!(&layout.size);
                         // dbg!(&layout.location);
@@ -932,11 +953,20 @@ impl BaseDocument {
                     width: content_width,
                     height: measured_size.height,
                 } + padding.sum_axes();
-                taffy::Rect {
+                let content = taffy::Rect {
                     left: 0.0,
                     right: content_extent.width,
                     top: 0.0,
                     bottom: content_extent.height,
+                };
+                match float_overflow {
+                    Some(f) => taffy::Rect {
+                        left: content.left.min(f.left),
+                        top: content.top.min(f.top),
+                        right: content.right.max(f.right),
+                        bottom: content.bottom.max(f.bottom),
+                    },
+                    None => content,
                 }
             },
             baselines: taffy::Baselines::from_first(first_baseline),

@@ -80,6 +80,11 @@ impl<T: Deref<Target = ComputedValues>> taffy::CoreStyle for TaffyStyloStyle<T> 
     }
 
     #[inline]
+    fn is_fixed_position(&self) -> bool {
+        self.0.get_box().position == style::computed_values::position::T::Fixed
+    }
+
+    #[inline]
     fn inset(&self) -> taffy::Rect<taffy::LengthPercentageAuto> {
         let position_styles = self.0.get_position();
         taffy::Rect {

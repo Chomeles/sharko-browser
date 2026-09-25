@@ -93,9 +93,11 @@ impl SvgImageData {
 
         let text = std::str::from_utf8(data).map_err(|_| usvg::Error::NotAnUtf8Str)?;
         // PATCH: usvg paints `color(display-p3 …)` black; rewrite such colors as sRGB.
+        // PATCH: usvg only knows the exact spelling `currentColor` (CSS keywords are
+        // case-insensitive; Stylo serializes `currentcolor`).
         let rewritten;
-        let text = if text.contains("color(") {
-            rewritten = rewrite_css_color_functions(text);
+        let text = if text.contains("color(") || has_lowercase_currentcolor(text) {
+            rewritten = fix_current_color(&rewrite_css_color_functions(text));
             rewritten.as_str()
         } else {
             text
@@ -208,6 +210,32 @@ impl SvgImageData {
     }
 }
 
+fn has_lowercase_currentcolor(text: &str) -> bool {
+    text.as_bytes()
+        .windows(12)
+        .any(|w| w.eq_ignore_ascii_case(b"currentcolor") && w != b"currentColor")
+}
+
+/// Every ASCII-case spelling of `currentcolor` becomes `currentColor`.
+fn fix_current_color(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    let mut copied = 0;
+    while i + 12 <= bytes.len() {
+        if bytes[i..i + 12].eq_ignore_ascii_case(b"currentcolor") {
+            out.push_str(&text[copied..i]);
+            out.push_str("currentColor");
+            i += 12;
+            copied = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
 /// PATCH: replaces `color(display-p3 …)`, `color(srgb …)` and `color(srgb-linear …)` in
 /// SVG source with `rgb()`/`rgba()`, which usvg understands.
 fn rewrite_css_color_functions(text: &str) -> String {
@@ -309,5 +337,16 @@ mod color_tests {
         // Unknown spaces and malformed input stay as they are.
         assert_eq!(rewrite_css_color_functions("color(rec2020 1 0 0)"), "color(rec2020 1 0 0)");
         assert_eq!(rewrite_css_color_functions("color(display-p3 1 0"), "color(display-p3 1 0");
+    }
+
+    #[test]
+    fn current_color_spellings() {
+        use super::{fix_current_color, has_lowercase_currentcolor};
+        assert!(has_lowercase_currentcolor(r#"<rect fill="currentcolor"/>"#));
+        assert!(!has_lowercase_currentcolor(r#"<rect fill="currentColor"/>"#));
+        assert_eq!(
+            fix_current_color(r#"<a fill="CurrentColor" stroke="currentcolor">ü</a>"#),
+            r#"<a fill="currentColor" stroke="currentColor">ü</a>"#
+        );
     }
 }

@@ -134,3 +134,15 @@ Patches so far:
     while ticking Stylo's animations (`take_animation_events`) for the embedder to
     dispatch; `each_custom_state` and `implicit_scope_for_sheet_in_shadow_root` no
     longer `todo!()`-panic (reachable from `:has()` invalidation).
+45. `blitz-dom/src/node/svg.rs`, `layout/construct.rs`: SVG `currentcolor` in any spelling
+    resolves to the element's color, and paint that comes from `var()` in presentation
+    attributes is always forwarded from CSS (usvg knows neither).
+46. `taffy/src/style/mod.rs`, `compute/block.rs`, `stylo_taffy`: `position: fixed`
+    boxes no longer add to their container's scrollable overflow (a fixed `body`
+    made the page unscrollable).
+47. `blitz-dom/src/layout/inline.rs`: floats inside inline formatting contexts count
+    toward the scrollable overflow.
+48. `blitz-dom/src/node/node.rs`, `blitz-paint/src/render.rs`: absolute/fixed children
+    hoisted into an ancestor stacking context are painted and hit-tested at their real
+    position (including scroll offsets) and clipped by the overflow of the ancestors
+    between them and their containing block (carousels painted slides outside the box).

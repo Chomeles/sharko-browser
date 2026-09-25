@@ -1666,6 +1666,7 @@ fn perform_absolute_layout_on_absolute_children(
 
     for item in items.iter().filter(|item| item.position == Position::Absolute) {
         let child_style = tree.get_block_child_style(item.node_id);
+        let is_fixed = child_style.is_fixed_position();
 
         // Skip items that are display:none or are not position:absolute
         if child_style.box_generation_mode() == BoxGenerationMode::None || child_style.position() != Position::Absolute
@@ -1903,14 +1904,18 @@ fn perform_absolute_layout_on_absolute_children(
             } else {
                 Point { x: location.x - area_offset.x, y: location.y - area_offset.y }
             };
-            absolute_overflow_rect = absolute_overflow_rect.union(compute_scrollable_overflow_contribution(
-                relative_location,
-                final_size,
-                layout_output.scrollable_overflow_rect,
-                item.overflow,
-                item.contain,
-                is_scroll_container,
-            ));
+            // PATCH: fixed boxes don't scroll with this box (e.g. a `position: fixed`
+            // <body> used as a scroll lock must not make the page scrollable).
+            if !is_fixed {
+                absolute_overflow_rect = absolute_overflow_rect.union(compute_scrollable_overflow_contribution(
+                    relative_location,
+                    final_size,
+                    layout_output.scrollable_overflow_rect,
+                    item.overflow,
+                    item.contain,
+                    is_scroll_container,
+                ));
+            }
         }
     }
 

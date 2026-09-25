@@ -1093,17 +1093,13 @@ impl ElementCx<'_, '_> {
         clip_rect: Rect,
     ) {
         // Negative z_index hoisted nodes
-
         if let Some(hoisted) = &self.node.stacking_context {
             for hoisted_child in hoisted.neg_z_hoisted_children() {
-                let pos = kurbo::Vec2 {
-                    x: hoisted_child.position.x as f64 * self.scale,
-                    y: hoisted_child.position.y as f64 * self.scale,
-                };
-                self.render_node(
+                self.render_hoisted(
                     scene,
                     hoisted_child.node_id,
-                    parent_style_transform.pre_translate(pos),
+                    (hoisted_child.position.x, hoisted_child.position.y),
+                    parent_style_transform,
                     clip_rect,
                 );
             }
@@ -1119,18 +1115,62 @@ impl ElementCx<'_, '_> {
         // Positive z_index hoisted nodes
         if let Some(hoisted) = &self.node.stacking_context {
             for hoisted_child in hoisted.pos_z_hoisted_children() {
-                let pos = kurbo::Vec2 {
-                    x: hoisted_child.position.x as f64 * self.scale,
-                    y: hoisted_child.position.y as f64 * self.scale,
-                };
-                self.render_node(
+                self.render_hoisted(
                     scene,
                     hoisted_child.node_id,
-                    parent_style_transform.pre_translate(pos),
+                    (hoisted_child.position.x, hoisted_child.position.y),
+                    parent_style_transform,
                     clip_rect,
                 );
             }
         }
+    }
+
+    /// PATCH: a hoisted (z-indexed) box is placed from the current layout and scroll
+    /// offsets of the boxes between it and this stacking context root, and clipped by
+    /// their overflow clips (see `Node::hoisted_placement`).
+    fn render_hoisted(
+        &self,
+        scene: &mut impl PaintScene,
+        node_id: NodeId,
+        stored_position: (f32, f32),
+        parent_style_transform: Affine,
+        clip_rect: Rect,
+    ) {
+        let node = &self.context.dom.as_ref().tree()[node_id];
+        let (pos, clip) = node.hoisted_placement(self.node.id).unwrap_or((
+            blitz_dom::Point { x: stored_position.0, y: stored_position.1 },
+            None,
+        ));
+        let transform = parent_style_transform.pre_translate(kurbo::Vec2 {
+            x: pos.x as f64 * self.scale,
+            y: pos.y as f64 * self.scale,
+        });
+        let Some([x0, y0, x1, y1]) = clip else {
+            self.render_node(scene, node_id, transform, clip_rect);
+            return;
+        };
+        // Finite stand-ins for unclipped axes.
+        let bound = |v: f32| (v as f64 * self.scale).clamp(-1.0e7, 1.0e7);
+        let clip_box = Rect::new(bound(x0), bound(y0), bound(x1), bound(y1));
+        if clip_box.width() <= 0.0 || clip_box.height() <= 0.0 {
+            return;
+        }
+        let screen = Affine::translate(Vec2 {
+            x: -self.context.initial_x,
+            y: -self.context.initial_y,
+        }) * parent_style_transform;
+        let child_clip_rect = clip_rect.intersect(screen.transform_rect_bbox(clip_box));
+        self.context.layer_manager.maybe_with_layer(
+            scene,
+            true,
+            1.0,
+            parent_style_transform,
+            &clip_box,
+            None,
+            None,
+            |scene| self.render_node(scene, node_id, transform, child_clip_rect),
+        );
     }
 
     #[cfg(feature = "svg")]
