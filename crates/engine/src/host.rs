@@ -13,7 +13,7 @@ use netstack::NetClient;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 /// State shared between the event loop and the providers (thread-safe parts).
 pub struct Shared {
@@ -23,8 +23,11 @@ pub struct Shared {
     pub browser: IpcSender<FromRenderer>,
     /// Something requested a new frame.
     pub redraw: AtomicBool,
-    /// Blitz subresource requests in flight (stylesheets, images, fonts).
+    /// Blitz subresource requests in flight (stylesheets, images, fonts) of the current
+    /// document.
     pub pending_resources: AtomicUsize,
+    /// Bumped on navigation: requests of an earlier document no longer count.
+    pub resource_generation: AtomicU64,
     /// Last cursor sent to the browser (avoid spamming identical messages).
     pub cursor: std::sync::Mutex<Option<CursorKind>>,
 }
@@ -51,6 +54,7 @@ pub struct CountingNetProvider {
 struct CountingHandler {
     inner: Option<Box<dyn NetHandler>>,
     shared: Arc<Shared>,
+    generation: u64,
 }
 
 impl NetHandler for CountingHandler {
@@ -64,7 +68,11 @@ impl NetHandler for CountingHandler {
 
 impl Drop for CountingHandler {
     fn drop(&mut self) {
-        self.shared.pending_resources.fetch_sub(1, Ordering::SeqCst);
+        // A request of the previous document finishing after a navigation must not
+        // count against the new one (the counter wrapped and `load` never fired).
+        if self.shared.resource_generation.load(Ordering::SeqCst) == self.generation {
+            let _ = self.shared.pending_resources.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1));
+        }
         self.shared.redraw.store(true, Ordering::SeqCst);
         self.shared.wake();
     }
@@ -80,10 +88,12 @@ impl NetProvider for CountingNetProvider {
             self.shared.wake();
             return;
         }
+        let generation = self.shared.resource_generation.load(Ordering::SeqCst);
         self.shared.pending_resources.fetch_add(1, Ordering::SeqCst);
         let wrapped = Box::new(CountingHandler {
             inner: Some(handler),
             shared: self.shared.clone(),
+            generation,
         });
         self.inner.fetch(doc_id, request, wrapped);
     }

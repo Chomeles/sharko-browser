@@ -121,6 +121,7 @@ impl Renderer {
             browser,
             redraw: AtomicBool::new(false),
             pending_resources: AtomicUsize::new(0),
+            resource_generation: std::sync::atomic::AtomicU64::new(0),
             cursor: std::sync::Mutex::new(None),
         });
         Self {
@@ -626,6 +627,7 @@ impl Renderer {
             }
             drop(old);
         }
+        self.shared.resource_generation.fetch_add(1, Ordering::SeqCst);
         self.shared.pending_resources.store(0, Ordering::SeqCst);
         // New document => new resource ids on the compositor side are fine, but keep the
         // "already sent" set: fonts are shared across documents.
@@ -802,6 +804,24 @@ impl Renderer {
                         url: page.url.clone(),
                         error: None,
                     });
+                    // A URL with a #fragment scrolls to its target once the document is
+                    // parsed (unless the page scrolled itself already).
+                    let fragment = url::Url::parse(&page.url)
+                        .ok()
+                        .and_then(|u| u.fragment().filter(|f| !f.is_empty()).map(str::to_string));
+                    if let Some(fragment) = fragment
+                        && page.doc.viewport_scroll() == blitz_dom::Point::ZERO
+                    {
+                        page.doc.resolve(script::animation_time());
+                        if page.doc.scroll_to_fragment(&fragment)
+                            && page.doc.viewport_scroll() != blitz_dom::Point::ZERO
+                        {
+                            if let Some(rt) = page.rt.as_mut() {
+                                rt.scrolled(&mut page.doc);
+                            }
+                            self.shared.redraw.store(true, Ordering::SeqCst);
+                        }
+                    }
                 }
                 if std::env::var_os("BROWSER_DEBUG_LOAD").is_some()
                     && page.created.elapsed().as_millis() % 1000 < 45

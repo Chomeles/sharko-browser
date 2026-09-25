@@ -1799,75 +1799,74 @@ impl BaseDocument {
         // semantics): state is captured at most once, and attributes are captured at most
         // once, but a state-only snapshot is upgraded to also capture attributes if an
         // attribute mutation follows.
-        let needs_attrs = capture_attrs
-            && self
-                .snapshots
-                .get_mut(&opaque_node_id)
-                .is_none_or(|snapshot| snapshot.attrs.is_none());
+        // PATCH: every snapshot carries the attributes. Stylo's stylesheet invalidation
+        // reads the snapshot's classes whenever an element has one, also for state-only
+        // snapshots (hover), and unwrapped `attrs: None` (renderer panic when a <style>
+        // was inserted after a hover).
+        let copy_attrs = self
+            .snapshots
+            .get_mut(&opaque_node_id)
+            .is_none_or(|snapshot| snapshot.attrs.is_none());
 
-        let (attrs, changed_attrs) = if needs_attrs {
+        let attrs = if copy_attrs {
             let node = &self.nodes[node_id];
-            let attrs: Option<Vec<_>> = node.attrs().map(|attrs| {
-                attrs
-                    .iter()
-                    .map(|attr| {
-                        let ident = AttrIdentifier {
-                            local_name: GenericAtomIdent(attr.name.local.clone()),
-                            name: GenericAtomIdent(attr.name.local.clone()),
-                            namespace: GenericAtomIdent(attr.name.ns.clone()),
-                            prefix: None,
-                        };
+            Some(
+                node.attrs()
+                    .map(|attrs| {
+                        attrs
+                            .iter()
+                            .map(|attr| {
+                                let ident = AttrIdentifier {
+                                    local_name: GenericAtomIdent(attr.name.local.clone()),
+                                    name: GenericAtomIdent(attr.name.local.clone()),
+                                    namespace: GenericAtomIdent(attr.name.ns.clone()),
+                                    prefix: None,
+                                };
 
-                        let value = if attr.name.local == local_name!("id") {
-                            AttrValue::Atom(Atom::from(&*attr.value))
-                        } else if attr.name.local == local_name!("class") {
-                            let classes = attr
-                                .value
-                                .split_ascii_whitespace()
-                                .map(Atom::from)
-                                .collect();
-                            AttrValue::TokenList(OnceLock::from(attr.value.clone()), classes)
-                        } else {
-                            AttrValue::String(attr.value.clone())
-                        };
+                                let value = if attr.name.local == local_name!("id") {
+                                    AttrValue::Atom(Atom::from(&*attr.value))
+                                } else if attr.name.local == local_name!("class") {
+                                    let classes = attr
+                                        .value
+                                        .split_ascii_whitespace()
+                                        .map(Atom::from)
+                                        .collect();
+                                    AttrValue::TokenList(OnceLock::from(attr.value.clone()), classes)
+                                } else {
+                                    AttrValue::String(attr.value.clone())
+                                };
 
-                        (ident, value)
+                                (ident, value)
+                            })
+                            .collect()
                     })
-                    .collect()
-            });
+                    .unwrap_or_default(),
+            )
+        } else {
+            None
+        };
 
-            let changed_attrs: Vec<_> = attrs
+        let snapshot = self
+            .snapshots
+            .entry(opaque_node_id)
+            .or_insert_with(|| ServoElementSnapshot {
+                // The state before the *first* change since the last style flush.
+                state: Some(*self.nodes[node_id].element_state()),
+                ..Default::default()
+            });
+        if let Some(attrs) = attrs {
+            snapshot.attrs = Some(attrs);
+        }
+        if capture_attrs && !snapshot.other_attributes_changed {
+            // An attribute mutation follows: every attribute may have changed.
+            snapshot.changed_attrs = snapshot
+                .attrs
                 .as_ref()
                 .map(|attrs| attrs.iter().map(|attr| attr.0.name.clone()).collect())
                 .unwrap_or_default();
-
-            (attrs, changed_attrs)
-        } else {
-            (None, Vec::new())
-        };
-
-        if let Some(snapshot) = self.snapshots.get_mut(&opaque_node_id) {
-            // The existing snapshot's state is preserved: it records the state before
-            // the *first* change since the last style flush.
-            if needs_attrs {
-                snapshot.attrs = attrs;
-                snapshot.changed_attrs = changed_attrs;
-                snapshot.class_changed = true;
-                snapshot.id_changed = true;
-                snapshot.other_attributes_changed = true;
-            }
-        } else {
-            self.snapshots.insert(
-                opaque_node_id,
-                ServoElementSnapshot {
-                    state: Some(*self.nodes[node_id].element_state()),
-                    attrs,
-                    changed_attrs,
-                    class_changed: needs_attrs,
-                    id_changed: needs_attrs,
-                    other_attributes_changed: needs_attrs,
-                },
-            );
+            snapshot.class_changed = true;
+            snapshot.id_changed = true;
+            snapshot.other_attributes_changed = true;
         }
     }
 

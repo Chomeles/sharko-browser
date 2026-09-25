@@ -406,7 +406,8 @@ mod tests {
     fn group_rules_and_statements() {
         assert_eq!(
             s("@import url(x.css);@media (min-width: 10px){a{b:c}}@keyframes k{from{a:b}}"),
-            format!("@import url(x.css);@media (min-width: 10px){{{H} a{{b:c}}}}@keyframes k{{from{{a:b}}}}")
+            // `@import` is dropped: imported rules could not be scoped.
+            format!("@media (min-width: 10px){{{H} a{{b:c}}}}@keyframes k{{from{{a:b}}}}")
         );
         assert_eq!(s("@font-face{font-family:x}"), "@font-face{font-family:x}");
         assert_eq!(s("@supports (x:y){:host{a:b}}"), format!("@supports (x:y){{{H}{{a:b}}}}"));
