@@ -68,9 +68,24 @@ pub struct ScriptRuntime {
     watchdog: Watchdog,
     timeout: Duration,
     stats: StartupStats,
+    /// The isolate is entered only while the runtime runs (see [`ScriptRuntime::new_frame`]).
+    detached: bool,
 }
 
 impl ScriptRuntime {
+    /// A runtime for an iframe's document (`window.parent` is another window). Unlike
+    /// [`ScriptRuntime::new`] its isolate is not left entered: V8 requires entered
+    /// isolates to be dropped in reverse order of creation, and iframes come and go
+    /// while the page's runtime lives on. It is entered around every call instead.
+    pub fn new_frame(host: Rc<dyn ScriptHost>, opts: RuntimeOptions) -> Self {
+        let mut rt = Self::new(host, opts);
+        rt.state.is_frame.set(true);
+        // SAFETY: the isolate was entered by its creation and is the current one.
+        unsafe { rt.isolate.exit() };
+        rt.detached = true;
+        rt
+    }
+
     /// Create the isolate and context, install `__native` and (optionally) run the JS
     /// layer — or deserialize a context in which it already ran (see `snapshot.rs`).
     /// Initializes V8 on first use in the process.
@@ -155,6 +170,7 @@ impl ScriptRuntime {
             watchdog,
             timeout: SCRIPT_TIMEOUT,
             stats: StartupStats::default(),
+            detached: false,
         };
         rt.stats.context_setup = t0.elapsed() - t_snapshot;
 
@@ -211,6 +227,10 @@ impl ScriptRuntime {
         doc: *mut BaseDocument,
         f: impl FnOnce(&mut v8::PinScope, &RuntimeState) -> R,
     ) -> R {
+        if self.detached {
+            // SAFETY: balanced by the `exit` below; re-entering is allowed.
+            unsafe { self.isolate.enter() };
+        }
         let st = self.state.clone();
         let prev = st.set_doc(doc);
         let depth = st.depth.get();
@@ -246,6 +266,10 @@ impl ScriptRuntime {
         }
         st.depth.set(depth);
         st.restore_doc(prev);
+        if self.detached {
+            // SAFETY: entered above, so it is the current isolate.
+            unsafe { self.isolate.exit() };
+        }
         r
     }
 
@@ -391,6 +415,30 @@ impl ScriptRuntime {
     /// `onWebSocket(id, kind, ...)` with kind `open` (protocol, extensions), `message`
     /// (string or ArrayBuffer), `sent` (bytes), `error` (message) or `close` (code,
     /// reason, wasClean).
+    /// A `postMessage` from another frame's window: `source` is `None` for the parent
+    /// window, else the node id (`NodeId::as_u64`) of the `<iframe>` in this document it
+    /// came from; `origin` is the sender's origin and `data` the serialized message.
+    pub fn deliver_message(
+        &mut self,
+        doc: &mut BaseDocument,
+        source: Option<u64>,
+        origin: &str,
+        data: &[u8],
+    ) {
+        let ptr = doc as *mut BaseDocument;
+        self.enter(ptr, |scope, st| {
+            let Some(value) = crate::natives::deserialize_message(scope, data) else {
+                return;
+            };
+            let source = match source.and_then(|s| cx::node_id_to_js(NodeId::from_u64(s))) {
+                Some(id) => cx::num_value(scope, id),
+                None => v8::null(scope).into(),
+            };
+            let origin = v8_str(scope, origin).into();
+            call_hook(scope, st, Hook::Message, &[source, origin, value]);
+        });
+    }
+
     pub fn deliver_ws(&mut self, doc: &mut BaseDocument, id: u64, event: common::protocol::WsEvent) {
         use common::protocol::{WsData, WsEvent};
         let ptr = doc as *mut BaseDocument;
@@ -620,6 +668,11 @@ impl ScriptRuntime {
 
 impl Drop for ScriptRuntime {
     fn drop(&mut self) {
+        if self.detached {
+            // Dropping an `OwnedIsolate` exits it and requires it to be the current one.
+            // SAFETY: not entered otherwise (see `new_frame`).
+            unsafe { self.isolate.enter() };
+        }
         self.state.storage.borrow_mut().flush();
         for url in self.state.blob_urls.borrow_mut().drain(..) {
             crate::blob::revoke(&url);

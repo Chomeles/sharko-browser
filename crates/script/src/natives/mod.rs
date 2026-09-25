@@ -8,7 +8,7 @@ mod tree;
 use crate::cx::{Cx, JsErr, NResult};
 use crate::state::RuntimeState;
 
-pub(crate) use misc::{format_number, register_hooks};
+pub(crate) use misc::{deserialize_message, format_number, register_hooks};
 
 type NativeImpl = fn(&mut Cx<'_, '_, '_>) -> NResult;
 
@@ -249,6 +249,8 @@ natives_table! {
     "urlParse" => misc::n_url_parse,
     "urlSet" => misc::n_url_set,
     "randomBytes" => misc::n_random_bytes,
+    "isFrame" => misc::n_is_frame,
+    "framePost" => misc::n_frame_post,
     "cryptoDigest" => crypto::n_crypto_digest,
     "cryptoHmac" => crypto::n_crypto_hmac,
     "cryptoAes" => crypto::n_crypto_aes,

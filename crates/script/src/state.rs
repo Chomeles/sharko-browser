@@ -61,10 +61,11 @@ pub(crate) enum Hook {
     WebSocket,
     FetchProgress,
     AnimationEvent,
+    Message,
 }
 
 impl Hook {
-    pub(crate) const ALL: [Hook; 17] = [
+    pub(crate) const ALL: [Hook; 18] = [
         Hook::DocumentParsed,
         Hook::Event,
         Hook::Timer,
@@ -82,6 +83,7 @@ impl Hook {
         Hook::WebSocket,
         Hook::FetchProgress,
         Hook::AnimationEvent,
+        Hook::Message,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -103,6 +105,7 @@ impl Hook {
             Hook::WebSocket => "onWebSocket",
             Hook::FetchProgress => "onFetchProgress",
             Hook::AnimationEvent => "onAnimationEvent",
+            Hook::Message => "onMessage",
         }
     }
 }
@@ -110,7 +113,7 @@ impl Hook {
 #[derive(Default)]
 pub(crate) struct Hooks {
     pub(crate) obj: Option<v8::Global<v8::Object>>,
-    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 17],
+    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 18],
 }
 
 impl Hooks {
@@ -241,6 +244,8 @@ pub(crate) struct RuntimeState {
     pub(crate) snapshotting: Cell<bool>,
     /// First native called during snapshot creation that is not snapshot-safe.
     pub(crate) snapshot_taint: Cell<Option<&'static str>>,
+    /// The document is an iframe's (`window.parent` is another window).
+    pub(crate) is_frame: Cell<bool>,
 }
 
 impl RuntimeState {
@@ -298,6 +303,7 @@ impl RuntimeState {
             in_checkpoint: Cell::new(false),
             snapshotting: Cell::new(false),
             snapshot_taint: Cell::new(None),
+            is_frame: Cell::new(false),
         }
     }
 

@@ -161,3 +161,10 @@ Patches so far:
 52. `blitz-dom/src/resolve.rs`: transform resolution never skips anonymous blocks (their
     damage isn't tracked): animated inline-blocks next to blocks kept the transform of
     their first keyframe, so e.g. `scale(0)` spinners stayed invisible.
+53. `blitz-dom/src/layout/damage.rs`: children hoisted into a stacking context are
+    collected in (order-modified) tree order, so equal z-indexes paint in document
+    order; descendants used to come before direct children (a consent dialog's backdrop
+    covered the dialog).
+54. `blitz-dom/src/node/node.rs`: hit testing always tries a stacking context's hoisted
+    children; its `content_area` is computed before layout and was stale or empty, so
+    z-indexed boxes nested in another stacking context could not be clicked.

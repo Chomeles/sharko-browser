@@ -165,7 +165,9 @@ and reports differences (for layout development).
 
 - No `<canvas>` drawing, video/audio, WebGL yet; Web Workers run on the page's thread
   (no parallelism yet, no module workers or SharedWorker)
-- iframes render but run no JavaScript; Shadow DOM is emulated (styles are scoped,
+- iframes run JavaScript in their own runtime and talk to the page with `postMessage`
+  (enough for consent dialogs); the page can't reach into same-origin iframes yet and
+  iframes inside iframes run no script; Shadow DOM is emulated (styles are scoped,
   declarative shadow roots work, but the shadow tree is part of the normal DOM);
   `position: sticky` only vertically
 - Web Crypto covers SHA, HMAC, AES (GCM/CBC/CTR/KW), PBKDF2 and HKDF; no ECDSA, ECDH,

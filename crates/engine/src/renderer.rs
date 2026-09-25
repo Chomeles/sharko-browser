@@ -10,9 +10,9 @@
 //! ```
 
 use crate::decode::{self, DocKind};
-use crate::host::{CountingNetProvider, NavProvider, RendererHost, Shared, Shell};
+use crate::host::{CountingNetProvider, FrameMessage, NavProvider, RendererHost, Shared, Shell};
 use crate::input::to_ui_event;
-use blitz_dom::{BaseDocument, DocumentConfig, EventDriver, FontContext, NoopEventHandler};
+use blitz_dom::{BaseDocument, DocumentConfig, EventDriver, FontContext, NodeId, NoopEventHandler};
 use blitz_html::HtmlDocument;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use common::display_list::{DisplayListRecorder, SentResources};
@@ -38,12 +38,13 @@ pub enum LoopMsg {
     Browser(Option<ToRenderer>),
     /// Main document response for navigation `generation`.
     Document { generation: u64, resp: NetResponse },
-    /// Response to a script-initiated fetch.
-    ScriptFetch { generation: u64, resp: NetResponse },
+    /// Response to a script-initiated fetch (`frame`: of an iframe's document, see
+    /// `RendererHost::frame`).
+    ScriptFetch { generation: u64, frame: Option<u64>, resp: NetResponse },
     /// Upload/download progress of a script-initiated fetch.
-    ScriptFetchProgress { generation: u64, id: u64, loaded: u64, total: u64, upload: bool },
+    ScriptFetchProgress { generation: u64, frame: Option<u64>, id: u64, loaded: u64, total: u64, upload: bool },
     /// Event of a page's WebSocket (`id` is the script's socket id).
-    ScriptWs { generation: u64, id: u64, event: common::protocol::WsEvent },
+    ScriptWs { generation: u64, frame: Option<u64>, id: u64, event: common::protocol::WsEvent },
     /// Something happened on another thread (subresource loaded, redraw requested).
     Wake,
 }
@@ -56,10 +57,51 @@ const LOADING_FRAME_INTERVAL: Duration = Duration::from_millis(100);
 /// Don't paint an unstyled page while render-blocking stylesheets load (like browsers),
 /// but give up waiting after this long.
 const RENDER_BLOCK_TIMEOUT: Duration = Duration::from_secs(4);
+/// At most this many iframes of a page run script (each has its own V8 isolate).
+const MAX_FRAME_RUNTIMES: usize = 12;
+/// An iframe's `load` event waits for its document's scripts to load, at most this long.
+const FRAME_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The script runtime of an iframe's document (a direct child of the page).
+struct FrameCtx {
+    rt: ScriptRuntime,
+    host: Rc<RendererHost>,
+    /// `Document::id` of the sub-document it runs (a new one replaces the runtime).
+    doc_id: usize,
+    origin: String,
+    created: Instant,
+    last_ready_check: Instant,
+    /// The document fired `load` (the `<iframe>`'s `load` then fires in the page).
+    loaded: bool,
+}
+
+/// The sub-document of the `<iframe>` `node` of `doc`.
+fn subdoc_mut(doc: &mut BaseDocument, node: NodeId) -> Option<blitz_dom::DocGuardMut<'_>> {
+    doc.get_node_mut(node)?.subdoc_mut().map(|d| d.inner_mut())
+}
+
+fn origin_of(url: &str) -> String {
+    url::Url::parse(url)
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_else(|_| "null".into())
+}
 
 struct Page {
     doc: BaseDocument,
     rt: Option<ScriptRuntime>,
+    /// Runtimes of iframe documents by `<iframe>` node (`NodeId::as_u64`). Declared after
+    /// `rt`: the page's isolate must be dropped first (see `ScriptRuntime::new_frame`).
+    frames: HashMap<u64, FrameCtx>,
+    /// Sub-documents (`<iframe>` node, `Document::id`) found to run no script.
+    scriptless_frames: std::collections::HashSet<(u64, usize)>,
+    /// `<iframe>`s whose `load` event waits for their document's `load`.
+    deferred_iframe_loads: Vec<NodeId>,
+    /// `postMessage`s between the page and its iframes, not yet delivered.
+    messages: Rc<RefCell<Vec<FrameMessage>>>,
+    /// The iframe (with a runtime) that has the focus: keyboard input goes to it.
+    focused_frame: Option<u64>,
+    /// The iframe a mouse button went down in: pointer events go to it until release.
+    pointer_frame: Option<u64>,
     host: Rc<RendererHost>,
     url: String,
     generation: u64,
@@ -212,6 +254,7 @@ impl Renderer {
         let Some(page) = &self.page else { return false };
         self.shared.redraw.load(Ordering::SeqCst)
             || page.rt.as_ref().is_some_and(|rt| rt.wants_frame())
+            || page.frames.values().any(|f| f.rt.wants_frame())
             || page.doc.is_animating()
             || self.pending_capture.is_some()
     }
@@ -227,6 +270,17 @@ impl Renderer {
         if let Some(page) = &self.page {
             if let Some(t) = page.rt.as_ref().and_then(|rt| rt.next_timer_deadline()) {
                 min(t);
+            }
+            for f in page.frames.values() {
+                if let Some(t) = f.rt.next_timer_deadline() {
+                    min(t);
+                }
+                if !f.loaded {
+                    min(Instant::now() + Duration::from_millis(50));
+                }
+            }
+            if !page.messages.borrow().is_empty() {
+                min(Instant::now());
             }
             if !page.load_sent {
                 min(Instant::now() + Duration::from_millis(50));
@@ -269,7 +323,17 @@ impl Renderer {
                     self.commit_navigation(resp);
                 }
             }
-            LoopMsg::ScriptFetch { generation, resp } => {
+            LoopMsg::ScriptFetch { generation, frame: Some(frame), resp } => {
+                if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
+                    && let Some(f) = page.frames.get_mut(&frame)
+                {
+                    f.host.inflight.borrow_mut().remove(&resp.id);
+                    if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(frame)) {
+                        f.rt.deliver_fetch(&mut sub, resp);
+                    }
+                }
+            }
+            LoopMsg::ScriptFetch { generation, frame: None, resp } => {
                 if let Some(page) = &mut self.page {
                     if page.generation == generation {
                         page.host.inflight.borrow_mut().remove(&resp.id);
@@ -279,7 +343,15 @@ impl Renderer {
                     }
                 }
             }
-            LoopMsg::ScriptFetchProgress { generation, id, loaded, total, upload } => {
+            LoopMsg::ScriptFetchProgress { generation, frame: Some(frame), id, loaded, total, upload } => {
+                if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
+                    && let Some(f) = page.frames.get_mut(&frame)
+                    && let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(frame))
+                {
+                    f.rt.deliver_fetch_progress(&mut sub, id, loaded, total, upload);
+                }
+            }
+            LoopMsg::ScriptFetchProgress { generation, frame: None, id, loaded, total, upload } => {
                 if let Some(page) = &mut self.page {
                     if page.generation == generation {
                         if let Some(rt) = page.rt.as_mut() {
@@ -288,7 +360,19 @@ impl Renderer {
                     }
                 }
             }
-            LoopMsg::ScriptWs { generation, id, event } => {
+            LoopMsg::ScriptWs { generation, frame: Some(frame), id, event } => {
+                if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
+                    && let Some(f) = page.frames.get_mut(&frame)
+                {
+                    if matches!(event, common::protocol::WsEvent::Closed { .. }) {
+                        f.host.sockets.borrow_mut().remove(&id);
+                    }
+                    if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(frame)) {
+                        f.rt.deliver_ws(&mut sub, id, event);
+                    }
+                }
+            }
+            LoopMsg::ScriptWs { generation, frame: None, id, event } => {
                 if let Some(page) = &mut self.page {
                     if page.generation == generation {
                         if matches!(event, common::protocol::WsEvent::Closed { .. }) {
@@ -446,8 +530,10 @@ impl Renderer {
             }
             _ => {}
         }
-        if let Some(ui) = to_ui_event(&ev, scroll) {
-            dispatch(page, ui);
+        if !route_to_frame(page, &ev) {
+            if let Some(ui) = to_ui_event(&ev, scroll) {
+                dispatch(page, ui);
+            }
         }
 
         // Cursor
@@ -642,6 +728,7 @@ impl Renderer {
         doc.set_parser_done();
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
+        let messages = Rc::new(RefCell::new(Vec::new()));
         let host = Rc::new(RendererHost {
             shared: self.shared.clone(),
             net: self.net.clone(),
@@ -652,11 +739,20 @@ impl Renderer {
             verbose_console: self.config.verbose_console,
             title: RefCell::new(String::new()),
             history: Cell::new((0, 1)),
+            frame: None,
+            origin: origin_of(url),
+            messages: messages.clone(),
         });
 
         let mut page = Page {
             doc,
             rt: None,
+            frames: HashMap::new(),
+            scriptless_frames: Default::default(),
+            deferred_iframe_loads: Vec::new(),
+            messages,
+            focused_frame: None,
+            pointer_frame: None,
             host: host.clone(),
             url: url.to_string(),
             generation: self.generation,
@@ -743,6 +839,12 @@ impl Renderer {
 
     fn tick(&mut self) {
         let now = Instant::now();
+        // Iframe documents attached since the last tick get their runtimes (and run their
+        // scripts) before the page hears of their `load`.
+        if let Some(page) = &mut self.page {
+            page.doc.handle_messages();
+        }
+        self.sync_frames();
         if let Some(page) = &mut self.page {
             // Timers
             if let Some(rt) = page.rt.as_mut() {
@@ -763,6 +865,12 @@ impl Renderer {
             if !events.is_empty() {
                 if let Some(rt) = page.rt.as_mut() {
                     for (node, ok) in events {
+                        // An iframe whose document runs script loads when that document
+                        // does.
+                        if ok && page.frames.get(&node.as_u64()).is_some_and(|f| !f.loaded) {
+                            page.deferred_iframe_loads.push(node);
+                            continue;
+                        }
                         rt.element_event(&mut page.doc, node, if ok { "load" } else { "error" });
                     }
                 }
@@ -851,8 +959,183 @@ impl Renderer {
             }
         }
 
+        self.tick_frames();
+        self.deliver_frame_messages();
+
         if self.needs_frame() && now >= self.last_frame + self.frame_interval() {
             self.produce_frame();
+        }
+    }
+
+    /// Create runtimes for new iframe documents that run script (and drop those of
+    /// documents that went away).
+    fn sync_frames(&mut self) {
+        let Some(page) = &mut self.page else { return };
+        if !page.frames.is_empty() {
+            let stale: Vec<u64> = page
+                .frames
+                .iter()
+                .filter(|(key, f)| {
+                    page.doc
+                        .get_node_mut(NodeId::from_u64(**key))
+                        .and_then(|n| n.subdoc_mut())
+                        .map(|d| d.id())
+                        != Some(f.doc_id)
+                })
+                .map(|(key, _)| *key)
+                .collect();
+            for key in stale {
+                page.frames.remove(&key);
+            }
+        }
+        if !self.config.javascript {
+            return;
+        }
+        for node in page.doc.sub_document_node_ids() {
+            let key = node.as_u64();
+            if page.frames.contains_key(&key) || page.frames.len() >= MAX_FRAME_RUNTIMES {
+                continue;
+            }
+            let Some(mut sub) = subdoc_mut(&mut page.doc, node) else { continue };
+            let doc_id = blitz_dom::Document::id(&*sub);
+            if page.scriptless_frames.contains(&(key, doc_id)) {
+                continue;
+            }
+            if !document_uses_script(&sub) {
+                page.scriptless_frames.insert((key, doc_id));
+                continue;
+            }
+            let url = sub.url().to_string();
+            let host = Rc::new(RendererHost {
+                shared: self.shared.clone(),
+                net: self.net.clone(),
+                generation: page.generation,
+                inflight: RefCell::new(HashMap::new()),
+                sockets: RefCell::new(HashMap::new()),
+                referrer: page.url.clone(),
+                verbose_console: self.config.verbose_console,
+                title: RefCell::new(String::new()),
+                history: Cell::new((0, 1)),
+                frame: Some(key),
+                origin: origin_of(&url),
+                messages: page.messages.clone(),
+            });
+            let mut rt = ScriptRuntime::new_frame(
+                host.clone(),
+                RuntimeOptions {
+                    document_url: url.clone(),
+                    user_agent: self.config.user_agent.clone(),
+                    profile_dir: self.config.profile_dir.clone(),
+                    load_js_layer: true,
+                },
+            );
+            if std::env::var_os("SHARKO_DEBUG_FRAMES").is_some() {
+                eprintln!("[frames] script runtime for iframe document {url}");
+            }
+            sub.add_user_agent_stylesheet("noscript { display: none !important; }");
+            rt.document_parsed(&mut sub);
+            page.frames.insert(
+                key,
+                FrameCtx {
+                    rt,
+                    host,
+                    doc_id,
+                    origin: origin_of(&url),
+                    created: Instant::now(),
+                    last_ready_check: Instant::now(),
+                    loaded: false,
+                },
+            );
+            self.shared.redraw.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Timers, subresource events and load state of the iframe documents' runtimes.
+    fn tick_frames(&mut self) {
+        let Some(page) = &mut self.page else { return };
+        if page.frames.is_empty() {
+            return;
+        }
+        let pending = self.shared.pending_resources.load(Ordering::SeqCst);
+        let mut loaded = Vec::new();
+        for (&key, f) in page.frames.iter_mut() {
+            let node = NodeId::from_u64(key);
+            let Some(mut sub) = subdoc_mut(&mut page.doc, node) else { continue };
+            if f.rt.next_timer_deadline().is_some_and(|d| d <= Instant::now()) {
+                f.rt.run_timers(&mut sub);
+                self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+            sub.handle_messages();
+            for (n, ok) in sub.take_element_load_events() {
+                f.rt.element_event(&mut sub, n, if ok { "load" } else { "error" });
+                self.shared.redraw.store(true, Ordering::SeqCst);
+            }
+            let animation_events = sub.take_animation_events();
+            if !animation_events.is_empty() {
+                f.rt.animation_events(&mut sub, animation_events);
+            }
+            if !f.loaded && f.last_ready_check.elapsed() >= Duration::from_millis(40) {
+                f.last_ready_check = Instant::now();
+                if pending == 0 {
+                    f.rt.resources_loaded(&mut sub);
+                }
+                let ready = f.rt.eval(&mut sub, "document.readyState").unwrap_or_default();
+                // Its own `load` fired (the resource count is the whole tab's, and the
+                // page may keep loading).
+                if ready.contains("complete") || f.created.elapsed() > FRAME_LOAD_TIMEOUT
+                {
+                    f.loaded = true;
+                    loaded.push(node);
+                }
+            }
+        }
+        if !loaded.is_empty() {
+            let deferred = std::mem::take(&mut page.deferred_iframe_loads);
+            for node in deferred {
+                if loaded.contains(&node) {
+                    if let Some(rt) = page.rt.as_mut() {
+                        rt.element_event(&mut page.doc, node, "load");
+                    }
+                } else {
+                    page.deferred_iframe_loads.push(node);
+                }
+            }
+        }
+    }
+
+    /// Deliver the `postMessage`s between the page and its iframes (also those posted
+    /// while delivering, a bounded number of rounds per tick).
+    fn deliver_frame_messages(&mut self) {
+        let Some(page) = &mut self.page else { return };
+        let page_origin = page.host.origin.clone();
+        for _ in 0..8 {
+            let messages = std::mem::take(&mut *page.messages.borrow_mut());
+            if messages.is_empty() {
+                return;
+            }
+            self.shared.redraw.store(true, Ordering::SeqCst);
+            for m in messages {
+                match (m.from, m.to) {
+                    (None, Some(to)) => {
+                        let Some(f) = page.frames.get_mut(&to) else { continue };
+                        if m.target_origin != "*" && m.target_origin != f.origin {
+                            continue;
+                        }
+                        if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(to)) {
+                            f.rt.deliver_message(&mut sub, None, &m.origin, &m.data);
+                        }
+                    }
+                    (Some(from), None) => {
+                        if m.target_origin != "*" && m.target_origin != page_origin {
+                            continue;
+                        }
+                        if let Some(rt) = page.rt.as_mut() {
+                            rt.deliver_message(&mut page.doc, Some(from), &m.origin, &m.data);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -867,6 +1150,14 @@ impl Renderer {
             if rt.wants_frame() {
                 let ts = page.created.elapsed().as_secs_f64() * 1000.0;
                 rt.run_frame(&mut page.doc, ts);
+            }
+        }
+        for (&key, f) in page.frames.iter_mut() {
+            if f.rt.wants_frame() {
+                let ts = f.created.elapsed().as_secs_f64() * 1000.0;
+                if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(key)) {
+                    f.rt.run_frame(&mut sub, ts);
+                }
             }
         }
 
@@ -1059,6 +1350,96 @@ fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {
             driver.handle_ui_event(ui);
         }
     }
+}
+
+/// The content-box origin of the `<iframe>` `key` in client coordinates.
+fn frame_origin(page: &Page, key: u64) -> Option<(f32, f32)> {
+    let node = NodeId::from_u64(key);
+    let rect = page.doc.get_client_bounding_rect(node)?;
+    let l = page.doc.get_node(node)?.final_layout();
+    Some((
+        rect.x as f32 + l.border.left + l.padding.left,
+        rect.y as f32 + l.border.top + l.padding.top,
+    ))
+}
+
+/// The iframe running script under the client point (x, y).
+fn frame_at(page: &Page, x: f32, y: f32) -> Option<u64> {
+    if page.frames.is_empty() {
+        return None;
+    }
+    let hit = page.doc.hit(x, y)?;
+    let key = hit.node_id.as_u64();
+    page.frames.contains_key(&key).then_some(key)
+}
+
+/// Send input over (or captured by, or focused in) an iframe that runs script to its
+/// document. Returns whether the page must not see the event.
+fn route_to_frame(page: &mut Page, ev: &InputEvent) -> bool {
+    if page.frames.is_empty() {
+        page.focused_frame = None;
+        page.pointer_frame = None;
+        return false;
+    }
+    let (key, local) = match ev {
+        InputEvent::MouseMove { x, y, .. }
+        | InputEvent::MouseDown { x, y, .. }
+        | InputEvent::MouseUp { x, y, .. }
+        | InputEvent::Wheel { x, y, .. } => {
+            let captured = page
+                .pointer_frame
+                .filter(|_| !matches!(ev, InputEvent::Wheel { .. }));
+            let key = captured.or_else(|| frame_at(page, *x, *y));
+            if matches!(ev, InputEvent::MouseDown { .. }) {
+                page.focused_frame = key;
+                page.pointer_frame = key;
+            }
+            let Some(key) = key else { return false };
+            let Some((ox, oy)) = frame_origin(page, key) else { return false };
+            (key, Some((*x - ox, *y - oy)))
+        }
+        InputEvent::KeyDown { .. }
+        | InputEvent::KeyUp { .. }
+        | InputEvent::ImePreedit { .. }
+        | InputEvent::ImeCommit(_) => match page.focused_frame {
+            Some(key) => (key, None),
+            None => return false,
+        },
+        _ => return false,
+    };
+    if matches!(ev, InputEvent::MouseUp { .. }) {
+        page.pointer_frame = None;
+    }
+    let Some(f) = page.frames.get_mut(&key) else { return false };
+    let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(key)) else { return false };
+    // Wheel scrolling only goes to a document that can scroll.
+    if matches!(ev, InputEvent::Wheel { .. }) {
+        let root = sub.try_root_element().map(|r| (r.scroll_height(), r.final_layout().size.height));
+        let vh = sub.viewport().window_size.1 as f32 / sub.viewport().scale();
+        if !root.is_some_and(|(sh, h)| sh.max(h) > vh + 1.0) {
+            return false;
+        }
+    }
+    let mut local_ev = ev.clone();
+    if let Some((lx, ly)) = local {
+        match &mut local_ev {
+            InputEvent::MouseMove { x, y, .. }
+            | InputEvent::MouseDown { x, y, .. }
+            | InputEvent::MouseUp { x, y, .. }
+            | InputEvent::Wheel { x, y, .. } => {
+                *x = lx;
+                *y = ly;
+            }
+            _ => {}
+        }
+    }
+    let s = sub.viewport_scroll();
+    if let Some(ui) = to_ui_event(&local_ev, (s.x, s.y)) {
+        let mut driver = EventDriver::new(&mut *sub, JsEventHandler { runtime: &mut f.rt });
+        driver.handle_ui_event(ui);
+    }
+    // Moves also reach the page (hover of the <iframe> element).
+    !matches!(ev, InputEvent::MouseMove { .. })
 }
 
 /// Whether a document can run script: script elements, inline event handlers or

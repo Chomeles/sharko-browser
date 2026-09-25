@@ -566,3 +566,64 @@ fn js_layer_web_crypto() {
         r#"["f5b251874e90c050b5106b700646beb4","Hello,","OperationError","a270d36291d79755","632c2812e46d4604","402e800b29584d63","[object CryptoKey]",256]"#
     );
 }
+
+/// An iframe document's runtime (`ScriptRuntime::new_frame`) next to the page's: `parent`
+/// and `contentWindow` are remote windows, `postMessage` goes both ways (structured clone,
+/// origin, `source` identity), and the runtimes can be dropped in any order.
+#[test]
+fn js_layer_frame_runtimes() {
+    use std::rc::Rc;
+    let mut page = js_env(
+        r#"<!DOCTYPE html><html><body><iframe id="f" src="https://frame.example/x.html"></iframe></body></html>"#,
+    );
+    let iframe = page.doc.get_element_by_id("f").unwrap().as_u64();
+    let frame_host = Rc::new(common::MockHost::default());
+    let mut opts = common::options(PathBuf::new(), true);
+    opts.document_url = "https://frame.example/x.html".into();
+    let mut frame = script::ScriptRuntime::new_frame(frame_host.clone(), opts.clone());
+    let mut frame_doc = common::make_doc("<!DOCTYPE html><html><body>child</body></html>");
+
+    // frame -> page
+    let r = frame
+        .eval(
+            &mut frame_doc,
+            "parent.postMessage({ a: [1, 2], d: new Date(5) }, '*'); \
+             [parent !== window, top === parent, String(parent), window.parent.window === parent]",
+        )
+        .unwrap();
+    assert_eq!(r, r#"[true,true,"[object Window]",true]"#);
+    let (target, target_origin, data) = frame_host.posted.borrow_mut().pop().unwrap();
+    assert_eq!((target, target_origin.as_str()), (None, "*"));
+    page.eval(
+        "globalThis.got = []; addEventListener('message', (e) => got.push([e.data.a.join(), \
+         e.data.d.getTime(), e.origin, e.source === document.getElementById('f').contentWindow])); 1",
+    );
+    page.rt
+        .deliver_message(&mut page.doc, Some(iframe), "https://frame.example", &data);
+    assert_eq!(page.eval("got"), r#"[["1,2",5,"https://frame.example",true]]"#);
+
+    // page -> frame
+    page.eval("document.getElementById('f').contentWindow.postMessage('hi', 'https://frame.example/y'); 1");
+    let (target, target_origin, data) = page.host.posted.borrow_mut().pop().unwrap();
+    assert_eq!((target, target_origin.as_str()), (Some(iframe), "https://frame.example"));
+    frame
+        .eval(&mut frame_doc, "globalThis.got = []; addEventListener('message', (e) => got.push([e.data, e.source === parent])); 1")
+        .unwrap();
+    frame.deliver_message(&mut frame_doc, None, "https://example.com", &data);
+    assert_eq!(frame.eval(&mut frame_doc, "got").unwrap(), r#"[["hi",true]]"#);
+    // Same-origin and about:blank iframes stay unscriptable from the page.
+    assert_eq!(
+        page.eval("const i = document.createElement('iframe'); document.body.append(i); i.contentWindow"),
+        "null"
+    );
+
+    // Drop order: the frame's runtime (created later) first, then another frame's after
+    // the page's.
+    drop(frame);
+    assert_eq!(page.eval("1 + 1"), "2");
+    let mut late = script::ScriptRuntime::new_frame(Rc::new(common::MockHost::default()), opts);
+    assert_eq!(late.eval(&mut frame_doc, "parent === window").unwrap(), "false");
+    drop(page);
+    assert_eq!(late.eval(&mut frame_doc, "2 + 2").unwrap(), "4");
+    drop(late);
+}

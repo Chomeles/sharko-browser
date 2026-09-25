@@ -12,6 +12,7 @@ use cursor_icon::CursorIcon;
 use netstack::NetClient;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
@@ -202,6 +203,20 @@ impl ShellProvider for Shell {
 // ScriptHost
 // ---------------------------------------------------------------------------
 
+/// A `postMessage` between the page and one of its iframes (see `ScriptHost::post_message`).
+pub struct FrameMessage {
+    /// Sender: `None` for the page, else the `<iframe>` node (`NodeId::as_u64`) whose
+    /// document posted it.
+    pub from: Option<u64>,
+    /// Receiver: `None` for the page, else an `<iframe>` node of the page.
+    pub to: Option<u64>,
+    /// `*` or the origin the receiver must have.
+    pub target_origin: String,
+    /// The sender's origin.
+    pub origin: String,
+    pub data: Vec<u8>,
+}
+
 /// Per-document script host. Lives on the renderer's main thread.
 pub struct RendererHost {
     pub shared: Arc<Shared>,
@@ -216,6 +231,13 @@ pub struct RendererHost {
     pub verbose_console: bool,
     pub title: RefCell<String>,
     pub history: Cell<(u32, u32)>,
+    /// The `<iframe>` node (`NodeId::as_u64`) whose document this host serves; `None` for
+    /// the page itself.
+    pub frame: Option<u64>,
+    /// The document's origin (sender of its `postMessage`s).
+    pub origin: String,
+    /// `postMessage`s between the page and its iframes, delivered by the renderer.
+    pub messages: Rc<RefCell<Vec<FrameMessage>>>,
 }
 
 impl Drop for RendererHost {
@@ -232,14 +254,15 @@ impl script::ScriptHost for RendererHost {
         let js_id = req.id;
         let tx = self.shared.loop_tx.clone();
         let generation = self.generation;
+        let frame = self.frame;
         let on_done = Box::new(move |mut resp: NetResponse| {
             resp.id = js_id;
-            let _ = tx.send(LoopMsg::ScriptFetch { generation, resp });
+            let _ = tx.send(LoopMsg::ScriptFetch { generation, frame, resp });
         });
         let net_id = if req.progress {
             let tx = self.shared.loop_tx.clone();
             let on_progress: netstack::ProgressCallback = Arc::new(move |loaded, total, upload| {
-                let _ = tx.send(LoopMsg::ScriptFetchProgress { generation, id: js_id, loaded, total, upload });
+                let _ = tx.send(LoopMsg::ScriptFetchProgress { generation, frame, id: js_id, loaded, total, upload });
             });
             self.net.fetch_with_progress(req, on_progress, on_done)
         } else {
@@ -257,12 +280,13 @@ impl script::ScriptHost for RendererHost {
     fn ws_open(&self, id: u64, url: &str, protocols: Vec<String>, origin: &str) -> bool {
         let tx = self.shared.loop_tx.clone();
         let generation = self.generation;
+        let frame = self.frame;
         let net_id = self.net.ws_open(
             url,
             protocols,
             origin,
             Box::new(move |event| {
-                let _ = tx.send(LoopMsg::ScriptWs { generation, id, event });
+                let _ = tx.send(LoopMsg::ScriptWs { generation, frame, id, event });
             }),
         );
         self.sockets.borrow_mut().insert(id, net_id);
@@ -297,6 +321,12 @@ impl script::ScriptHost for RendererHost {
         body: Option<Vec<u8>>,
         content_type: Option<String>,
     ) {
+        if self.frame.is_some() {
+            // Navigating an iframe from its own script isn't supported yet (it must not
+            // navigate the tab).
+            self.console("warn", &format!("iframe navigation to {url} is not supported"));
+            return;
+        }
         self.shared.send(FromRenderer::OpenUrl {
             url: url.to_string(),
             method: method.to_string(),
@@ -319,11 +349,15 @@ impl script::ScriptHost for RendererHost {
     }
 
     fn history_go(&self, delta: i32) {
-        self.shared.send(FromRenderer::HistoryGo(delta));
+        if self.frame.is_none() {
+            self.shared.send(FromRenderer::HistoryGo(delta));
+        }
     }
 
     fn url_changed(&self, url: &str) {
-        self.shared.send(FromRenderer::UrlChanged(url.to_string()));
+        if self.frame.is_none() {
+            self.shared.send(FromRenderer::UrlChanged(url.to_string()));
+        }
     }
 
     fn title_changed(&self, title: &str) {
@@ -367,6 +401,9 @@ impl script::ScriptHost for RendererHost {
     }
 
     fn history_push(&self, url: &str, replace: bool) {
+        if self.frame.is_some() {
+            return;
+        }
         self.shared.send(FromRenderer::HistoryPush {
             url: url.to_string(),
             replace,
@@ -377,5 +414,22 @@ impl script::ScriptHost for RendererHost {
         if let Ok(mut c) = arboard::Clipboard::new() {
             let _ = c.set_text(text.to_string());
         }
+    }
+
+    fn post_message(&self, target: Option<u64>, target_origin: &str, data: Vec<u8>) {
+        // The page posts to its iframes, an iframe to its parent (the page).
+        let to = match (self.frame, target) {
+            (None, Some(frame)) => Some(frame),
+            (Some(_), None) => None,
+            _ => return,
+        };
+        self.messages.borrow_mut().push(FrameMessage {
+            from: self.frame,
+            to,
+            target_origin: target_origin.to_string(),
+            origin: self.origin.clone(),
+            data,
+        });
+        self.shared.redraw.store(true, Ordering::SeqCst);
     }
 }

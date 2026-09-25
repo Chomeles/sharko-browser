@@ -163,6 +163,13 @@ pub trait ScriptHost {
     fn clipboard_write(&self, text: &str) {
         let _ = text;
     }
+    /// `postMessage` to another frame's window: `target` is `None` for the parent window
+    /// (from an iframe's document) or the node id (`NodeId::as_u64`) of an `<iframe>` in
+    /// this document; `target_origin` is `*` or the origin the receiver must have; `data`
+    /// is the message serialized with V8's ValueSerializer. Default: dropped.
+    fn post_message(&self, target: Option<u64>, target_origin: &str, data: Vec<u8>) {
+        let _ = (target, target_origin, data);
+    }
 }
 
 /// Configure a [`blitz_dom::DocumentConfig`] for use with the script runtime.

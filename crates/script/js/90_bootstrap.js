@@ -96,8 +96,8 @@
   defGetter('window', function window() { return g; }, { unforgeable: true });
   defGetter('self', function self() { return g; }, { replaceable: true });
   defGetter('frames', function frames() { return g; }, { replaceable: true });
-  defGetter('parent', function parent() { return g; }, { replaceable: true });
-  defGetter('top', function top() { return g; }, { unforgeable: true });
+  defGetter('parent', function parent() { return L.parentWindow(); }, { replaceable: true });
+  defGetter('top', function top() { return L.windowTop(); }, { unforgeable: true });
   defGetter('document', function document_() { return document; }, { unforgeable: true });
   Object.defineProperty(g, 'location', {
     get: function location() { return L.location; },
@@ -937,6 +937,7 @@
     onWebSocket: guard(L.onWebSocket),
     onFetchProgress: guard(L.onFetchProgress),
     onAnimationEvent: guard(onAnimationEvent),
+    onMessage: guard(L.onMessage),
   });
 
   // =======================================================================================

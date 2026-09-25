@@ -39,6 +39,8 @@ pub struct MockHost {
     pub history_pushes: RefCell<Vec<(String, bool)>>,
     pub referrer: RefCell<String>,
     pub clipboard: RefCell<Vec<String>>,
+    /// `postMessage`s to other frames: (target, target origin, serialized message).
+    pub posted: RefCell<Vec<(Option<u64>, String, Vec<u8>)>>,
 }
 
 impl ScriptHost for MockHost {
@@ -111,6 +113,11 @@ impl ScriptHost for MockHost {
     }
     fn clipboard_write(&self, text: &str) {
         self.clipboard.borrow_mut().push(text.to_string());
+    }
+    fn post_message(&self, target: Option<u64>, target_origin: &str, data: Vec<u8>) {
+        self.posted
+            .borrow_mut()
+            .push((target, target_origin.to_string(), data));
     }
     fn fetch_sync(&self, req: NetRequest) -> Option<NetResponse> {
         let resp = self.respond(&req);

@@ -259,6 +259,80 @@
     static { L.bcClosed = (c) => c.#closed; }
   }
   L.defineEventHandlers(BroadcastChannel.prototype, ['onmessage', 'onmessageerror']);
+  // Windows of other frames (stand-ins for cross-origin WindowProxy objects): an iframe's
+  // contentWindow in its parent, and parent/top in an iframe. Each frame runs in its own
+  // isolate, so only postMessage reaches the other window.
+  const REMOTE = new WeakMap(); // RemoteWindow -> target (null: the parent, else an <iframe> id)
+  const remoteByFrame = new Map(); // <iframe> id -> RemoteWindow
+  let remoteParent = null;
+  function remoteTarget(w) {
+    if (!REMOTE.has(w)) throw L.illegal();
+    return REMOTE.get(w);
+  }
+  const crossOriginErr = (what) => new DOMException(`Failed to read a named property '${what}' from 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+  const remoteLocation = Object.freeze({ replace() { }, set href(v) { }, toString() { return ''; } });
+  class RemoteWindow {
+    constructor(token, target) {
+      if (token !== INTERNAL) throw L.illegal();
+      REMOTE.set(this, target);
+    }
+    postMessage(message, targetOrigin, transfer) {
+      const target = remoteTarget(this);
+      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+      let t = targetOrigin !== null && typeof targetOrigin === 'object'
+        ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
+        : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
+      if (t === '/') t = L.location.origin;
+      else if (t !== '*') {
+        const p = N.urlParse(t, null);
+        if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
+        t = p[10];
+      }
+      N.framePost(target, message, t);
+    }
+    get window() { remoteTarget(this); return this; }
+    get self() { remoteTarget(this); return this; }
+    get frames() { remoteTarget(this); return this; }
+    get parent() { return remoteTarget(this) === null ? this : L.window; }
+    get top() { return remoteTarget(this) === null ? this : L.windowTop(); }
+    get opener() { remoteTarget(this); return null; }
+    get closed() { remoteTarget(this); return false; }
+    get length() { remoteTarget(this); return 0; }
+    get location() { remoteTarget(this); return remoteLocation; }
+    set location(v) { remoteTarget(this); }
+    get document() { throw crossOriginErr('document'); }
+    focus() { remoteTarget(this); }
+    blur() { remoteTarget(this); }
+    close() { remoteTarget(this); }
+  }
+  Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
+  L.remoteWindowFor = function (id) {
+    let w = remoteByFrame.get(id);
+    if (w === undefined) { w = new RemoteWindow(INTERNAL, id); remoteByFrame.set(id, w); }
+    return w;
+  };
+  const isFrame = () => typeof N.isFrame === 'function' && N.isFrame();
+  L.parentWindow = function () {
+    if (!isFrame()) return L.window;
+    if (remoteParent === null) remoteParent = new RemoteWindow(INTERNAL, null);
+    return remoteParent;
+  };
+  L.windowTop = L.parentWindow;
+  // An iframe's contentWindow: a remote window for cross-origin http(s) documents (they may
+  // run in their own runtime); same-origin and about:blank documents aren't scriptable
+  // from here yet (null, as before).
+  L.iframeWindow = function (el, id) {
+    if (!N.isConnected(id)) return null;
+    const src = N.getAttr(id, 'src');
+    if (src === null || src.trim() === '' || N.getAttr(id, 'srcdoc') !== null) return null;
+    const p = N.urlParse(src.trim(), L.baseURL());
+    if (p === null || (p[1] !== 'https:' && p[1] !== 'http:') || p[10] === L.location.origin) return null;
+    return L.remoteWindowFor(id);
+  };
+  L.onMessage = function (source, origin, data) {
+    const src = source === null ? L.parentWindow() : L.remoteWindowFor(source);
+    L.fire(L.window, 'message', { data, origin, source: src, ports: [], lastEventId: '' }, L.MessageEvent);
+  };
   L.windowPostMessage = function (message, targetOrigin, transfer) {
     let target = '/';
     let list = [];

@@ -871,6 +871,55 @@ pub(crate) fn n_structured_clone(cx: &mut Cx) -> NResult {
     }
 }
 
+/// Addition: `N.isFrame()` -> whether this document is an iframe's (`window.parent` is
+/// another window).
+pub(crate) fn n_is_frame(cx: &mut Cx) -> NResult {
+    let is_frame = cx.st.is_frame.get();
+    cx.ret_bool(is_frame);
+    Ok(())
+}
+
+/// Addition: `N.framePost(target, message, targetOrigin)`: `postMessage` to another
+/// frame's window. `target` is `null` for the parent window or an `<iframe>` element's
+/// node id; `targetOrigin` is `*` or a serialized origin. The message is serialized here
+/// (a `DataCloneError` is thrown synchronously, as in browsers) and delivered as a task.
+pub(crate) fn n_frame_post(cx: &mut Cx) -> NResult {
+    use v8::ValueSerializerHelper;
+    let target = if cx.arg(0).is_null_or_undefined() {
+        None
+    } else {
+        let doc = cx.st.doc()?;
+        Some(cx.node(doc, 0)?.as_u64())
+    };
+    let value = cx.arg(1);
+    let target_origin = cx.string(2)?;
+    let context = cx.scope.get_current_context();
+    let bytes = {
+        let ser = v8::ValueSerializer::new(cx.scope, Box::new(CloneDelegate));
+        ser.write_header();
+        if ser.write_value(context, value) != Some(true) {
+            return Err(JsErr::Thrown);
+        }
+        ser.release()
+    };
+    cx.st.host.post_message(target, &target_origin, bytes);
+    Ok(())
+}
+
+/// A message serialized by `N.framePost` (in another isolate), as a value of this one.
+pub(crate) fn deserialize_message<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    data: &[u8],
+) -> Option<v8::Local<'s, v8::Value>> {
+    use v8::ValueDeserializerHelper;
+    let context = scope.get_current_context();
+    let de = v8::ValueDeserializer::new(scope, Box::new(CloneDelegate), data);
+    if de.read_header(context) != Some(true) {
+        return None;
+    }
+    de.read_value(context)
+}
+
 /// Addition: `N.workerCreate()` -> the global object of a new JS realm (a separate V8
 /// context with only the ECMAScript builtins) for a dedicated worker. The JS layer installs
 /// the worker API on it. The context lives as long as its global object is referenced.

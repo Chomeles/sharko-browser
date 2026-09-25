@@ -188,6 +188,11 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.textDecode(arrayBufferOrView, label, fatal)` | string (throws on unknown label or on invalid data if fatal) |
 | `N.userAgent()` | UA string |
 | `N.structuredClone(value)` | deep clone using V8's ValueSerializer |
+| `N.isFrame()` | whether the document is an iframe's (`window.parent` is another window) |
+| `N.framePost(targetOrNull, message, targetOrigin)` | `postMessage` to another frame: `null` = the parent window, else an `<iframe>` element id; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
+| `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
+| `N.cryptoAes(mode, encrypt, key, iv, aad, tagBits, data)` | ArrayBuffer; `mode` is `GCM`, `CBC`, `CTR` or `KW`; throws `OperationError` (e.g. failed authentication) |
+| `N.cryptoPbkdf2(hash, password, salt, iterations, bits)`, `N.cryptoHkdf(hash, ikm, salt, info, bits)` | ArrayBuffer |
 | `N.pendingResourceCount()` | number of subresources (stylesheets/images/fonts) still loading – used to decide when to fire `window.load` |
 
 ## Hooks (JS → registered once with `N.setHooks(obj)`)
@@ -204,6 +209,7 @@ Rust calls these; exceptions thrown inside hooks are reported to the console.
 | `onViewportChanged()` | viewport resized → JS dispatches `resize` on window | – |
 | `onScroll()` | viewport scrolled → JS dispatches `scroll` on document (bubbling to window) | – |
 | `onPageHide()` | before navigating away → `pagehide`, `beforeunload` (ignore result), `unload` | – |
+| `onMessage(sourceOrNull, origin, data)` | (addition) a `postMessage` from another frame: `null` = from the parent window, else from the document of the `<iframe>` with that id; `data` is already deserialized | – |
 
 ## Script execution model (implemented in JS)
 After `onDocumentParsed`:

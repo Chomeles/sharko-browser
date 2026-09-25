@@ -1020,7 +1020,7 @@
     R.url(P, 'longDesc', 'longdesc');
     R.bool(P, 'credentialless');
     def(P, 'contentDocument', function () { return null; });
-    def(P, 'contentWindow', function () { return null; });
+    def(P, 'contentWindow', function () { return L.iframeWindow(this, idOf(this)); });
     L.mixin(P, { getSVGDocument() { return null; } });
     def(P, 'featurePolicy', function () { return undefined; });
   }
