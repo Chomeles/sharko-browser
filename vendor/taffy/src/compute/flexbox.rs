@@ -1328,6 +1328,28 @@ fn determine_container_main_size(
 
                 if lines.len() > 1 {
                     f32_max(size, main_axis_available_space)
+                } else if dir.is_row() {
+                    // PATCH: a single-line row container is fit-content wide: its max-content
+                    // width clamped to the available space, but not below the sum of its
+                    // items' minimum sizes. It used to keep its max-content width, so e.g. a
+                    // flex row of text in a column with `align-items: flex-start` didn't wrap.
+                    let min_line_length: f32 = lines
+                        .iter()
+                        .map(|line| {
+                            line.items
+                                .iter()
+                                .map(|child| {
+                                    let padding_border_sum =
+                                        (child.padding + child.border).main_axis_sum(constants.dir);
+                                    (child.resolved_minimum_main_size + child.margin.main_axis_sum(constants.dir))
+                                        .max(padding_border_sum)
+                                })
+                                .sum::<f32>()
+                                + sum_axis_gaps(main_axis_gap, line.items.len())
+                        })
+                        .max_by(|a, b| a.total_cmp(b))
+                        .unwrap_or(0.0);
+                    f32_max(min_line_length + main_content_box_inset, f32_min(size, main_axis_available_space))
                 } else {
                     size
                 }

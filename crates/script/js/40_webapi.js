@@ -2371,6 +2371,51 @@
   L.expose('TextEncoderStream', TextEncoderStream);
   L.expose('TextDecoderStream', TextDecoderStream);
 
+  // CompressionStream / DecompressionStream (natives on flate2).
+  function zFormat(format, what) {
+    const f = `${format}`;
+    if (f !== 'gzip' && f !== 'deflate' && f !== 'deflate-raw') {
+      throw new TypeError(`Failed to construct '${what}': The provided value '${f}' is not a valid enum value of type CompressionFormat.`);
+    }
+    return f;
+  }
+  function zStream(format, compress, what) {
+    const h = N.zCreate(zFormat(format, what), compress);
+    return new TransformStream({
+      transform(chunk, c) {
+        const bytes = toBytes(chunk);
+        if (bytes === null) throw new TypeError(`Failed to execute 'transform' on '${what}': The provided value is not of type '(ArrayBuffer or ArrayBufferView)'.`);
+        const out = N.zWrite(h, bytes);
+        if (out.byteLength) c.enqueue(new Uint8Array(out));
+      },
+      flush(c) {
+        const out = N.zFinish(h);
+        if (out.byteLength) c.enqueue(new Uint8Array(out));
+      },
+      cancel() { N.zDrop(h); },
+    });
+  }
+  class CompressionStream {
+    #ts;
+    constructor(format) {
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'CompressionStream': 1 argument required, but only 0 present.");
+      this.#ts = zStream(format, true, 'CompressionStream');
+    }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  class DecompressionStream {
+    #ts;
+    constructor(format) {
+      if (arguments.length === 0) throw new TypeError("Failed to construct 'DecompressionStream': 1 argument required, but only 0 present.");
+      this.#ts = zStream(format, false, 'DecompressionStream');
+    }
+    get readable() { return this.#ts.readable; }
+    get writable() { return this.#ts.writable; }
+  }
+  L.expose('CompressionStream', CompressionStream);
+  L.expose('DecompressionStream', DecompressionStream);
+
   // =======================================================================================
   // WebSocket (the connection itself lives in the network process: N.wsOpen/wsSend/wsClose,
   // events come back through hooks.onWebSocket)

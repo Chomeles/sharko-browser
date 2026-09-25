@@ -248,6 +248,8 @@ pub(crate) struct RuntimeState {
     pub(crate) is_frame: Cell<bool>,
     /// Canvas 2D surfaces.
     pub(crate) canvases: RefCell<crate::canvas::Canvases>,
+    /// Open (de)compression streams.
+    pub(crate) coders: RefCell<crate::compress::Coders>,
 }
 
 impl RuntimeState {
@@ -307,6 +309,7 @@ impl RuntimeState {
             snapshot_taint: Cell::new(None),
             is_frame: Cell::new(false),
             canvases: RefCell::new(Default::default()),
+            coders: RefCell::new(Default::default()),
         }
     }
 

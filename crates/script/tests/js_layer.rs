@@ -668,3 +668,37 @@ fn js_layer_canvas_2d() {
     assert_eq!((img.width, img.height), (100, 60));
     assert_eq!(&img.data.data()[..4], &[255, 0, 0, 255]);
 }
+
+/// CompressionStream / DecompressionStream round trips (gzip, deflate, deflate-raw) and
+/// errors for bad formats and corrupt input.
+#[test]
+fn js_layer_compression_streams() {
+    let mut e = js_env(PAGE);
+    e.eval(
+        r#"globalThis.zr = null; (async () => {
+          const text = 'Hallo Sharko! '.repeat(200);
+          const pipe = async (stream, bytes) => {
+            const w = stream.writable.getWriter(); w.write(bytes.slice(0, 7)); w.write(bytes.slice(7)); w.close();
+            const r = stream.readable.getReader(); const parts = [];
+            for (;;) { const { value, done } = await r.read(); if (done) break; parts.push(...value); }
+            return new Uint8Array(parts);
+          };
+          const out = [];
+          for (const f of ['gzip', 'deflate', 'deflate-raw']) {
+            const packed = await pipe(new CompressionStream(f), new TextEncoder().encode(text));
+            const back = new TextDecoder().decode(await pipe(new DecompressionStream(f), packed));
+            out.push([f, packed.length < 200, back === text]);
+          }
+          let bad = 'none'; try { new CompressionStream('brotli'); } catch (err) { bad = err.name; }
+          let corrupt = 'none'; try { await pipe(new DecompressionStream('gzip'), new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9])); } catch (err) { corrupt = err.name; }
+          out.push(bad, corrupt, packedMagic(await pipe(new CompressionStream('gzip'), new Uint8Array([1]))));
+          zr = out;
+          function packedMagic(b) { return b[0] === 0x1f && b[1] === 0x8b; }
+        })(); 1"#,
+    );
+    run_timers_for(&mut e, Duration::from_millis(50));
+    assert_eq!(
+        e.eval("zr"),
+        r#"[["gzip",true,true],["deflate",true,true],["deflate-raw",true,true],"TypeError","TypeError",true]"#
+    );
+}

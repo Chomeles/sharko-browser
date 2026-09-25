@@ -170,3 +170,7 @@ Patches so far:
     z-indexed boxes nested in another stacking context could not be clicked.
 55. `blitz-dom/src/document.rs`: `font_context()` and `set_canvas_pixels()` for the
     embedder's canvas 2D implementation (the canvas' pixels are shown as its image).
+56. `taffy/src/compute/flexbox.rs`: a single-line row flex container sized under definite
+    available space is fit-content wide (max-content clamped to the space, at least its
+    items' minimum sizes), not max-content: text in a flex row inside a column with
+    `align-items: flex-start` didn't wrap (heise.de's consent dialog overflowed).

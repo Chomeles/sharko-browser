@@ -44,6 +44,7 @@
 mod activation;
 mod blob;
 mod canvas;
+mod compress;
 mod cx;
 mod dom;
 mod events;
