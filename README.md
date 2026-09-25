@@ -163,10 +163,10 @@ and reports differences (for layout development).
 
 ## 🚧 Known limitations
 
-- No `<canvas>` drawing, video/audio, WebSockets, Web Workers, WebGL yet
+- No `<canvas>` drawing, video/audio, WebGL yet; Web Workers run on the page's thread
+  (no parallelism yet, no module workers or SharedWorker)
 - iframes render but run no JavaScript; Shadow DOM is emulated (styles are scoped,
   declarative shadow roots work, but the shadow tree is part of the normal DOM);
-  `:has()` works in `querySelector`/`matches` but not yet in stylesheets;
   `position: sticky` only vertically
 - No downloads, bookmarks, extensions, password manager yet
 - Bot-protection pages (Cloudflare challenges etc.) may block the browser
