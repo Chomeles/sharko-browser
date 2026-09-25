@@ -52,35 +52,48 @@ jobs:
             target: aarch64-apple-darwin
             platform_key: macos
     runs-on: ${{ matrix.os }}
-    # A manual run only builds the requested subset; a tag push always builds all three.
-    if: ${{ github.event_name != 'workflow_dispatch' || contains(github.event.inputs.platforms, matrix.platform_key) }}
     env:
       # Compiled into the binary: where the updater looks for new releases.
       BROWSER_UPDATE_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # A manual run only builds the requested subset; a tag push always builds all
+      # three. (Job-level `if:` can't see the `matrix` context on this API, so every
+      # step below repeats this instead — cheap steps too, so a platform a manual run
+      # didn't ask for barely spins up its runner.)
     steps:
+      - name: Wanted this run?
+        id: wanted
+        shell: bash
+        run: echo "yes=${{ github.event_name != 'workflow_dispatch' || contains(github.event.inputs.platforms, matrix.platform_key) }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.wanted.outputs.yes == 'true'
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.wanted.outputs.yes == 'true'
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        if: steps.wanted.outputs.yes == 'true'
         with:
           key: release-${{ matrix.target }}
       - name: Linux build dependencies
-        if: runner.os == 'Linux'
+        if: steps.wanted.outputs.yes == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld libfontconfig1-dev libxkbcommon-dev libwayland-dev
       - name: Check tag matches Cargo version
+        if: steps.wanted.outputs.yes == 'true'
         shell: bash
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           test "v$version" = "${RELEASE_TAG}" || { echo "tag ${RELEASE_TAG} != v$version"; exit 1; }
       - name: Build
+        if: steps.wanted.outputs.yes == 'true'
         run: cargo build --release --locked --target ${{ matrix.target }} -p browser-core -p browser-launcher
       - name: Package
+        if: steps.wanted.outputs.yes == 'true'
         run: cargo xtask package --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
+        if: steps.wanted.outputs.yes == 'true'
         with:
           name: package-${{ matrix.target }}
           path: dist/*.zip
