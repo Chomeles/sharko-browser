@@ -31,7 +31,7 @@ if curl -s --noproxy '*' -o /dev/null http://web-platform.test:8000/resources/te
     node tools/wpt/run.js || fail "WPT"
   else
     step "web-platform-tests (quick subset)"
-    node tools/wpt/run.js dom/nodes dom/events dom/traversal dom/ranges dom/lists url encoding css/cssom-view || fail "WPT quick subset"
+    node tools/wpt/run.js --batch dom/nodes dom/events dom/traversal dom/ranges dom/lists url encoding css/cssom-view || fail "WPT quick subset"
   fi
 else
   echo "(wpt serve not running; skipping web-platform-tests)"

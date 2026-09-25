@@ -44,7 +44,10 @@ the most tests.
 `run.js` finds the binary in `target/profiling` or `target/release` (or `--browser=`,
 `$SHARKO_BIN`), the checkout in `../wpt` (or `--wpt=`, `$WPT_DIR`), and runs
 `cores - 1` browsers in parallel (`--jobs=`). Each test gets a fresh profile and
-15 s (`--timeout=`; tests marked `timeout=long` get 60 s). `--workers` adds the
+15 s (`--timeout=`; tests marked `timeout=long` get 60 s). With `--batch` every worker
+keeps one browser open (the headless `--batch` mode) and loads the tests in turn, which
+skips the per-test process start; storage then carries over between tests, so use the
+default one-process-per-test mode for the committed baseline. `--workers` adds the
 `.any.worker.html` variants, `--json=FILE` dumps every result, `--console` shows
 the pages' console output.
 

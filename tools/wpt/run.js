@@ -13,6 +13,9 @@
 //   --browser=PATH     browser binary (default: $SHARKO_BIN, target/profiling/browser or
 //                      target/release/browser)
 //   --jobs=N           parallel browsers (default: cores - 1)
+//   --batch            each worker keeps one browser in --batch mode and loads the tests
+//                      in turn (much faster than a process per test; storage is not
+//                      reset between tests)
 //   --timeout=MS       per-test budget (default 15000; tests marked timeout=long get 4x)
 //   --filter=REGEX     only run tests whose id matches
 //   --workers          also run the `.any.worker.html` / `.worker.html` variants
@@ -241,23 +244,131 @@ function runOne(test, n) {
   });
 }
 
+/** A worker's long-lived `--batch` browser: one JSON result line per URL written to it. */
+class BatchBrowser {
+  constructor(n) {
+    this.profile = fs.mkdtempSync(path.join(os.tmpdir(), `sharko-wpt-${process.pid}-b${n}-`));
+    this.child = spawn(
+      browser,
+      ['--headless', '--batch', `--profile=${this.profile}`, '--settle=0', '--wait-for=window.__wpt_done', '--eval=JSON.stringify(window.__wpt_done)', 'about:blank'],
+      { env: { ...process.env, NO_PROXY: noProxy, no_proxy: noProxy }, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    this.stderr = '';
+    this.buf = '';
+    this.pending = null; // {resolve} of the URL in flight
+    this.child.stderr.on('data', (d) => {
+      this.stderr += d;
+      if (this.stderr.length > 20000) this.stderr = this.stderr.slice(-10000);
+    });
+    this.child.stdout.on('data', (d) => {
+      this.buf += d;
+      let nl;
+      while ((nl = this.buf.indexOf('\n')) >= 0) {
+        const line = this.buf.slice(0, nl);
+        this.buf = this.buf.slice(nl + 1);
+        if (this.pending && line.startsWith('{')) {
+          const p = this.pending;
+          this.pending = null;
+          p.resolve(line);
+        }
+      }
+    });
+    this.exited = new Promise((r) => this.child.on('close', (code, signal) => r({ code, signal })));
+    this.child.on('close', () => {
+      if (this.pending) {
+        const p = this.pending;
+        this.pending = null;
+        p.resolve(null);
+      }
+      fs.rmSync(this.profile, { recursive: true, force: true });
+    });
+  }
+  /** Resolves with the JSON line, or null on crash/timeout (the browser is then dead). */
+  run(test, timeout) {
+    return new Promise((resolve) => {
+      const killer = setTimeout(() => {
+        this.child.kill('SIGKILL');
+      }, timeout + 10000);
+      this.pending = { resolve: (line) => { clearTimeout(killer); resolve(line); } };
+      this.stderr = '';
+      this.child.stdin.write(`${test.url}\t${timeout}\n`);
+    });
+  }
+  close() {
+    try { this.child.stdin.end(); } catch (_) {}
+    setTimeout(() => { try { this.child.kill('SIGKILL'); } catch (_) {} }, 3000).unref();
+  }
+}
+
+function batchResult(test, line, stderr, ms) {
+  const panic = stderr.split('\n').find((l) => /panicked at|renderer crashed/.test(l));
+  let r = null;
+  try { r = line ? JSON.parse(line) : null; } catch (_) {}
+  if (!r || r.crash || panic) {
+    return { id: test.id, status: line ? 'CRASH' : 'TIMEOUT', message: panic || (r && r.crash ? 'renderer crashed' : 'no result (browser killed)'), subtests: [], ms, console: [] };
+  }
+  let result = null;
+  const ev = r.evals && r.evals[0];
+  if (ev && ev.ok) {
+    try {
+      let v = JSON.parse(ev.value);
+      if (typeof v === 'string') v = JSON.parse(v);
+      if (v && typeof v === 'object' && v.subtests) result = v;
+    } catch (_) {}
+  }
+  let status;
+  if (result) status = result.status;
+  else if (r.load.startsWith('failed')) status = 'ERROR';
+  else if (r.load === 'timeout' || r.wait === 'timeout') status = 'TIMEOUT';
+  else status = 'ERROR';
+  const consoleLines = (r.console || []).filter((l) => /^(error|warn)/.test(l)).map((l) => 'console.' + l);
+  return {
+    id: test.id,
+    status,
+    message: (result && result.message) || (status === 'ERROR' ? r.load : null),
+    subtests: result ? result.subtests : [],
+    ms: r.ms || ms,
+    console: consoleLines.slice(0, 20),
+    stdout: flag('console') ? consoleLines.join('\n') : undefined,
+  };
+}
+
 async function runAll() {
   const results = new Array(tests.length);
   let next = 0;
   let done = 0;
   const t0 = Date.now();
-  const worker = async () => {
+  const batch = flag('batch');
+  const worker = async (w) => {
+    let bb = null;
     while (next < tests.length) {
       const i = next++;
-      results[i] = await runOne(tests[i], i);
+      if (batch) {
+        if (!bb) bb = new BatchBrowser(w);
+        const timeout = tests[i].long ? baseTimeout * 4 : baseTimeout;
+        const t1 = Date.now();
+        const line = await bb.run(tests[i], timeout);
+        results[i] = batchResult(tests[i], line, bb.stderr, Date.now() - t1);
+        if (line === null || results[i].status === 'CRASH') {
+          bb.close();
+          await bb.exited;
+          bb = null;
+        }
+      } else {
+        results[i] = await runOne(tests[i], i);
+      }
       done++;
       if (!verbose && process.stderr.isTTY) {
         process.stderr.write(`\r${done}/${tests.length} ${tests[i].id.slice(0, 70).padEnd(70)}`);
       }
       if (verbose) printResult(results[i]);
     }
+    if (bb) {
+      bb.close();
+      await bb.exited;
+    }
   };
-  await Promise.all(Array.from({ length: Math.min(jobs, tests.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(jobs, tests.length) }, (_, w) => worker(w)));
   if (!verbose && process.stderr.isTTY) process.stderr.write('\r' + ' '.repeat(90) + '\r');
   return { results, ms: Date.now() - t0 };
 }

@@ -228,3 +228,9 @@ Patches so far:
     no longer replaces its image/canvas data with a table context (the replaced layout
     then panicked at `unreachable!()`; the fallback now uses the tag's intrinsic sizes).
     Found by `tools/fuzz/run.js`.
+71. `blitz-dom/src/traversal.rs`: `node_layout_ancestors` stops at the first id that no
+    longer exists instead of indexing it. The hover/active node is retargeted when its
+    subtree is removed, but its `layout_parent` chain can still name an anonymous box
+    dropped by a later box rebuild, and a native click arriving between a DOM mutation
+    and the next resolve then panicked (`invalid SlotMap key`; `tools/fuzz/run.js
+    --clicks=30`, seeds 108 and 136).

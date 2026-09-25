@@ -34,6 +34,9 @@ pub struct HeadlessOptions {
     pub wait_for: Option<String>,
     /// Poll interval for `wait_for`.
     pub wait_poll: Duration,
+    /// Batch mode: read `URL[<TAB>TIMEOUT_MS]` lines from stdin, load each in the same
+    /// tab (`wait_for`, then the `--eval`s) and print one JSON line per URL.
+    pub batch: bool,
 }
 
 impl Default for HeadlessOptions {
@@ -57,6 +60,7 @@ impl Default for HeadlessOptions {
             scroll_y: 0.0,
             wait_for: None,
             wait_poll: Duration::from_millis(50),
+            batch: false,
         }
     }
 }
@@ -66,6 +70,28 @@ struct Driver {
     #[allow(dead_code)]
     tab: TabId,
     print_console: bool,
+    /// Batch mode collects the console per URL instead of printing it.
+    collect_console: bool,
+    console: Vec<(String, String)>,
+}
+
+/// JSON string literal (for the batch-mode result lines; no serde dependency here).
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 impl Driver {
@@ -84,8 +110,12 @@ impl Driver {
             match self.browser.events.recv_timeout(deadline - now) {
                 Ok(ev) => {
                     if let Some(ev) = self.browser.process_event(ev) {
-                        if self.print_console {
-                            if let BrowserEvent::Tab(_, FromRenderer::Console { level, message }) = &ev {
+                        if let BrowserEvent::Tab(_, FromRenderer::Console { level, message }) = &ev {
+                            if self.collect_console {
+                                if self.console.len() < 200 {
+                                    self.console.push((level.clone(), message.clone()));
+                                }
+                            } else if self.print_console {
                                 eprintln!("console.{level}: {message}");
                             }
                         }
@@ -132,7 +162,13 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
         browser,
         tab,
         print_console: opts.print_console,
+        collect_console: opts.batch,
+        console: Vec::new(),
     };
+
+    if opts.batch {
+        return run_batch(&mut d, tab, &opts);
+    }
 
     // Wait for load (or failure / timeout).
     let mut exit = 0;
@@ -348,4 +384,143 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
     }
     d.browser.shutdown();
     exit
+}
+
+/// Run one URL in the batch tab: navigate, wait for load, `wait_for`, the `--eval`s.
+/// Returns the JSON fields for the result line, or `None` when the renderer crashed.
+fn batch_one(d: &mut Driver, tab: TabId, opts: &HeadlessOptions, url: &str, timeout: Duration) -> Option<String> {
+    let t0 = Instant::now();
+    d.console.clear();
+    d.browser.navigate(tab, url);
+    let crashed = |ev: &BrowserEvent| matches!(ev, BrowserEvent::TabCrashed(_));
+    // The previous page may still report events; wait for this navigation to start.
+    let started = d.pump_until(timeout, |ev| {
+        crashed(ev)
+            || matches!(
+                ev,
+                BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Started | LoadEvent::Failed, .. })
+            )
+    });
+    let load = match started {
+        Some(BrowserEvent::TabCrashed(_)) => return None,
+        Some(BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Failed, error, .. })) => {
+            format!("failed: {}", error.unwrap_or_default())
+        }
+        None => "timeout".to_string(),
+        _ => {
+            let remaining = timeout.saturating_sub(t0.elapsed());
+            match d.pump_until(remaining, |ev| {
+                crashed(ev)
+                    || matches!(
+                        ev,
+                        BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Load | LoadEvent::Failed, .. })
+                    )
+            }) {
+                Some(BrowserEvent::TabCrashed(_)) => return None,
+                Some(BrowserEvent::Tab(_, FromRenderer::Load { event: LoadEvent::Failed, error, .. })) => {
+                    format!("failed: {}", error.unwrap_or_default())
+                }
+                Some(_) => "ok".to_string(),
+                None => "timeout".to_string(),
+            }
+        }
+    };
+    if !load.starts_with("failed") {
+        d.pump_until(opts.settle, |_| false);
+    }
+    let mut wait = "none".to_string();
+    if let Some(cond) = &opts.wait_for {
+        if load.starts_with("failed") {
+            wait = "skipped".to_string();
+        } else {
+            let source = format!("!!({cond})");
+            let deadline = t0 + timeout;
+            let mut n = 0u64;
+            wait = loop {
+                let id = 3000 + n;
+                n += 1;
+                d.browser.send(tab, ToRenderer::Eval { id, source: source.clone() });
+                match d.pump_until(Duration::from_secs(10), |ev| {
+                    crashed(ev)
+                        || matches!(ev, BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id)
+                }) {
+                    Some(BrowserEvent::TabCrashed(_)) => return None,
+                    Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { ok, value, .. })) if ok && value == "true" => {
+                        break "ok".to_string();
+                    }
+                    _ => {}
+                }
+                if Instant::now() >= deadline {
+                    break "timeout".to_string();
+                }
+                if d.pump_until(opts.wait_poll, crashed).is_some() {
+                    return None;
+                }
+            };
+        }
+    }
+    let mut evals = Vec::new();
+    for (i, src) in opts.eval.iter().enumerate() {
+        let id = 4000 + i as u64;
+        d.browser.send(tab, ToRenderer::Eval { id, source: src.clone() });
+        match d.pump_until(Duration::from_secs(10), |ev| {
+            crashed(ev) || matches!(ev, BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id)
+        }) {
+            Some(BrowserEvent::TabCrashed(_)) => return None,
+            Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { ok, value, .. })) => {
+                evals.push(format!("{{\"ok\":{ok},\"value\":{}}}", json_str(&value)));
+            }
+            _ => evals.push("{\"ok\":false,\"value\":\"eval timeout\"}".to_string()),
+        }
+    }
+    let console: Vec<String> = d
+        .console
+        .iter()
+        .map(|(level, message)| format!("{}: {}", level, message))
+        .map(|s| json_str(&s))
+        .collect();
+    Some(format!(
+        "\"load\":{},\"wait\":{},\"ms\":{},\"evals\":[{}],\"console\":[{}]",
+        json_str(&load),
+        json_str(&wait),
+        t0.elapsed().as_millis(),
+        evals.join(","),
+        console.join(",")
+    ))
+}
+
+/// `--batch`: one JSON line per stdin URL. A renderer crash prints `"crash":true` for the
+/// URL and ends the process with status 3 (the caller restarts it).
+fn run_batch(d: &mut Driver, tab: TabId, opts: &HeadlessOptions) -> i32 {
+    use std::io::{BufRead, Write};
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout();
+    for line in stdin.lock().lines() {
+        let Ok(line) = line else { break };
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (url, timeout) = match line.split_once('\t') {
+            Some((u, t)) => (
+                u.trim().to_string(),
+                t.trim().parse().map(Duration::from_millis).unwrap_or(opts.timeout),
+            ),
+            None => (line.to_string(), opts.timeout),
+        };
+        match batch_one(d, tab, opts, &url, timeout) {
+            Some(fields) => {
+                let _ = writeln!(stdout, "{{\"url\":{},{}}}", json_str(&url), fields);
+            }
+            None => {
+                let _ = writeln!(stdout, "{{\"url\":{},\"crash\":true}}", json_str(&url));
+                let _ = stdout.flush();
+                d.browser.shutdown();
+                return 3;
+            }
+        }
+        let _ = stdout.flush();
+    }
+    d.browser.shutdown();
+    0
 }
