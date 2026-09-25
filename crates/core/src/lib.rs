@@ -48,6 +48,7 @@ Headless options:
   --dump-dom                print the serialized DOM after load
   --eval=JS                 evaluate JS after load and print the result (repeatable)
   --click=X,Y               click at viewport position after load (repeatable)
+  --click-text=REGEX        click the first button/link whose text matches, also in iframes (repeatable)
   --click-wait=MS           time to let the page react after each click (default 300)
   --scroll=PX               scroll down by PX before the screenshot
   --timeout=MS              max wait for the load event (default 30000)
@@ -245,6 +246,10 @@ pub fn run() -> i32 {
         o.eval = args
             .iter()
             .filter_map(|a| a.strip_prefix(prefix_eval).map(|s| s.to_string()))
+            .collect();
+        o.click_text = args
+            .iter()
+            .filter_map(|a| a.strip_prefix("--click-text=").map(String::from))
             .collect();
         o.clicks = args
             .iter()

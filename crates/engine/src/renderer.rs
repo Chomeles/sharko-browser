@@ -515,6 +515,13 @@ impl Renderer {
                 }
             }
             ToRenderer::Eval { id, source } => {
+                // `click-text:<regex>`: click the first button/link whose text matches, in
+                // the page or in any iframe that runs script (headless `--click-text`).
+                if let Some(pattern) = source.strip_prefix("click-text:") {
+                    let value = self.click_text(pattern);
+                    self.send(FromRenderer::EvalResult { id, ok: true, value });
+                    return true;
+                }
                 // Debugging aid: `frames:<js>` evaluates in every iframe runtime.
                 if std::env::var_os("SHARKO_DEBUG_FRAMES").is_some()
                     && let Some(js) = source.strip_prefix("frames:")
@@ -574,6 +581,72 @@ impl Renderer {
             ToRenderer::Shutdown => return false,
         }
         true
+    }
+
+    /// Find the first visible button or link whose text matches `pattern` (a
+    /// case-insensitive regex) in the page or its script-running iframes, and click its
+    /// center. Returns a description of what was clicked, or `no match`.
+    fn click_text(&mut self, pattern: &str) -> String {
+        let escaped = pattern.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', " ");
+        let js = format!(
+            "(() => {{ const re = new RegExp('{escaped}', 'i'); \
+             const els = [...document.querySelectorAll('button, a, [role=button], input[type=submit], input[type=button], summary')]; \
+             const text = (e) => ((e.innerText || e.value || e.getAttribute('aria-label') || e.title || '').trim()); \
+             const visible = (e) => {{ const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; }}; \
+             let cands = els.filter((e) => visible(e) && re.test(text(e))); \
+             if (!cands.length) return 'null'; \
+             const inView = (e) => {{ const r = e.getBoundingClientRect(); return r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth; }}; \
+             let el = cands.find(inView) || cands[0]; \
+             if (!inView(el)) el.scrollIntoView({{ block: 'center' }}); \
+             const r = el.getBoundingClientRect(); \
+             return Math.round(r.x + r.width / 2) + ',' + Math.round(r.y + r.height / 2) + '|' + text(el).slice(0, 60).replace(/\\s+/g, ' '); }})()"
+        );
+        let parse = |v: String| -> Option<(f32, f32, String)> {
+            let v = v.trim().trim_matches('"').to_string();
+            if v == "null" || v.is_empty() {
+                return None;
+            }
+            let (coords, label) = v.split_once('|')?;
+            let (x, y) = coords.split_once(',')?;
+            Some((x.parse().ok()?, y.parse().ok()?, label.to_string()))
+        };
+        self.ensure_runtime();
+        let Some(page) = &mut self.page else { return "no page".into() };
+        let mut hit: Option<(f32, f32, String, Vec<u64>)> = None;
+        if let Some(rt) = page.rt.as_mut() {
+            if let Some((x, y, label)) = rt.eval(&mut page.doc, &js).ok().and_then(&parse) {
+                hit = Some((x, y, label, Vec::new()));
+            }
+        }
+        if hit.is_none() {
+            let mut keys: Vec<Vec<u64>> = page.frames.keys().cloned().collect();
+            keys.sort();
+            for key in keys {
+                let Some(f) = page.frames.get_mut(&key) else { continue };
+                let Some(sub) = subdoc_mut(&mut page.doc, &key) else { continue };
+                if let Some((x, y, label)) = f.rt.eval(sub, &js).ok().and_then(&parse) {
+                    hit = Some((x, y, label, key));
+                    break;
+                }
+            }
+        }
+        let Some((mut x, mut y, label, path)) = hit else { return "no match".into() };
+        if !path.is_empty() {
+            let Some(page) = &self.page else { return "no page".into() };
+            match frame_origin(page, &path) {
+                Some((ox, oy)) => {
+                    x += ox;
+                    y += oy;
+                }
+                None => return "frame not laid out".into(),
+            }
+        }
+        let mods = Default::default();
+        self.handle_input(InputEvent::MouseMove { x, y, buttons: 0, mods });
+        self.handle_input(InputEvent::MouseDown { x, y, button: 0, buttons: 1, mods });
+        self.handle_input(InputEvent::MouseUp { x, y, button: 0, buttons: 0, mods });
+        let frame = if path.is_empty() { String::new() } else { format!(" in iframe {path:?}") };
+        format!("clicked \"{label}\" at {x},{y}{frame}")
     }
 
     fn handle_input(&mut self, ev: InputEvent) {

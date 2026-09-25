@@ -152,6 +152,7 @@ browser --headless --full-page --screenshot=full.png https://news.ycombinator.co
 browser --headless --eval="document.title" --console https://example.com
 browser --headless --dump-dom https://example.com
 browser --headless --click=640,400 --click-wait=2000 --screenshot=after.png https://example.com
+browser --headless --click-text="^(alle )?akzeptieren" --click-wait=5000 --screenshot=home.png https://www.heise.de
 ```
 
 `SHARKO_DEBUG_FRAMES=1` logs iframe runtimes and their `postMessage`s; with it,

@@ -26,6 +26,8 @@ pub struct HeadlessOptions {
     pub clicks: Vec<(f32, f32)>,
     /// Time to let the page react after each click.
     pub click_wait: Duration,
+    /// Buttons/links to click by text (case-insensitive regexes), also inside iframes.
+    pub click_text: Vec<String>,
     /// Scroll by this many CSS px after load (before the screenshot).
     pub scroll_y: f64,
 }
@@ -44,6 +46,7 @@ impl Default for HeadlessOptions {
             timeout: Duration::from_secs(30),
             settle: Duration::from_millis(300),
             click_wait: Duration::from_millis(300),
+            click_text: Vec::new(),
             print_console: false,
             timings: true,
             clicks: Vec::new(),
@@ -157,6 +160,17 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
             common::protocol::InputEvent::MouseUp { x: *x, y: *y, button: 0, buttons: 0, mods },
         ] {
             d.browser.send(tab, ToRenderer::Input(m));
+        }
+        d.pump_until(opts.click_wait, |_| false);
+    }
+    for (i, pattern) in opts.click_text.iter().enumerate() {
+        let id = 900 + i as u64;
+        d.browser.send(tab, ToRenderer::Eval { id, source: format!("click-text:{pattern}") });
+        if let Some(BrowserEvent::Tab(_, FromRenderer::EvalResult { value, .. })) = d.pump_until(
+            Duration::from_secs(10),
+            |ev| matches!(ev, BrowserEvent::Tab(_, FromRenderer::EvalResult { id: rid, .. }) if *rid == id),
+        ) {
+            eprintln!("[headless] click-text /{pattern}/: {value}");
         }
         d.pump_until(opts.click_wait, |_| false);
     }
