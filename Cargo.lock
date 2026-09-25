@@ -1461,7 +1461,7 @@ dependencies = [
  "kurbo",
  "netstack",
  "peniko",
- "png 0.17.16",
+ "png 0.18.1",
  "script",
  "smol_str 0.3.6",
  "url",
