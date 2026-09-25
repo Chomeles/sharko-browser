@@ -2009,11 +2009,43 @@
     'ariaRelevant', 'ariaRequired', 'ariaRoleDescription', 'ariaRowCount', 'ariaRowIndex', 'ariaRowIndexText',
     'ariaRowSpan', 'ariaSelected', 'ariaSetSize', 'ariaSort', 'ariaValueMax', 'ariaValueMin', 'ariaValueNow',
     'ariaValueText'];
+  // ARIA 1.3 reflects these as enumerated attributes (w3c/aria#2484): [keywords, invalid
+  // value default, missing value default]; the getter returns the canonical keyword.
+  const ARIA_ENUM = {
+    ariaAtomic: [['true', 'false'], 'false', null],
+    ariaAutoComplete: [['inline', 'list', 'both', 'none'], 'none', 'none'],
+    ariaBusy: [['true', 'false'], 'false', 'false'],
+    ariaChecked: [['true', 'false', 'mixed'], null, null],
+    ariaCurrent: [['page', 'step', 'location', 'date', 'time', 'true', 'false'], 'true', 'false'],
+    ariaDisabled: [['true', 'false'], 'false', 'false'],
+    ariaExpanded: [['true', 'false'], null, null],
+    ariaHasPopup: [['true', 'false', 'menu', 'dialog', 'listbox', 'tree', 'grid'], 'false', null],
+    ariaHidden: [['true', 'false'], 'false', 'false'],
+    ariaInvalid: [['true', 'false', 'spelling', 'grammar'], 'true', 'false'],
+    ariaLive: [['polite', 'assertive', 'off'], 'off', 'off'],
+    ariaModal: [['true', 'false'], 'false', 'false'],
+    ariaMultiLine: [['true', 'false'], 'false', 'false'],
+    ariaMultiSelectable: [['true', 'false'], 'false', 'false'],
+    ariaOrientation: [['horizontal', 'vertical'], null, null],
+    ariaPressed: [['true', 'false', 'mixed'], null, null],
+    ariaReadOnly: [['true', 'false'], 'false', 'false'],
+    ariaRequired: [['true', 'false'], 'false', 'false'],
+    ariaSelected: [['true', 'false'], null, null],
+    ariaSort: [['ascending', 'descending', 'other', 'none'], 'none', 'none'],
+  };
+  L.ariaGet = function (id, p, attr) {
+    const v = N.getAttr(id, attr);
+    const en = ARIA_ENUM[p];
+    if (en === undefined || v === null) return en === undefined ? v : (v === null ? en[2] : v);
+    const lower = L.asciiLower(v);
+    for (const k of en[0]) if (lower === k) return k;
+    return en[1];
+  };
   for (const p of ARIA) {
     if (p.endsWith('Element')) continue;
     const attr = p === 'role' ? 'role' : 'aria-' + p.slice(4).toLowerCase();
     Object.defineProperty(Element.prototype, p, {
-      get() { return N.getAttr(idOf(this), attr); },
+      get() { return L.ariaGet(idOf(this), p, attr); },
       set(v) { L.setAttrOrRemove(this, attr, v === null || v === undefined ? null : `${v}`); },
       enumerable: true, configurable: true,
     });

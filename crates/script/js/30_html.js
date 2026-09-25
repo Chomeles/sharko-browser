@@ -23,13 +23,17 @@
     const m = /^[\t\n\f\r ]*([+-]?[0-9]+)/.exec(s);
     if (!m) return null;
     const n = parseInt(m[1], 10);
-    return n >= -2147483648 && n <= 2147483647 ? n : null;
+    return n >= -2147483648 && n <= 2147483647 ? n || 0 : null; // ("-0" is 0)
   }
   function parseNonNeg(s) { const n = parseInteger(s); return n === null || n < 0 ? null : n; }
   function parseFloatAttr(s) {
     const m = /^[\t\n\f\r ]*([+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)/.exec(s);
-    return m ? parseFloat(m[1]) : null;
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    return Number.isFinite(n) ? n : null; // (an overflowing "1.8e308" is an error, not Infinity)
   }
+  const ENTER_KEY_HINTS = new Set(['enter', 'done', 'go', 'next', 'previous', 'search', 'send']);
+  const INPUT_MODES = new Set(['none', 'text', 'tel', 'url', 'email', 'numeric', 'decimal', 'search']);
   const R = {
     str(proto, prop, attr) {
       const a = attr || prop.toLowerCase();
@@ -38,6 +42,11 @@
     strNull(proto, prop, attr) {
       const a = attr || prop.toLowerCase();
       def(proto, prop, function () { return N.getAttr(idOf(this), a); }, function (v) { L.setAttrOrRemove(this, a, v === null || v === undefined ? null : `${v}`); });
+    },
+    // [LegacyNullToEmptyString] attribute DOMString
+    strNE(proto, prop, attr) {
+      const a = attr || prop.toLowerCase();
+      def(proto, prop, function () { return attrOrEmpty(this, a); }, function (v) { setAttr(this, idOf(this), a, v === null ? '' : `${v}`); });
     },
     bool(proto, prop, attr) {
       const a = attr || prop.toLowerCase();
@@ -51,25 +60,49 @@
         const v = N.getAttr(idOf(this), a);
         if (v === null) return dflt;
         const n = nonNeg ? parseNonNeg(v) : parseInteger(v);
-        return n === null ? dflt : n;
+        return n === null ? dflt : n || 0; // ("-0" is 0)
       }, function (v) {
         const n = L.toLong(v);
         if (nonNeg && n < 0) throw new DOMException(`Failed to set the '${prop}' property: The value provided (${n}) is negative.`, 'IndexSizeError');
         setAttr(this, idOf(this), a, String(n));
       });
     },
-    ulong(proto, prop, attr, dflt = 0, min = 0, max = 2147483647) {
+    // `fallback`: "limited to only positive numbers with fallback" (setting 0 stores the
+    // default instead of throwing).
+    ulong(proto, prop, attr, dflt = 0, min = 0, max = 2147483647, fallback = false) {
       const a = attr || prop.toLowerCase();
       def(proto, prop, function () {
         const v = N.getAttr(idOf(this), a);
         if (v === null) return dflt;
         const n = parseNonNeg(v);
         if (n === null || n < min) return dflt;
-        return Math.min(n, max);
+        return Math.min(n, max) || 0;
       }, function (v) {
         let n = L.toULong(v);
         if (n > 2147483647) n = dflt;
-        if (min > 0 && n === 0) throw new DOMException(`Failed to set the '${prop}' property: The value provided is 0, which is an invalid size.`, 'IndexSizeError');
+        if (min > 0 && n === 0) {
+          if (!fallback) throw new DOMException(`Failed to set the '${prop}' property: The value provided is 0, which is an invalid size.`, 'IndexSizeError');
+          n = dflt;
+        }
+        setAttr(this, idOf(this), a, String(n));
+      });
+    },
+    // unsigned long "clamped to the range [min, max]" (span, colSpan, rowSpan): out-of-range
+    // content values clamp instead of falling back, and setting 0 is allowed.
+    clamped(proto, prop, attr, dflt, min, max) {
+      const a = attr || prop.toLowerCase();
+      def(proto, prop, function () {
+        const v = N.getAttr(idOf(this), a);
+        if (v === null) return dflt;
+        // (No 2^31 limit before clamping: "2147483648" clamps to max; "-0" is 0.)
+        const m = /^[\t\n\f\r ]*([+-]?)([0-9]+)/.exec(v);
+        if (!m) return dflt;
+        const n = Number(m[2]);
+        if (m[1] === '-' && n !== 0) return dflt;
+        return Math.min(Math.max(n, min), max) || 0;
+      }, function (v) {
+        let n = L.toULong(v);
+        if (n > 2147483647) n = dflt;
         setAttr(this, idOf(this), a, String(n));
       });
     },
@@ -544,9 +577,10 @@
       }
       return false;
     },
-    get enterKeyHint() { return attrOrEmpty(this, 'enterkeyhint').toLowerCase(); },
+    // Enumerated attributes without a missing/invalid value default: unknown values read as ''.
+    get enterKeyHint() { const l = L.asciiLower(attrOrEmpty(this, 'enterkeyhint')); return ENTER_KEY_HINTS.has(l) ? l : ''; },
     set enterKeyHint(v) { setAttr(this, idOf(this), 'enterkeyhint', `${v}`); },
-    get inputMode() { return attrOrEmpty(this, 'inputmode').toLowerCase(); },
+    get inputMode() { const l = L.asciiLower(attrOrEmpty(this, 'inputmode')); return INPUT_MODES.has(l) ? l : ''; },
     set inputMode(v) { setAttr(this, idOf(this), 'inputmode', `${v}`); },
     get popover() {
       const v = N.getAttr(idOf(this), 'popover');
@@ -992,7 +1026,8 @@
   R.str(HTMLMetaElement.prototype, 'media');
   R.str(HTMLMetaElement.prototype, 'scheme');
   const HTMLBodyElement = htmlClass('HTMLBodyElement', ['body']);
-  for (const [p, a] of [['text', 'text'], ['link', 'link'], ['vLink', 'vlink'], ['aLink', 'alink'], ['bgColor', 'bgcolor'], ['background', 'background']]) R.str(HTMLBodyElement.prototype, p, a);
+  for (const [p, a] of [['text', 'text'], ['link', 'link'], ['vLink', 'vlink'], ['aLink', 'alink'], ['bgColor', 'bgcolor']]) R.strNE(HTMLBodyElement.prototype, p, a);
+  R.str(HTMLBodyElement.prototype, 'background');
   const bodyTarget = (el) => (L.isBodyOfDocument(el) ? L.window : el);
   L.defineEventHandlers(HTMLBodyElement.prototype, L.BODY_FORWARDED, bodyTarget);
   const HTMLFrameSetElement = htmlClass('HTMLFrameSetElement', ['frameset']);
@@ -1047,12 +1082,14 @@
   def(HTMLTrackElement.prototype, 'track', function () { return null; });
   L.defineConstants([HTMLTrackElement, HTMLTrackElement.prototype], { NONE: 0, LOADING: 1, LOADED: 2, ERROR: 3 });
   const HTMLFontElement = htmlClass('HTMLFontElement', ['font']);
-  R.str(HTMLFontElement.prototype, 'color'); R.str(HTMLFontElement.prototype, 'face'); R.str(HTMLFontElement.prototype, 'size');
+  R.strNE(HTMLFontElement.prototype, 'color'); R.str(HTMLFontElement.prototype, 'face'); R.str(HTMLFontElement.prototype, 'size');
   const HTMLParamElement = htmlClass('HTMLParamElement', ['param']);
   R.str(HTMLParamElement.prototype, 'name'); R.str(HTMLParamElement.prototype, 'value'); R.str(HTMLParamElement.prototype, 'type'); R.str(HTMLParamElement.prototype, 'valueType', 'valuetype');
   const HTMLMarqueeElement = htmlClass('HTMLMarqueeElement', ['marquee']);
   for (const p of ['behavior', 'bgColor', 'direction', 'height', 'width']) R.str(HTMLMarqueeElement.prototype, p, p.toLowerCase());
-  for (const p of ['hspace', 'vspace', 'scrollAmount', 'scrollDelay']) R.ulong(HTMLMarqueeElement.prototype, p, p.toLowerCase());
+  for (const p of ['hspace', 'vspace']) R.ulong(HTMLMarqueeElement.prototype, p, p.toLowerCase());
+  R.ulong(HTMLMarqueeElement.prototype, 'scrollAmount', 'scrollamount', 6);
+  R.ulong(HTMLMarqueeElement.prototype, 'scrollDelay', 'scrolldelay', 85);
   R.long(HTMLMarqueeElement.prototype, 'loop', 'loop', -1); R.bool(HTMLMarqueeElement.prototype, 'trueSpeed', 'truespeed');
   L.mixin(HTMLMarqueeElement.prototype, { start() { }, stop() { } });
   const HTMLSlotElement = htmlClass('HTMLSlotElement', ['slot']);
@@ -1120,7 +1157,7 @@
   }
   for (const p of ['hreflang', 'type', 'charset', 'coords', 'name', 'rev', 'shape']) R.str(HTMLAnchorElement.prototype, p);
   def(HTMLAnchorElement.prototype, 'text', function () { return L.textContentGet(this); }, function (v) { L.textContentSet(this, v); });
-  R.str(HTMLAreaElement.prototype, 'alt'); R.str(HTMLAreaElement.prototype, 'coords'); R.str(HTMLAreaElement.prototype, 'shape');
+  for (const p of ['alt', 'coords', 'shape', 'hreflang', 'type']) R.str(HTMLAreaElement.prototype, p);
   R.bool(HTMLAreaElement.prototype, 'noHref', 'nohref');
 
   // --- iframe / embed / object / frame ---
@@ -1131,7 +1168,8 @@
     R.bool(P, 'allowPaymentRequest', 'allowpaymentrequest'); R.str(P, 'width'); R.str(P, 'height'); R.referrerPolicy(P);
     R.enumerated(P, 'loading', 'loading', ['lazy', 'eager'], 'eager', 'eager');
     R.tokens(P, 'sandbox', 'sandbox', ['allow-downloads', 'allow-forms', 'allow-modals', 'allow-orientation-lock', 'allow-pointer-lock', 'allow-popups', 'allow-popups-to-escape-sandbox', 'allow-presentation', 'allow-same-origin', 'allow-scripts', 'allow-top-navigation', 'allow-top-navigation-by-user-activation', 'allow-top-navigation-to-custom-protocols', 'allow-storage-access-by-user-activation']);
-    for (const p of ['align', 'scrolling', 'frameBorder', 'marginHeight', 'marginWidth']) R.str(P, p, p.toLowerCase());
+    for (const p of ['align', 'scrolling', 'frameBorder']) R.str(P, p, p.toLowerCase());
+    R.strNE(P, 'marginHeight', 'marginheight'); R.strNE(P, 'marginWidth', 'marginwidth');
     R.url(P, 'longDesc', 'longdesc');
     R.bool(P, 'credentialless');
     def(P, 'contentDocument', function () { return null; });
@@ -1143,7 +1181,7 @@
   {
     const P = HTMLFrameElement.prototype;
     R.str(P, 'name'); R.str(P, 'scrolling'); R.url(P, 'src'); R.str(P, 'frameBorder', 'frameborder'); R.url(P, 'longDesc', 'longdesc');
-    R.bool(P, 'noResize', 'noresize'); R.str(P, 'marginHeight', 'marginheight'); R.str(P, 'marginWidth', 'marginwidth');
+    R.bool(P, 'noResize', 'noresize'); R.strNE(P, 'marginHeight', 'marginheight'); R.strNE(P, 'marginWidth', 'marginwidth');
     def(P, 'contentDocument', function () { return null; });
     def(P, 'contentWindow', function () { return null; });
   }
@@ -1157,7 +1195,8 @@
   {
     const P = HTMLObjectElement.prototype;
     R.url(P, 'data'); R.str(P, 'type'); R.str(P, 'name'); R.str(P, 'useMap', 'usemap'); R.str(P, 'width'); R.str(P, 'height');
-    for (const p of ['align', 'archive', 'code', 'codeType', 'standby', 'border']) R.str(P, p, p.toLowerCase());
+    for (const p of ['align', 'archive', 'code', 'codeType', 'standby']) R.str(P, p, p.toLowerCase());
+    R.strNE(P, 'border');
     R.url(P, 'codeBase', 'codebase'); R.bool(P, 'declare'); R.ulong(P, 'hspace'); R.ulong(P, 'vspace');
     def(P, 'contentDocument', function () { return null; });
     def(P, 'contentWindow', function () { return null; });
@@ -1202,7 +1241,9 @@
   const HTMLLinkElement = htmlClass('HTMLLinkElement', ['link']);
   {
     const P = HTMLLinkElement.prototype;
-    R.url(P, 'href'); R.crossOrigin(P); R.str(P, 'rel'); R.str(P, 'as'); R.str(P, 'media'); R.str(P, 'integrity');
+    R.url(P, 'href'); R.crossOrigin(P); R.str(P, 'rel'); R.str(P, 'media'); R.str(P, 'integrity');
+    R.enumerated(P, 'as', 'as', ['fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report',
+      'script', 'sharedworker', 'style', 'track', 'video', 'worker', 'xslt'], '', '');
     R.str(P, 'hreflang'); R.str(P, 'type'); R.referrerPolicy(P); R.str(P, 'imageSrcset', 'imagesrcset');
     R.str(P, 'imageSizes', 'imagesizes'); R.str(P, 'charset'); R.str(P, 'rev'); R.str(P, 'target');
     R.str(P, 'fetchPriority', 'fetchpriority'); R.bool(P, 'disabled');
@@ -1267,7 +1308,7 @@
     const P = HTMLImageElement.prototype;
     R.str(P, 'alt'); R.url(P, 'src'); R.str(P, 'srcset'); R.str(P, 'sizes'); R.crossOrigin(P); R.str(P, 'useMap', 'usemap');
     R.bool(P, 'isMap', 'ismap'); R.referrerPolicy(P); R.str(P, 'name'); R.url(P, 'lowsrc'); R.str(P, 'align');
-    R.ulong(P, 'hspace'); R.ulong(P, 'vspace'); R.url(P, 'longDesc', 'longdesc'); R.str(P, 'border');
+    R.ulong(P, 'hspace'); R.ulong(P, 'vspace'); R.url(P, 'longDesc', 'longdesc'); R.strNE(P, 'border');
     R.enumerated(P, 'decoding', 'decoding', ['sync', 'async', 'auto'], 'auto', 'auto');
     R.enumerated(P, 'loading', 'loading', ['lazy', 'eager'], 'eager', 'eager');
     R.str(P, 'fetchPriority', 'fetchpriority');
@@ -1277,13 +1318,13 @@
       if (v !== null) { const n = parseNonNeg(v); if (n !== null) return n; }
       if (N.isConnected(idOf(this))) { L.flushSheets(); const r = N.getBoundingClientRect(idOf(this)); if (r[2] > 0) return Math.round(r[2]); }
       return naturalSize(this)[0];
-    }, function (v) { setAttr(this, idOf(this), 'width', String(L.toULong(v))); });
+    }, function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'width', String(n > 2147483647 ? 0 : n)); });
     def(P, 'height', function () {
       const v = N.getAttr(idOf(this), 'height');
       if (v !== null) { const n = parseNonNeg(v); if (n !== null) return n; }
       if (N.isConnected(idOf(this))) { L.flushSheets(); const r = N.getBoundingClientRect(idOf(this)); if (r[3] > 0) return Math.round(r[3]); }
       return naturalSize(this)[1];
-    }, function (v) { setAttr(this, idOf(this), 'height', String(L.toULong(v))); });
+    }, function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'height', String(n > 2147483647 ? 0 : n)); });
     def(P, 'naturalWidth', function () { return naturalSize(this)[0]; });
     def(P, 'naturalHeight', function () { return naturalSize(this)[1]; });
     def(P, 'complete', function () { return imgComplete(this); });
@@ -1332,9 +1373,9 @@
   {
     const P = HTMLCanvasElement.prototype;
     def(P, 'width', function () { return canvasDim(idOf(this), 'width', 300); },
-      function (v) { setAttr(this, idOf(this), 'width', String(L.toULong(v))); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
+      function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'width', String(n > 2147483647 ? 300 : n)); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
     def(P, 'height', function () { return canvasDim(idOf(this), 'height', 150); },
-      function (v) { setAttr(this, idOf(this), 'height', String(L.toULong(v))); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
+      function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'height', String(n > 2147483647 ? 150 : n)); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
     L.mixin(P, {
       getContext(type, attrs) {
         const t = `${type}`;
@@ -2034,6 +2075,7 @@
   const HTMLMediaElement = htmlClass('HTMLMediaElement', []);
   {
     const P = HTMLMediaElement.prototype;
+    R.enumerated(P, 'loading', 'loading', ['lazy', 'eager'], 'eager', 'eager');
     L.defineConstants([HTMLMediaElement, P], { NETWORK_EMPTY: 0, NETWORK_IDLE: 1, NETWORK_LOADING: 2, NETWORK_NO_SOURCE: 3, HAVE_NOTHING: 0, HAVE_METADATA: 1, HAVE_CURRENT_DATA: 2, HAVE_FUTURE_DATA: 3, HAVE_ENOUGH_DATA: 4 });
     R.url(P, 'src'); R.crossOrigin(P); R.bool(P, 'autoplay'); R.bool(P, 'loop'); R.bool(P, 'controls');
     R.bool(P, 'defaultMuted', 'muted');
@@ -2200,7 +2242,8 @@
   const HTMLTableElement = htmlClass('HTMLTableElement', ['table']);
   {
     const P = HTMLTableElement.prototype;
-    for (const p of ['align', 'border', 'frame', 'rules', 'summary', 'width', 'bgColor', 'cellPadding', 'cellSpacing']) R.str(P, p, p.toLowerCase());
+    for (const p of ['align', 'border', 'frame', 'rules', 'summary', 'width']) R.str(P, p, p.toLowerCase());
+    for (const p of ['bgColor', 'cellPadding', 'cellSpacing']) R.strNE(P, p, p.toLowerCase());
     L.mixin(P, {
       get caption() { return wrap(firstChildByName(idOf(this), 'caption')); },
       set caption(v) {
@@ -2299,7 +2342,8 @@
   const HTMLTableRowElement = htmlClass('HTMLTableRowElement', ['tr']);
   {
     const P = HTMLTableRowElement.prototype;
-    for (const p of ['align', 'ch', 'chOff', 'vAlign', 'bgColor']) R.str(P, p, p === 'ch' ? 'char' : p === 'chOff' ? 'charoff' : p.toLowerCase());
+    for (const p of ['align', 'ch', 'chOff', 'vAlign']) R.str(P, p, p === 'ch' ? 'char' : p === 'chOff' ? 'charoff' : p.toLowerCase());
+    R.strNE(P, 'bgColor', 'bgcolor');
     L.mixin(P, {
       get rowIndex() {
         const id = idOf(this);
@@ -2335,9 +2379,10 @@
   const HTMLTableCellElement = htmlClass('HTMLTableCellElement', ['td', 'th']);
   {
     const P = HTMLTableCellElement.prototype;
-    R.ulong(P, 'colSpan', 'colspan', 1, 1, 1000);
-    R.ulong(P, 'rowSpan', 'rowspan', 1, 0, 65534);
-    for (const p of ['headers', 'abbr', 'align', 'axis', 'height', 'width', 'ch', 'chOff', 'vAlign', 'bgColor']) R.str(P, p, p === 'ch' ? 'char' : p === 'chOff' ? 'charoff' : p.toLowerCase());
+    R.clamped(P, 'colSpan', 'colspan', 1, 1, 1000);
+    R.clamped(P, 'rowSpan', 'rowspan', 1, 0, 65534);
+    for (const p of ['headers', 'abbr', 'align', 'axis', 'height', 'width', 'ch', 'chOff', 'vAlign']) R.str(P, p, p === 'ch' ? 'char' : p === 'chOff' ? 'charoff' : p.toLowerCase());
+    R.strNE(P, 'bgColor', 'bgcolor');
     R.enumerated(P, 'scope', 'scope', ['row', 'col', 'rowgroup', 'colgroup'], '', '');
     R.bool(P, 'noWrap', 'nowrap');
     def(P, 'cellIndex', function () {
@@ -2348,7 +2393,7 @@
     });
   }
   const HTMLTableColElement = htmlClass('HTMLTableColElement', ['col', 'colgroup']);
-  R.ulong(HTMLTableColElement.prototype, 'span', 'span', 1, 1, 1000);
+  R.clamped(HTMLTableColElement.prototype, 'span', 'span', 1, 1, 1000);
   for (const p of ['align', 'ch', 'chOff', 'vAlign', 'width']) R.str(HTMLTableColElement.prototype, p, p === 'ch' ? 'char' : p === 'chOff' ? 'charoff' : p.toLowerCase());
   const HTMLTableCaptionElement = htmlClass('HTMLTableCaptionElement', ['caption']);
   R.str(HTMLTableCaptionElement.prototype, 'align');
@@ -3029,7 +3074,9 @@
   {
     const P = HTMLInputElement.prototype;
     R.str(P, 'accept'); R.str(P, 'alt'); R.str(P, 'autocomplete'); R.str(P, 'dirName', 'dirname');
-    R.bool(P, 'disabled'); R.str(P, 'formEnctype', 'formenctype'); R.str(P, 'formMethod', 'formmethod');
+    R.bool(P, 'disabled');
+    R.enumerated(P, 'formEnctype', 'formenctype', ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'], '', 'application/x-www-form-urlencoded');
+    R.enumerated(P, 'formMethod', 'formmethod', ['get', 'post', 'dialog'], '', 'get');
     R.bool(P, 'formNoValidate', 'formnovalidate'); R.str(P, 'formTarget', 'formtarget');
     R.ulong(P, 'height'); R.str(P, 'max'); R.long(P, 'maxLength', 'maxlength', -1, true); R.str(P, 'min');
     R.long(P, 'minLength', 'minlength', -1, true); R.bool(P, 'multiple'); R.str(P, 'name'); R.str(P, 'pattern');
@@ -3168,9 +3215,9 @@
   const HTMLTextAreaElement = htmlClass('HTMLTextAreaElement', ['textarea']);
   {
     const P = HTMLTextAreaElement.prototype;
-    R.str(P, 'autocomplete'); R.ulong(P, 'cols', 'cols', 20, 1); R.str(P, 'dirName', 'dirname'); R.bool(P, 'disabled');
+    R.str(P, 'autocomplete'); R.ulong(P, 'cols', 'cols', 20, 1, 2147483647, true); R.str(P, 'dirName', 'dirname'); R.bool(P, 'disabled');
     R.long(P, 'maxLength', 'maxlength', -1, true); R.long(P, 'minLength', 'minlength', -1, true); R.str(P, 'name');
-    R.str(P, 'placeholder'); R.bool(P, 'readOnly', 'readonly'); R.bool(P, 'required'); R.ulong(P, 'rows', 'rows', 2, 1);
+    R.str(P, 'placeholder'); R.bool(P, 'readOnly', 'readonly'); R.bool(P, 'required'); R.ulong(P, 'rows', 'rows', 2, 1, 2147483647, true);
     R.str(P, 'wrap');
     L.mixin(P, ConstraintValidation);
     L.mixin(P, SelectionAPI);
@@ -3454,7 +3501,9 @@
   const HTMLButtonElement = htmlClass('HTMLButtonElement', ['button']);
   {
     const P = HTMLButtonElement.prototype;
-    R.bool(P, 'disabled'); R.str(P, 'formEnctype', 'formenctype'); R.str(P, 'formMethod', 'formmethod');
+    R.bool(P, 'disabled');
+    R.enumerated(P, 'formEnctype', 'formenctype', ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'], '', 'application/x-www-form-urlencoded');
+    R.enumerated(P, 'formMethod', 'formmethod', ['get', 'post', 'dialog'], '', 'get');
     R.bool(P, 'formNoValidate', 'formnovalidate'); R.str(P, 'formTarget', 'formtarget'); R.str(P, 'name');
     R.str(P, 'value'); R.str(P, 'popoverTargetAction', 'popovertargetaction'); R.str(P, 'command');
     def(P, 'formAction', function () {
