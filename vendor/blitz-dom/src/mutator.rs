@@ -370,6 +370,17 @@ impl DocumentMutator<'_> {
             self.load_custom_paint_src(node_id);
         } else if (tag, attr) == tag_and_attr!("link", "href") {
             self.load_linked_stylesheet(node_id);
+        } else if (tag, attr) == tag_and_attr!("link", "rel") {
+            // PATCH: a `rel` change loads or drops the stylesheet (`preload` -> `stylesheet`).
+            let is_sheet = value
+                .split_ascii_whitespace()
+                .any(|rel| rel.eq_ignore_ascii_case("stylesheet"));
+            let loaded = self.doc.nodes_to_stylesheet.contains_key(&node_id);
+            if is_sheet && !loaded {
+                self.load_linked_stylesheet(node_id);
+            } else if !is_sheet && loaded {
+                self.unload_stylesheet(node_id);
+            }
         } else if (tag, attr) == tag_and_attr!("iframe", "src")
             || (tag, attr) == tag_and_attr!("iframe", "srcdoc")
         {
@@ -1113,7 +1124,26 @@ impl<'doc> DocumentMutator<'doc> {
         let (Some(rels), Some(href)) = (rel_attr, href_attr) else {
             return;
         };
-        if !rels.split_ascii_whitespace().any(|rel| rel == "stylesheet") {
+        if !rels.split_ascii_whitespace().any(|rel| rel.eq_ignore_ascii_case("stylesheet")) {
+            // PATCH: `<link rel=preload>` fetches its resource and fires `load` (async CSS
+            // loaders switch `rel` to `stylesheet` then).
+            if rels.split_ascii_whitespace().any(|rel| rel.eq_ignore_ascii_case("preload"))
+                && !href.trim().is_empty()
+            {
+                let url = self.doc.resolve_url(href);
+                let handler = ResourceHandler::new(
+                    self.doc.tx.clone(),
+                    self.doc.id(),
+                    Some(node.id),
+                    self.doc.shell_provider.clone(),
+                    crate::net::PreloadHandler,
+                );
+                self.doc.net_provider.fetch(
+                    self.doc.id(),
+                    self.doc.build_request(url),
+                    Box::new(handler),
+                );
+            }
             return;
         }
 

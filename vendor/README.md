@@ -200,3 +200,11 @@ Patches so far:
     `document.rs`: inline layouts record the text byte range of each DOM text node
     (`TextLayout::text_nodes`), and `text_range_client_rects()` returns the line rects of
     part of a text node (Range geometry), without hanging trailing spaces.
+64. `blitz-dom/src/node/element.rs`, `stylo.rs`: `ElementData::script_animation_declarations`
+    holds the current values of script animations (`Element.animate`); `animation_rule`
+    cascades them after the element's CSS animations (at the animation level, so the
+    style attribute stays untouched) and `has_animations` accounts for them.
+65. `blitz-dom/src/mutator.rs`, `net.rs`, `document.rs`: `<link rel=preload>` fetches its
+    resource and fires `load`; changing a `<link>`'s `rel` loads or drops its stylesheet
+    (the async-CSS pattern `rel=preload as=style` + `rel='stylesheet'` from script left
+    welt.de unstyled).

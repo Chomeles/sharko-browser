@@ -1722,6 +1722,11 @@ impl BaseDocument {
                 // TODO: see if we can only invalidate if resolved fonts may have changed
                 self.invalidate_inline_contexts();
             }
+            Resource::Preloaded => {
+                if let Some(node_id) = res.node_id {
+                    self.push_element_load_event(node_id, true);
+                }
+            }
             Resource::None => {
                 // Do nothing
             }

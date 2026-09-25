@@ -64,6 +64,8 @@ pub enum Resource {
     Font(Bytes, FontFaceOverrides),
     /// HTML fetched for an `<iframe>` element's `src`
     DocumentSrc(String),
+    /// PATCH: a `<link rel=preload>` resource was fetched (its `load` event fires).
+    Preloaded,
     None,
 }
 
@@ -541,6 +543,16 @@ fn stylo_to_fontique_style(style: &FontStyleRange) -> parley::fontique::FontStyl
                 Fq::Oblique(angle)
             }
         }
+    }
+}
+
+/// PATCH: fetches a `<link rel=preload>` resource (into the HTTP cache) for its `load`
+/// event.
+pub(crate) struct PreloadHandler;
+
+impl NetHandler for ResourceHandler<PreloadHandler> {
+    fn bytes(self: Box<Self>, resolved_url: String, _bytes: Bytes) {
+        self.respond(resolved_url, Ok(Resource::Preloaded));
     }
 }
 
