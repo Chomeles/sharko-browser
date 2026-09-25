@@ -195,8 +195,17 @@
       const r = el.getBoundingClientRect();
       const w = L.window.innerWidth, h = L.window.innerHeight;
       if (r.width === 0 && r.height === 0) return;
-      if (r.top >= 0 && r.left >= 0 && r.bottom <= h && r.right <= w) return;
-      N.scrollIntoView(id, 'center', 'nearest', 'auto');
+      // Like Chrome ("center if needed" per axis): no scroll when the element is visible
+      // or covers the viewport (horizontally: when 32px of it show), the nearest edge
+      // when partly visible, centered when hidden.
+      const mode = (a, b, size, minShown) => {
+        const shown = Math.min(b, size) - Math.max(a, 0);
+        if (shown >= b - a || shown >= size || shown >= minShown) return 'none';
+        return shown > 0 ? 'nearest' : 'center';
+      };
+      const y = mode(r.top, r.bottom, h, Infinity), x = mode(r.left, r.right, w, 32);
+      if (x === 'none' && y === 'none') return;
+      N.scrollIntoView(id, y === 'none' ? 'nearest' : y, x === 'none' ? 'nearest' : x, 'auto');
     } catch (_) { /* best effort */ }
   }
   function blurElement(el) {

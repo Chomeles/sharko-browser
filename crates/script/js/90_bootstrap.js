@@ -21,9 +21,17 @@
   // WindowProperties: named access to elements by id (window.myId)
   const namedPropsTarget = Object.create(EventTarget.prototype);
   const NAMED_SEL_CACHE = new Map();
+  const INDEX_RE = /^(0|[1-9][0-9]{0,8})$/;
   function namedWindowProp(name) {
     if (name === '' || name.length > 256) return undefined;
+    if (INDEX_RE.test(name)) {
+      const f = L.childFrames()[+name];
+      return f === undefined ? undefined : L.remoteWindowFor(f);
+    }
     let id = 0;
+    // A child browsing context with that name comes first (window.frames['__tcfapiLocator']).
+    try { id = N.querySelector(docId, `iframe[name=${L.cssString(name)}],frame[name=${L.cssString(name)}]`); } catch (_) { id = 0; }
+    if (id !== 0 && !notYetParsed(id)) return L.remoteWindowFor(id);
     try { id = N.getElementById(name); } catch (_) { id = 0; }
     if (id !== 0 && notYetParsed(id)) id = 0;
     if (id !== 0) return wrap(id);
@@ -126,7 +134,7 @@
   defGetter('crossOriginIsolated', () => false);
   defGetter('originAgentCluster', () => false);
   defGetter('closed', () => false);
-  defGetter('length', () => 0, { replaceable: true });
+  defGetter('length', () => L.childFrames().length, { replaceable: true });
   defGetter('opener', () => null, { replaceable: true });
   defGetter('frameElement', () => null);
   let windowName = '';

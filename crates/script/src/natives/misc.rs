@@ -871,26 +871,53 @@ pub(crate) fn n_structured_clone(cx: &mut Cx) -> NResult {
     }
 }
 
-/// Addition: `N.isFrame()` -> whether this document is an iframe's (`window.parent` is
-/// another window).
-pub(crate) fn n_is_frame(cx: &mut Cx) -> NResult {
-    let is_frame = cx.st.is_frame.get();
-    cx.ret_bool(is_frame);
+/// A frame path (JS node ids) from argument `i`.
+fn frame_path_arg(cx: &Cx, i: i32) -> Result<Vec<u64>, JsErr> {
+    let v = cx.arg(i);
+    let Ok(arr) = v8::Local::<v8::Array>::try_from(v) else {
+        return Err(JsErr::type_err("frame path expected"));
+    };
+    let mut path = Vec::with_capacity(arr.length() as usize);
+    for k in 0..arr.length() {
+        let n = arr
+            .get_index(cx.scope, k)
+            .and_then(|e| e.number_value(cx.scope))
+            .unwrap_or(0.0);
+        path.push(crate::cx::node_id_from_js(n).ok_or_else(JsErr::invalid_node)?.as_u64());
+    }
+    Ok(path)
+}
+
+/// JS array of the node ids of a frame path.
+pub(crate) fn frame_path_value<'s>(scope: &v8::PinScope<'s, '_>, path: &[u64]) -> v8::Local<'s, v8::Array> {
+    let elems: Vec<v8::Local<v8::Value>> = path
+        .iter()
+        .map(|id| {
+            crate::cx::num_value(
+                scope,
+                crate::cx::node_id_to_js(blitz_dom::NodeId::from_u64(*id)).unwrap_or(0.0),
+            )
+        })
+        .collect();
+    v8::Array::new_with_elements(scope, &elems)
+}
+
+/// Addition: `N.framePath()` -> this document's frame path: the `<iframe>` node ids from
+/// the page down (each in its parent's document); `[]` for the page.
+pub(crate) fn n_frame_path(cx: &mut Cx) -> NResult {
+    let path = cx.st.host.frame_path();
+    let arr = frame_path_value(cx.scope, &path);
+    cx.ret_value(arr.into());
     Ok(())
 }
 
-/// Addition: `N.framePost(target, message, targetOrigin)`: `postMessage` to another
-/// frame's window. `target` is `null` for the parent window or an `<iframe>` element's
-/// node id; `targetOrigin` is `*` or a serialized origin. The message is serialized here
-/// (a `DataCloneError` is thrown synchronously, as in browsers) and delivered as a task.
+/// Addition: `N.framePost(path, message, targetOrigin)`: `postMessage` to the window of
+/// the frame at `path` (see `N.framePath`); `targetOrigin` is `*` or a serialized origin.
+/// The message is serialized here (a `DataCloneError` is thrown synchronously, as in
+/// browsers) and delivered as a task.
 pub(crate) fn n_frame_post(cx: &mut Cx) -> NResult {
     use v8::ValueSerializerHelper;
-    let target = if cx.arg(0).is_null_or_undefined() {
-        None
-    } else {
-        let doc = cx.st.doc()?;
-        Some(cx.node(doc, 0)?.as_u64())
-    };
+    let target = frame_path_arg(cx, 0)?;
     let value = cx.arg(1);
     let target_origin = cx.string(2)?;
     let context = cx.scope.get_current_context();
@@ -902,7 +929,29 @@ pub(crate) fn n_frame_post(cx: &mut Cx) -> NResult {
         }
         ser.release()
     };
-    cx.st.host.post_message(target, &target_origin, bytes);
+    cx.st.host.post_message(&target, &target_origin, bytes);
+    Ok(())
+}
+
+/// Addition: `N.frameList(path)` -> the frames of the document at `path` in tree order as
+/// `[id, name]` pairs, or `null` if the host doesn't know them.
+pub(crate) fn n_frame_list(cx: &mut Cx) -> NResult {
+    let path = frame_path_arg(cx, 0)?;
+    let Some(frames) = cx.st.host.frame_children(&path) else {
+        cx.ret_null();
+        return Ok(());
+    };
+    let elems: Vec<v8::Local<v8::Value>> = frames
+        .iter()
+        .filter_map(|(id, name)| {
+            let js = crate::cx::node_id_to_js(blitz_dom::NodeId::from_u64(*id))?;
+            let parts: [v8::Local<v8::Value>; 2] =
+                [crate::cx::num_value(cx.scope, js), v8_str(cx.scope, name).into()];
+            Some(v8::Array::new_with_elements(cx.scope, &parts).into())
+        })
+        .collect();
+    let arr = v8::Array::new_with_elements(cx.scope, &elems);
+    cx.ret_value(arr.into());
     Ok(())
 }
 

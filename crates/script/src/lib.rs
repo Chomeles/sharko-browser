@@ -165,12 +165,22 @@ pub trait ScriptHost {
     fn clipboard_write(&self, text: &str) {
         let _ = text;
     }
-    /// `postMessage` to another frame's window: `target` is `None` for the parent window
-    /// (from an iframe's document) or the node id (`NodeId::as_u64`) of an `<iframe>` in
-    /// this document; `target_origin` is `*` or the origin the receiver must have; `data`
-    /// is the message serialized with V8's ValueSerializer. Default: dropped.
-    fn post_message(&self, target: Option<u64>, target_origin: &str, data: Vec<u8>) {
+    /// `postMessage` to another frame's window. Frames are named by their path: the
+    /// `<iframe>` node ids (`NodeId::as_u64`, each in its parent's document) from the page
+    /// down; the page is `[]`. `target_origin` is `*` or the origin the receiver must
+    /// have; `data` is the message serialized with V8's ValueSerializer. Default: dropped.
+    fn post_message(&self, target: &[u64], target_origin: &str, data: Vec<u8>) {
         let _ = (target, target_origin, data);
+    }
+    /// The frame path of this document (`[]`: the page, the default).
+    fn frame_path(&self) -> Vec<u64> {
+        Vec::new()
+    }
+    /// The frames of the document at `path` in tree order, as `(node id of the <iframe>,
+    /// its name)` (`parent.frames['x']`, `top.length`); `None` if unknown.
+    fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
+        let _ = path;
+        None
     }
 }
 

@@ -578,6 +578,7 @@ fn js_layer_frame_runtimes() {
     );
     let iframe = page.doc.get_element_by_id("f").unwrap().as_u64();
     let frame_host = Rc::new(common::MockHost::default());
+    *frame_host.frame_path.borrow_mut() = vec![iframe];
     let mut opts = common::options(PathBuf::new(), true);
     opts.document_url = "https://frame.example/x.html".into();
     let mut frame = script::ScriptRuntime::new_frame(frame_host.clone(), opts.clone());
@@ -593,35 +594,77 @@ fn js_layer_frame_runtimes() {
         .unwrap();
     assert_eq!(r, r#"[true,true,"[object Window]",true]"#);
     let (target, target_origin, data) = frame_host.posted.borrow_mut().pop().unwrap();
-    assert_eq!((target, target_origin.as_str()), (None, "*"));
+    assert_eq!((target, target_origin.as_str()), (vec![], "*"));
     page.eval(
         "globalThis.got = []; addEventListener('message', (e) => got.push([e.data.a.join(), \
          e.data.d.getTime(), e.origin, e.source === document.getElementById('f').contentWindow])); 1",
     );
     page.rt
-        .deliver_message(&mut page.doc, Some(iframe), "https://frame.example", &data);
+        .deliver_message(&mut page.doc, &[iframe], "https://frame.example", &data);
     assert_eq!(page.eval("got"), r#"[["1,2",5,"https://frame.example",true]]"#);
 
     // page -> frame
     page.eval("document.getElementById('f').contentWindow.postMessage('hi', 'https://frame.example/y'); 1");
     let (target, target_origin, data) = page.host.posted.borrow_mut().pop().unwrap();
-    assert_eq!((target, target_origin.as_str()), (Some(iframe), "https://frame.example"));
+    assert_eq!((target, target_origin.as_str()), (vec![iframe], "https://frame.example"));
     frame
         .eval(&mut frame_doc, "globalThis.got = []; addEventListener('message', (e) => got.push([e.data, e.source === parent])); 1")
         .unwrap();
-    frame.deliver_message(&mut frame_doc, None, "https://example.com", &data);
+    frame.deliver_message(&mut frame_doc, &[], "https://example.com", &data);
     assert_eq!(frame.eval(&mut frame_doc, "got").unwrap(), r#"[["hi",true]]"#);
-    // Same-origin and about:blank iframes stay unscriptable from the page.
+    // Every iframe has a window (window.length, frames[i], named access); the documents
+    // of same-origin and about:blank ones aren't scriptable from the page yet.
     assert_eq!(
-        page.eval("const i = document.createElement('iframe'); document.body.append(i); i.contentWindow"),
-        "null"
+        page.eval(
+            "const i = document.createElement('iframe'); i.name = '__tcfapiLocator'; document.body.append(i); \
+             [typeof i.contentWindow, i.contentWindow.document, window.length, frames[1] === i.contentWindow, \
+              window.__tcfapiLocator === i.contentWindow, frames[0] === document.getElementById('f').contentWindow, \
+              i.contentWindow.parent === window]"
+        ),
+        r#"["object",null,2,true,true,true,true]"#
     );
+
+    // The parent's frames seen from the frame (a sibling found by name, itself by index),
+    // and nested frames: a grandchild's parent chain and top.
+    let body = page.doc.query_selector("body").unwrap().unwrap().as_u64();
+    frame_host.frame_lists.borrow_mut().insert(
+        vec![],
+        vec![(iframe, "f".into()), (body, "__tcfapiLocator".into())],
+    );
+    let r = frame
+        .eval(
+            &mut frame_doc,
+            "const loc = parent.frames['__tcfapiLocator']; loc.postMessage('x', '*'); \
+             [typeof loc, parent.length, parent.frames[0] === window, parent.frames.f === window, \
+              loc.parent === parent, loc === top[1], '__tcfapiLocator' in parent, parent.frames.nope]",
+        )
+        .unwrap();
+    assert_eq!(r, r#"["object",2,true,true,true,true,true,null]"#);
+    let (target, _, _) = frame_host.posted.borrow_mut().pop().unwrap();
+    assert_eq!(target, vec![body]);
+    let inner_iframe = frame_doc.query_selector("body").unwrap().unwrap().as_u64();
+    let nested_host = Rc::new(common::MockHost::default());
+    *nested_host.frame_path.borrow_mut() = vec![iframe, inner_iframe];
+    let mut nested = script::ScriptRuntime::new_frame(nested_host.clone(), opts.clone());
+    let mut nested_doc = common::make_doc("<!DOCTYPE html><html><body>nested</body></html>");
+    let r = nested
+        .eval(
+            &mut nested_doc,
+            "top.postMessage(1, '*'); [parent !== top, parent.parent === top, top.parent === top, top.top === top]",
+        )
+        .unwrap();
+    assert_eq!(r, "[true,true,true,true]");
+    let (target, _, _) = nested_host.posted.borrow_mut().pop().unwrap();
+    assert_eq!(target, Vec::<u64>::new());
+    drop(nested);
 
     // Drop order: the frame's runtime (created later) first, then another frame's after
     // the page's.
     drop(frame);
     assert_eq!(page.eval("1 + 1"), "2");
-    let mut late = script::ScriptRuntime::new_frame(Rc::new(common::MockHost::default()), opts);
+    let late_host = Rc::new(common::MockHost::default());
+    *late_host.frame_path.borrow_mut() = vec![iframe];
+    let mut late = script::ScriptRuntime::new_frame(late_host, opts);
     assert_eq!(late.eval(&mut frame_doc, "parent === window").unwrap(), "false");
     drop(page);
     assert_eq!(late.eval(&mut frame_doc, "2 + 2").unwrap(), "4");

@@ -188,8 +188,9 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.textDecode(arrayBufferOrView, label, fatal)` | string (throws on unknown label or on invalid data if fatal) |
 | `N.userAgent()` | UA string |
 | `N.structuredClone(value)` | deep clone using V8's ValueSerializer |
-| `N.isFrame()` | whether the document is an iframe's (`window.parent` is another window) |
-| `N.framePost(targetOrNull, message, targetOrigin)` | `postMessage` to another frame: `null` = the parent window, else an `<iframe>` element id; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
+| `N.framePath()` | This document's frame path: the `<iframe>` node ids from the page down (each in its parent's document); `[]` for the page |
+| `N.framePost(path, message, targetOrigin)` | `postMessage` to the window of the frame at `path`; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
+| `N.frameList(path)` | The frames of the document at `path` in tree order as `[id, name]` pairs (`parent.frames[name]`, `top.length`), or `null` if unknown |
 | `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
 | `N.cryptoAes(mode, encrypt, key, iv, aad, tagBits, data)` | ArrayBuffer; `mode` is `GCM`, `CBC`, `CTR` or `KW`; throws `OperationError` (e.g. failed authentication) |
 | `N.cryptoPbkdf2(hash, password, salt, iterations, bits)`, `N.cryptoHkdf(hash, ikm, salt, info, bits)` | ArrayBuffer |

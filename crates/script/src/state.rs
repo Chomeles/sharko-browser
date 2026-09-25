@@ -244,8 +244,6 @@ pub(crate) struct RuntimeState {
     pub(crate) snapshotting: Cell<bool>,
     /// First native called during snapshot creation that is not snapshot-safe.
     pub(crate) snapshot_taint: Cell<Option<&'static str>>,
-    /// The document is an iframe's (`window.parent` is another window).
-    pub(crate) is_frame: Cell<bool>,
     /// Canvas 2D surfaces.
     pub(crate) canvases: RefCell<crate::canvas::Canvases>,
     /// Open (de)compression streams.
@@ -307,7 +305,6 @@ impl RuntimeState {
             in_checkpoint: Cell::new(false),
             snapshotting: Cell::new(false),
             snapshot_taint: Cell::new(None),
-            is_frame: Cell::new(false),
             canvases: RefCell::new(Default::default()),
             coders: RefCell::new(Default::default()),
         }

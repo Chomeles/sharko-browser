@@ -151,7 +151,11 @@ browser --headless --screenshot=page.png https://en.wikipedia.org
 browser --headless --full-page --screenshot=full.png https://news.ycombinator.com
 browser --headless --eval="document.title" --console https://example.com
 browser --headless --dump-dom https://example.com
+browser --headless --click=640,400 --click-wait=2000 --screenshot=after.png https://example.com
 ```
+
+`SHARKO_DEBUG_FRAMES=1` logs iframe runtimes and their `postMessage`s; with it,
+`--eval="frames:JS"` evaluates in every iframe that runs script.
 
 `BLITZ_VERIFY_INCREMENTAL=1` re-checks every incremental layout pass against a full one
 and reports differences (for layout development).
@@ -166,9 +170,9 @@ and reports differences (for layout development).
 - Canvas 2D has no shadows or filters, and there is no video/audio or WebGL yet; Web
   Workers run on the page's thread
   (no parallelism yet, no module workers or SharedWorker)
-- iframes run JavaScript in their own runtime and talk to the page with `postMessage`
-  (enough for consent dialogs); the page can't reach into same-origin iframes yet and
-  iframes inside iframes run no script; Shadow DOM is emulated (styles are scoped,
+- iframes (also nested ones) run JavaScript in their own runtime and talk to each other
+  with `postMessage` (enough for consent dialogs); a page can't reach into same-origin
+  iframes' documents yet; Shadow DOM is emulated (styles are scoped,
   declarative shadow roots work, but the shadow tree is part of the normal DOM);
   `position: sticky` only vertically
 - Web Crypto covers SHA, HMAC, AES (GCM/CBC/CTR/KW), PBKDF2 and HKDF; no ECDSA, ECDH,

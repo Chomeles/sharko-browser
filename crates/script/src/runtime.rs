@@ -79,7 +79,6 @@ impl ScriptRuntime {
     /// while the page's runtime lives on. It is entered around every call instead.
     pub fn new_frame(host: Rc<dyn ScriptHost>, opts: RuntimeOptions) -> Self {
         let mut rt = Self::new(host, opts);
-        rt.state.is_frame.set(true);
         // SAFETY: the isolate was entered by its creation and is the current one.
         unsafe { rt.isolate.exit() };
         rt.detached = true;
@@ -411,17 +410,13 @@ impl ScriptRuntime {
         });
     }
 
-    /// Deliver an event of a WebSocket opened through [`ScriptHost::ws_open`]: hook
-    /// `onWebSocket(id, kind, ...)` with kind `open` (protocol, extensions), `message`
-    /// (string or ArrayBuffer), `sent` (bytes), `error` (message) or `close` (code,
-    /// reason, wasClean).
-    /// A `postMessage` from another frame's window: `source` is `None` for the parent
-    /// window, else the node id (`NodeId::as_u64`) of the `<iframe>` in this document it
-    /// came from; `origin` is the sender's origin and `data` the serialized message.
+    /// A `postMessage` from another frame's window: `source` is the sender's frame path
+    /// (see [`ScriptHost::post_message`]), `origin` its origin and `data` the serialized
+    /// message.
     pub fn deliver_message(
         &mut self,
         doc: &mut BaseDocument,
-        source: Option<u64>,
+        source: &[u64],
         origin: &str,
         data: &[u8],
     ) {
@@ -430,15 +425,16 @@ impl ScriptRuntime {
             let Some(value) = crate::natives::deserialize_message(scope, data) else {
                 return;
             };
-            let source = match source.and_then(|s| cx::node_id_to_js(NodeId::from_u64(s))) {
-                Some(id) => cx::num_value(scope, id),
-                None => v8::null(scope).into(),
-            };
+            let source = crate::natives::frame_path_value(scope, source).into();
             let origin = v8_str(scope, origin).into();
             call_hook(scope, st, Hook::Message, &[source, origin, value]);
         });
     }
 
+    /// Deliver an event of a WebSocket opened through [`ScriptHost::ws_open`]: hook
+    /// `onWebSocket(id, kind, ...)` with kind `open` (protocol, extensions), `message`
+    /// (string or ArrayBuffer), `sent` (bytes), `error` (message) or `close` (code,
+    /// reason, wasClean).
     pub fn deliver_ws(&mut self, doc: &mut BaseDocument, id: u64, event: common::protocol::WsEvent) {
         use common::protocol::{WsData, WsEvent};
         let ptr = doc as *mut BaseDocument;

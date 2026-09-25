@@ -203,13 +203,12 @@ impl ShellProvider for Shell {
 // ScriptHost
 // ---------------------------------------------------------------------------
 
-/// A `postMessage` between the page and one of its iframes (see `ScriptHost::post_message`).
+/// A `postMessage` between two frames of the page (see `ScriptHost::post_message`).
 pub struct FrameMessage {
-    /// Sender: `None` for the page, else the `<iframe>` node (`NodeId::as_u64`) whose
-    /// document posted it.
-    pub from: Option<u64>,
-    /// Receiver: `None` for the page, else an `<iframe>` node of the page.
-    pub to: Option<u64>,
+    /// Sender: its frame path (the `<iframe>` node ids from the page down; `[]`: the page).
+    pub from: Vec<u64>,
+    /// Receiver: its frame path.
+    pub to: Vec<u64>,
     /// `*` or the origin the receiver must have.
     pub target_origin: String,
     /// The sender's origin.
@@ -231,13 +230,16 @@ pub struct RendererHost {
     pub verbose_console: bool,
     pub title: RefCell<String>,
     pub history: Cell<(u32, u32)>,
-    /// The `<iframe>` node (`NodeId::as_u64`) whose document this host serves; `None` for
-    /// the page itself.
-    pub frame: Option<u64>,
+    /// The frame path of the iframe document this host serves (the `<iframe>` node ids,
+    /// `NodeId::as_u64`, from the page down); `None` for the page itself.
+    pub frame: Option<Vec<u64>>,
     /// The document's origin (sender of its `postMessage`s).
     pub origin: String,
     /// `postMessage`s between the page and its iframes, delivered by the renderer.
     pub messages: Rc<RefCell<Vec<FrameMessage>>>,
+    /// The `<iframe>`s of each document of the page (by frame path) in tree order as
+    /// `(node id, name)`, refreshed by the renderer; shared by all hosts of the page.
+    pub frame_lists: Rc<RefCell<HashMap<Vec<u64>, Vec<(u64, String)>>>>,
 }
 
 impl Drop for RendererHost {
@@ -254,7 +256,8 @@ impl script::ScriptHost for RendererHost {
         let js_id = req.id;
         let tx = self.shared.loop_tx.clone();
         let generation = self.generation;
-        let frame = self.frame;
+        let frame = self.frame.clone();
+        let progress_frame = self.frame.clone();
         let on_done = Box::new(move |mut resp: NetResponse| {
             resp.id = js_id;
             let _ = tx.send(LoopMsg::ScriptFetch { generation, frame, resp });
@@ -262,6 +265,7 @@ impl script::ScriptHost for RendererHost {
         let net_id = if req.progress {
             let tx = self.shared.loop_tx.clone();
             let on_progress: netstack::ProgressCallback = Arc::new(move |loaded, total, upload| {
+                let frame = progress_frame.clone();
                 let _ = tx.send(LoopMsg::ScriptFetchProgress { generation, frame, id: js_id, loaded, total, upload });
             });
             self.net.fetch_with_progress(req, on_progress, on_done)
@@ -280,12 +284,13 @@ impl script::ScriptHost for RendererHost {
     fn ws_open(&self, id: u64, url: &str, protocols: Vec<String>, origin: &str) -> bool {
         let tx = self.shared.loop_tx.clone();
         let generation = self.generation;
-        let frame = self.frame;
+        let frame = self.frame.clone();
         let net_id = self.net.ws_open(
             url,
             protocols,
             origin,
             Box::new(move |event| {
+                let frame = frame.clone();
                 let _ = tx.send(LoopMsg::ScriptWs { generation, frame, id, event });
             }),
         );
@@ -416,20 +421,26 @@ impl script::ScriptHost for RendererHost {
         }
     }
 
-    fn post_message(&self, target: Option<u64>, target_origin: &str, data: Vec<u8>) {
-        // The page posts to its iframes, an iframe to its parent (the page).
-        let to = match (self.frame, target) {
-            (None, Some(frame)) => Some(frame),
-            (Some(_), None) => None,
-            _ => return,
-        };
+    fn post_message(&self, target: &[u64], target_origin: &str, data: Vec<u8>) {
+        let from = self.frame.clone().unwrap_or_default();
+        if target == from.as_slice() {
+            return;
+        }
         self.messages.borrow_mut().push(FrameMessage {
-            from: self.frame,
-            to,
+            from,
+            to: target.to_vec(),
             target_origin: target_origin.to_string(),
             origin: self.origin.clone(),
             data,
         });
         self.shared.redraw.store(true, Ordering::SeqCst);
+    }
+
+    fn frame_path(&self) -> Vec<u64> {
+        self.frame.clone().unwrap_or_default()
+    }
+
+    fn frame_children(&self, path: &[u64]) -> Option<Vec<(u64, String)>> {
+        self.frame_lists.borrow().get(path).cloned()
     }
 }

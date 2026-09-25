@@ -24,6 +24,8 @@ pub struct HeadlessOptions {
     pub timings: bool,
     /// Simulated input after load: list of (x, y) clicks.
     pub clicks: Vec<(f32, f32)>,
+    /// Time to let the page react after each click.
+    pub click_wait: Duration,
     /// Scroll by this many CSS px after load (before the screenshot).
     pub scroll_y: f64,
 }
@@ -41,6 +43,7 @@ impl Default for HeadlessOptions {
             eval: Vec::new(),
             timeout: Duration::from_secs(30),
             settle: Duration::from_millis(300),
+            click_wait: Duration::from_millis(300),
             print_console: false,
             timings: true,
             clicks: Vec::new(),
@@ -155,7 +158,7 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
         ] {
             d.browser.send(tab, ToRenderer::Input(m));
         }
-        d.pump_until(Duration::from_millis(300), |_| false);
+        d.pump_until(opts.click_wait, |_| false);
     }
     if opts.scroll_y != 0.0 {
         d.browser.send(

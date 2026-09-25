@@ -40,11 +40,11 @@ pub enum LoopMsg {
     Document { generation: u64, resp: NetResponse },
     /// Response to a script-initiated fetch (`frame`: of an iframe's document, see
     /// `RendererHost::frame`).
-    ScriptFetch { generation: u64, frame: Option<u64>, resp: NetResponse },
+    ScriptFetch { generation: u64, frame: Option<Vec<u64>>, resp: NetResponse },
     /// Upload/download progress of a script-initiated fetch.
-    ScriptFetchProgress { generation: u64, frame: Option<u64>, id: u64, loaded: u64, total: u64, upload: bool },
+    ScriptFetchProgress { generation: u64, frame: Option<Vec<u64>>, id: u64, loaded: u64, total: u64, upload: bool },
     /// Event of a page's WebSocket (`id` is the script's socket id).
-    ScriptWs { generation: u64, frame: Option<u64>, id: u64, event: common::protocol::WsEvent },
+    ScriptWs { generation: u64, frame: Option<Vec<u64>>, id: u64, event: common::protocol::WsEvent },
     /// Something happened on another thread (subresource loaded, redraw requested).
     Wake,
 }
@@ -62,7 +62,7 @@ const MAX_FRAME_RUNTIMES: usize = 12;
 /// An iframe's `load` event waits for its document's scripts to load, at most this long.
 const FRAME_LOAD_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The script runtime of an iframe's document (a direct child of the page).
+/// The script runtime of an iframe's document.
 struct FrameCtx {
     rt: ScriptRuntime,
     host: Rc<RendererHost>,
@@ -75,9 +75,53 @@ struct FrameCtx {
     loaded: bool,
 }
 
-/// The sub-document of the `<iframe>` `node` of `doc`.
-fn subdoc_mut(doc: &mut BaseDocument, node: NodeId) -> Option<blitz_dom::DocGuardMut<'_>> {
-    doc.get_node_mut(node)?.subdoc_mut().map(|d| d.inner_mut())
+/// The document of the frame at `path`: the `<iframe>` node ids (`NodeId::as_u64`) from
+/// `doc` down, each in its parent's document.
+fn subdoc_mut<'a>(doc: &'a mut BaseDocument, path: &[u64]) -> Option<&'a mut BaseDocument> {
+    let mut cur = doc;
+    for &id in path {
+        match cur.get_node_mut(NodeId::from_u64(id))?.subdoc_mut()?.inner_mut() {
+            blitz_dom::DocGuardMut::Ref(d) => cur = d,
+            _ => return None,
+        }
+    }
+    Some(cur)
+}
+
+/// Like [`subdoc_mut`], shared.
+fn subdoc_ref<'a>(doc: &'a BaseDocument, path: &[u64]) -> Option<&'a BaseDocument> {
+    let mut cur = doc;
+    for &id in path {
+        match cur.get_node(NodeId::from_u64(id))?.subdoc()?.inner() {
+            blitz_dom::DocGuard::Ref(d) => cur = d,
+            _ => return None,
+        }
+    }
+    Some(cur)
+}
+
+/// The frame paths of all documents nested in `doc` (parents before their children).
+fn subdoc_paths(doc: &BaseDocument) -> Vec<Vec<u64>> {
+    fn walk(doc: &BaseDocument, prefix: &mut Vec<u64>, out: &mut Vec<Vec<u64>>, depth: usize) {
+        if depth > 10 {
+            return;
+        }
+        let mut nodes = doc.sub_document_node_ids();
+        nodes.sort_by_key(|n| n.as_u64());
+        for node in nodes {
+            prefix.push(node.as_u64());
+            out.push(prefix.clone());
+            if let Some(blitz_dom::DocGuard::Ref(sub)) =
+                doc.get_node(node).and_then(|n| n.subdoc()).map(|d| d.inner())
+            {
+                walk(sub, prefix, out, depth + 1);
+            }
+            prefix.pop();
+        }
+    }
+    let mut out = Vec::new();
+    walk(doc, &mut Vec::new(), &mut out, 0);
+    out
 }
 
 fn origin_of(url: &str) -> String {
@@ -86,22 +130,44 @@ fn origin_of(url: &str) -> String {
         .unwrap_or_else(|_| "null".into())
 }
 
+/// The `<iframe>`/`<frame>` elements of `doc` in tree order, as `(node id, name)`.
+fn list_iframes(doc: &BaseDocument) -> Vec<(u64, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![doc.root_node().id];
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.get_node(id) else { continue };
+        if let Some(el) = node.element_data() {
+            let tag = el.name.local.as_ref();
+            if tag == "iframe" || tag == "frame" {
+                let name = el.attr(blitz_dom::local_name!("name")).unwrap_or("");
+                out.push((id.as_u64(), name.to_string()));
+                continue;
+            }
+        }
+        stack.extend(node.children.iter().rev().copied());
+    }
+    out
+}
+
 struct Page {
     doc: BaseDocument,
     rt: Option<ScriptRuntime>,
-    /// Runtimes of iframe documents by `<iframe>` node (`NodeId::as_u64`). Declared after
-    /// `rt`: the page's isolate must be dropped first (see `ScriptRuntime::new_frame`).
-    frames: HashMap<u64, FrameCtx>,
-    /// Sub-documents (`<iframe>` node, `Document::id`) found to run no script.
-    scriptless_frames: std::collections::HashSet<(u64, usize)>,
-    /// `<iframe>`s whose `load` event waits for their document's `load`.
-    deferred_iframe_loads: Vec<NodeId>,
-    /// `postMessage`s between the page and its iframes, not yet delivered.
+    /// Runtimes of iframe documents by frame path (the `<iframe>` node ids from the page
+    /// down). Declared after `rt`: the page's isolate must be dropped first (see
+    /// `ScriptRuntime::new_frame`).
+    frames: HashMap<Vec<u64>, FrameCtx>,
+    /// Sub-documents (frame path, `Document::id`) found to run no script.
+    scriptless_frames: std::collections::HashSet<(Vec<u64>, usize)>,
+    /// `<iframe>`s (by frame path) whose `load` event waits for their document's `load`.
+    deferred_iframe_loads: Vec<Vec<u64>>,
+    /// `postMessage`s between the page's frames, not yet delivered.
     messages: Rc<RefCell<Vec<FrameMessage>>>,
+    /// When `host.frame_lists` was last refreshed.
+    frames_listed_at: Option<Instant>,
     /// The iframe (with a runtime) that has the focus: keyboard input goes to it.
-    focused_frame: Option<u64>,
+    focused_frame: Option<Vec<u64>>,
     /// The iframe a mouse button went down in: pointer events go to it until release.
-    pointer_frame: Option<u64>,
+    pointer_frame: Option<Vec<u64>>,
     host: Rc<RendererHost>,
     url: String,
     generation: u64,
@@ -328,8 +394,8 @@ impl Renderer {
                     && let Some(f) = page.frames.get_mut(&frame)
                 {
                     f.host.inflight.borrow_mut().remove(&resp.id);
-                    if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(frame)) {
-                        f.rt.deliver_fetch(&mut sub, resp);
+                    if let Some(sub) = subdoc_mut(&mut page.doc, &frame) {
+                        f.rt.deliver_fetch(sub, resp);
                     }
                 }
             }
@@ -346,9 +412,9 @@ impl Renderer {
             LoopMsg::ScriptFetchProgress { generation, frame: Some(frame), id, loaded, total, upload } => {
                 if let Some(page) = self.page.as_mut().filter(|p| p.generation == generation)
                     && let Some(f) = page.frames.get_mut(&frame)
-                    && let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(frame))
+                    && let Some(sub) = subdoc_mut(&mut page.doc, &frame)
                 {
-                    f.rt.deliver_fetch_progress(&mut sub, id, loaded, total, upload);
+                    f.rt.deliver_fetch_progress(sub, id, loaded, total, upload);
                 }
             }
             LoopMsg::ScriptFetchProgress { generation, frame: None, id, loaded, total, upload } => {
@@ -367,8 +433,8 @@ impl Renderer {
                     if matches!(event, common::protocol::WsEvent::Closed { .. }) {
                         f.host.sockets.borrow_mut().remove(&id);
                     }
-                    if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(frame)) {
-                        f.rt.deliver_ws(&mut sub, id, event);
+                    if let Some(sub) = subdoc_mut(&mut page.doc, &frame) {
+                        f.rt.deliver_ws(sub, id, event);
                     }
                 }
             }
@@ -449,6 +515,21 @@ impl Renderer {
                 }
             }
             ToRenderer::Eval { id, source } => {
+                // Debugging aid: `frames:<js>` evaluates in every iframe runtime.
+                if std::env::var_os("SHARKO_DEBUG_FRAMES").is_some()
+                    && let Some(js) = source.strip_prefix("frames:")
+                    && let Some(page) = &mut self.page
+                {
+                    let mut out = Vec::new();
+                    for (key, f) in page.frames.iter_mut() {
+                        if let Some(sub) = subdoc_mut(&mut page.doc, key) {
+                            let v = f.rt.eval(sub, js).unwrap_or_else(|e| format!("error: {e}"));
+                            out.push(format!("{key:?} {}: {v}", sub.url()));
+                        }
+                    }
+                    self.send(FromRenderer::EvalResult { id, ok: true, value: out.join("\n") });
+                    return true;
+                }
                 self.ensure_runtime();
                 let (ok, value) = match &mut self.page {
                     Some(Page {
@@ -742,6 +823,7 @@ impl Renderer {
             frame: None,
             origin: origin_of(url),
             messages: messages.clone(),
+            frame_lists: Rc::new(RefCell::new(HashMap::new())),
         });
 
         let mut page = Page {
@@ -751,6 +833,7 @@ impl Renderer {
             scriptless_frames: Default::default(),
             deferred_iframe_loads: Vec::new(),
             messages,
+            frames_listed_at: None,
             focused_frame: None,
             pointer_frame: None,
             host: host.clone(),
@@ -867,8 +950,9 @@ impl Renderer {
                     for (node, ok) in events {
                         // An iframe whose document runs script loads when that document
                         // does.
-                        if ok && page.frames.get(&node.as_u64()).is_some_and(|f| !f.loaded) {
-                            page.deferred_iframe_loads.push(node);
+                        let key = vec![node.as_u64()];
+                        if ok && page.frames.get(&key).is_some_and(|f| !f.loaded) {
+                            page.deferred_iframe_loads.push(key);
                             continue;
                         }
                         rt.element_event(&mut page.doc, node, if ok { "load" } else { "error" });
@@ -972,17 +1056,13 @@ impl Renderer {
     fn sync_frames(&mut self) {
         let Some(page) = &mut self.page else { return };
         if !page.frames.is_empty() {
-            let stale: Vec<u64> = page
+            let stale: Vec<Vec<u64>> = page
                 .frames
                 .iter()
                 .filter(|(key, f)| {
-                    page.doc
-                        .get_node_mut(NodeId::from_u64(**key))
-                        .and_then(|n| n.subdoc_mut())
-                        .map(|d| d.id())
-                        != Some(f.doc_id)
+                    subdoc_ref(&page.doc, key).map(blitz_dom::Document::id) != Some(f.doc_id)
                 })
-                .map(|(key, _)| *key)
+                .map(|(key, _)| key.clone())
                 .collect();
             for key in stale {
                 page.frames.remove(&key);
@@ -991,17 +1071,41 @@ impl Renderer {
         if !self.config.javascript {
             return;
         }
-        for node in page.doc.sub_document_node_ids() {
-            let key = node.as_u64();
+        let paths = subdoc_paths(&page.doc);
+        if paths.is_empty() {
+            return;
+        }
+        // Frames see each other's frames (`parent.frames[name]`, `top.length`): keep the
+        // lists of iframes current while frame runtimes exist.
+        let new_frames = paths.iter().any(|p| {
+            !page.frames.contains_key(p) && !page.scriptless_frames.iter().any(|(k, _)| k == p)
+        });
+        if (new_frames || !page.frames.is_empty())
+            && (new_frames
+                || page
+                    .frames_listed_at
+                    .is_none_or(|t| t.elapsed() >= Duration::from_millis(250)))
+        {
+            let mut lists = HashMap::new();
+            lists.insert(Vec::new(), list_iframes(&page.doc));
+            for p in &paths {
+                if let Some(d) = subdoc_ref(&page.doc, p) {
+                    lists.insert(p.clone(), list_iframes(d));
+                }
+            }
+            *page.host.frame_lists.borrow_mut() = lists;
+            page.frames_listed_at = Some(Instant::now());
+        }
+        for key in paths {
             if page.frames.contains_key(&key) || page.frames.len() >= MAX_FRAME_RUNTIMES {
                 continue;
             }
-            let Some(mut sub) = subdoc_mut(&mut page.doc, node) else { continue };
+            let Some(sub) = subdoc_mut(&mut page.doc, &key) else { continue };
             let doc_id = blitz_dom::Document::id(&*sub);
-            if page.scriptless_frames.contains(&(key, doc_id)) {
+            if page.scriptless_frames.contains(&(key.clone(), doc_id)) {
                 continue;
             }
-            if !document_uses_script(&sub) {
+            if !document_uses_script(sub) {
                 page.scriptless_frames.insert((key, doc_id));
                 continue;
             }
@@ -1016,9 +1120,10 @@ impl Renderer {
                 verbose_console: self.config.verbose_console,
                 title: RefCell::new(String::new()),
                 history: Cell::new((0, 1)),
-                frame: Some(key),
+                frame: Some(key.clone()),
                 origin: origin_of(&url),
                 messages: page.messages.clone(),
+                frame_lists: page.host.frame_lists.clone(),
             });
             let mut rt = ScriptRuntime::new_frame(
                 host.clone(),
@@ -1033,7 +1138,7 @@ impl Renderer {
                 eprintln!("[frames] script runtime for iframe document {url}");
             }
             sub.add_user_agent_stylesheet("noscript { display: none !important; }");
-            rt.document_parsed(&mut sub);
+            rt.document_parsed(sub);
             page.frames.insert(
                 key,
                 FrameCtx {
@@ -1056,58 +1161,88 @@ impl Renderer {
         if page.frames.is_empty() {
             return;
         }
+        // Nested documents attached by these get their runtimes (and run their scripts)
+        // before their parents hear of their `load`.
+        for key in page.frames.keys() {
+            if let Some(sub) = subdoc_mut(&mut page.doc, key) {
+                sub.handle_messages();
+            }
+        }
+        self.sync_frames();
+        let Some(page) = &mut self.page else { return };
         let pending = self.shared.pending_resources.load(Ordering::SeqCst);
+        let unloaded: std::collections::HashSet<Vec<u64>> = page
+            .frames
+            .iter()
+            .filter(|(_, f)| !f.loaded)
+            .map(|(k, _)| k.clone())
+            .collect();
         let mut loaded = Vec::new();
-        for (&key, f) in page.frames.iter_mut() {
-            let node = NodeId::from_u64(key);
-            let Some(mut sub) = subdoc_mut(&mut page.doc, node) else { continue };
+        for (key, f) in page.frames.iter_mut() {
+            let Some(sub) = subdoc_mut(&mut page.doc, key) else { continue };
             if f.rt.next_timer_deadline().is_some_and(|d| d <= Instant::now()) {
-                f.rt.run_timers(&mut sub);
+                f.rt.run_timers(sub);
                 self.shared.redraw.store(true, Ordering::SeqCst);
             }
-            sub.handle_messages();
             for (n, ok) in sub.take_element_load_events() {
-                f.rt.element_event(&mut sub, n, if ok { "load" } else { "error" });
+                // A nested iframe whose document runs script loads when that document does.
+                let mut child = key.clone();
+                child.push(n.as_u64());
+                if ok && unloaded.contains(&child) {
+                    page.deferred_iframe_loads.push(child);
+                    continue;
+                }
+                f.rt.element_event(sub, n, if ok { "load" } else { "error" });
                 self.shared.redraw.store(true, Ordering::SeqCst);
             }
             let animation_events = sub.take_animation_events();
             if !animation_events.is_empty() {
-                f.rt.animation_events(&mut sub, animation_events);
+                f.rt.animation_events(sub, animation_events);
             }
             if !f.loaded && f.last_ready_check.elapsed() >= Duration::from_millis(40) {
                 f.last_ready_check = Instant::now();
                 if pending == 0 {
-                    f.rt.resources_loaded(&mut sub);
+                    f.rt.resources_loaded(sub);
                 }
-                let ready = f.rt.eval(&mut sub, "document.readyState").unwrap_or_default();
+                let ready = f.rt.eval(sub, "document.readyState").unwrap_or_default();
                 // Its own `load` fired (the resource count is the whole tab's, and the
                 // page may keep loading).
                 if ready.contains("complete") || f.created.elapsed() > FRAME_LOAD_TIMEOUT
                 {
                     f.loaded = true;
-                    loaded.push(node);
+                    loaded.push(key.clone());
                 }
             }
         }
         if !loaded.is_empty() {
             let deferred = std::mem::take(&mut page.deferred_iframe_loads);
-            for node in deferred {
-                if loaded.contains(&node) {
+            for path in deferred {
+                if !loaded.contains(&path) {
+                    page.deferred_iframe_loads.push(path);
+                    continue;
+                }
+                // The `<iframe>`'s `load` fires in its parent document.
+                let (node, parent) = path.split_last().expect("frame paths are not empty");
+                let node = NodeId::from_u64(*node);
+                if parent.is_empty() {
                     if let Some(rt) = page.rt.as_mut() {
                         rt.element_event(&mut page.doc, node, "load");
                     }
-                } else {
-                    page.deferred_iframe_loads.push(node);
+                } else if let Some(f) = page.frames.get_mut(parent)
+                    && let Some(sub) = subdoc_mut(&mut page.doc, parent)
+                {
+                    f.rt.element_event(sub, node, "load");
                 }
             }
         }
     }
 
-    /// Deliver the `postMessage`s between the page and its iframes (also those posted
-    /// while delivering, a bounded number of rounds per tick).
+    /// Deliver the `postMessage`s between the page's frames (also those posted while
+    /// delivering, a bounded number of rounds per tick).
     fn deliver_frame_messages(&mut self) {
         let Some(page) = &mut self.page else { return };
         let page_origin = page.host.origin.clone();
+        let debug = std::env::var_os("SHARKO_DEBUG_FRAMES").is_some();
         for _ in 0..8 {
             let messages = std::mem::take(&mut *page.messages.borrow_mut());
             if messages.is_empty() {
@@ -1115,25 +1250,33 @@ impl Renderer {
             }
             self.shared.redraw.store(true, Ordering::SeqCst);
             for m in messages {
-                match (m.from, m.to) {
-                    (None, Some(to)) => {
-                        let Some(f) = page.frames.get_mut(&to) else { continue };
-                        if m.target_origin != "*" && m.target_origin != f.origin {
-                            continue;
-                        }
-                        if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(to)) {
-                            f.rt.deliver_message(&mut sub, None, &m.origin, &m.data);
-                        }
+                if debug {
+                    let known = m.to.is_empty() || page.frames.contains_key(&m.to);
+                    eprintln!(
+                        "[frames] message {:?} -> {:?} from {} (target {}, {} bytes){}",
+                        m.from,
+                        m.to,
+                        m.origin,
+                        m.target_origin,
+                        m.data.len(),
+                        if known { "" } else { " to a frame without runtime" }
+                    );
+                }
+                if m.to.is_empty() {
+                    if m.target_origin != "*" && m.target_origin != page_origin {
+                        continue;
                     }
-                    (Some(from), None) => {
-                        if m.target_origin != "*" && m.target_origin != page_origin {
-                            continue;
-                        }
-                        if let Some(rt) = page.rt.as_mut() {
-                            rt.deliver_message(&mut page.doc, Some(from), &m.origin, &m.data);
-                        }
+                    if let Some(rt) = page.rt.as_mut() {
+                        rt.deliver_message(&mut page.doc, &m.from, &m.origin, &m.data);
                     }
-                    _ => {}
+                    continue;
+                }
+                let Some(f) = page.frames.get_mut(&m.to) else { continue };
+                if m.target_origin != "*" && m.target_origin != f.origin {
+                    continue;
+                }
+                if let Some(sub) = subdoc_mut(&mut page.doc, &m.to) {
+                    f.rt.deliver_message(sub, &m.from, &m.origin, &m.data);
                 }
             }
         }
@@ -1152,11 +1295,11 @@ impl Renderer {
                 rt.run_frame(&mut page.doc, ts);
             }
         }
-        for (&key, f) in page.frames.iter_mut() {
+        for (key, f) in page.frames.iter_mut() {
             if f.rt.wants_frame() {
                 let ts = f.created.elapsed().as_secs_f64() * 1000.0;
-                if let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(key)) {
-                    f.rt.run_frame(&mut sub, ts);
+                if let Some(sub) = subdoc_mut(&mut page.doc, key) {
+                    f.rt.run_frame(sub, ts);
                 }
             }
         }
@@ -1352,25 +1495,47 @@ fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {
     }
 }
 
-/// The content-box origin of the `<iframe>` `key` in client coordinates.
-fn frame_origin(page: &Page, key: u64) -> Option<(f32, f32)> {
-    let node = NodeId::from_u64(key);
-    let rect = page.doc.get_client_bounding_rect(node)?;
-    let l = page.doc.get_node(node)?.final_layout();
-    Some((
-        rect.x as f32 + l.border.left + l.padding.left,
-        rect.y as f32 + l.border.top + l.padding.top,
-    ))
+/// The content-box origin of the frame at `path` in the page's client coordinates.
+fn frame_origin(page: &Page, path: &[u64]) -> Option<(f32, f32)> {
+    let (mut ox, mut oy) = (0.0, 0.0);
+    let mut doc = &page.doc;
+    for (i, &id) in path.iter().enumerate() {
+        let node = NodeId::from_u64(id);
+        let rect = doc.get_client_bounding_rect(node)?;
+        let l = doc.get_node(node)?.final_layout();
+        ox += rect.x as f32 + l.border.left + l.padding.left;
+        oy += rect.y as f32 + l.border.top + l.padding.top;
+        if i + 1 < path.len() {
+            doc = subdoc_ref(doc, &[id])?;
+        }
+    }
+    Some((ox, oy))
 }
 
-/// The iframe running script under the client point (x, y).
-fn frame_at(page: &Page, x: f32, y: f32) -> Option<u64> {
+/// The innermost iframe running script under the client point (x, y).
+fn frame_at(page: &Page, x: f32, y: f32) -> Option<Vec<u64>> {
     if page.frames.is_empty() {
         return None;
     }
-    let hit = page.doc.hit(x, y)?;
-    let key = hit.node_id.as_u64();
-    page.frames.contains_key(&key).then_some(key)
+    let (mut x, mut y) = (x, y);
+    let mut doc = &page.doc;
+    let mut path = Vec::new();
+    let mut found = None;
+    loop {
+        let Some(hit) = doc.hit(x, y) else { break };
+        let node = hit.node_id;
+        let Some(sub) = subdoc_ref(doc, &[node.as_u64()]) else { break };
+        let Some(rect) = doc.get_client_bounding_rect(node) else { break };
+        let Some(l) = doc.get_node(node).map(|n| n.final_layout()) else { break };
+        x -= rect.x as f32 + l.border.left + l.padding.left;
+        y -= rect.y as f32 + l.border.top + l.padding.top;
+        path.push(node.as_u64());
+        if page.frames.contains_key(&path) {
+            found = Some(path.clone());
+        }
+        doc = sub;
+    }
+    found
 }
 
 /// Send input over (or captured by, or focused in) an iframe that runs script to its
@@ -1388,20 +1553,21 @@ fn route_to_frame(page: &mut Page, ev: &InputEvent) -> bool {
         | InputEvent::Wheel { x, y, .. } => {
             let captured = page
                 .pointer_frame
+                .clone()
                 .filter(|_| !matches!(ev, InputEvent::Wheel { .. }));
             let key = captured.or_else(|| frame_at(page, *x, *y));
             if matches!(ev, InputEvent::MouseDown { .. }) {
-                page.focused_frame = key;
-                page.pointer_frame = key;
+                page.focused_frame = key.clone();
+                page.pointer_frame = key.clone();
             }
             let Some(key) = key else { return false };
-            let Some((ox, oy)) = frame_origin(page, key) else { return false };
+            let Some((ox, oy)) = frame_origin(page, &key) else { return false };
             (key, Some((*x - ox, *y - oy)))
         }
         InputEvent::KeyDown { .. }
         | InputEvent::KeyUp { .. }
         | InputEvent::ImePreedit { .. }
-        | InputEvent::ImeCommit(_) => match page.focused_frame {
+        | InputEvent::ImeCommit(_) => match page.focused_frame.clone() {
             Some(key) => (key, None),
             None => return false,
         },
@@ -1411,7 +1577,7 @@ fn route_to_frame(page: &mut Page, ev: &InputEvent) -> bool {
         page.pointer_frame = None;
     }
     let Some(f) = page.frames.get_mut(&key) else { return false };
-    let Some(mut sub) = subdoc_mut(&mut page.doc, NodeId::from_u64(key)) else { return false };
+    let Some(sub) = subdoc_mut(&mut page.doc, &key) else { return false };
     // Wheel scrolling only goes to a document that can scroll.
     if matches!(ev, InputEvent::Wheel { .. }) {
         let root = sub.try_root_element().map(|r| (r.scroll_height(), r.final_layout().size.height));
@@ -1435,7 +1601,7 @@ fn route_to_frame(page: &mut Page, ev: &InputEvent) -> bool {
     }
     let s = sub.viewport_scroll();
     if let Some(ui) = to_ui_event(&local_ev, (s.x, s.y)) {
-        let mut driver = EventDriver::new(&mut *sub, JsEventHandler { runtime: &mut f.rt });
+        let mut driver = EventDriver::new(sub, JsEventHandler { runtime: &mut f.rt });
         driver.handle_ui_event(ui);
     }
     // Moves also reach the page (hover of the <iframe> element).

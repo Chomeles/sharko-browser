@@ -260,24 +260,59 @@
   }
   L.defineEventHandlers(BroadcastChannel.prototype, ['onmessage', 'onmessageerror']);
   // Windows of other frames (stand-ins for cross-origin WindowProxy objects): an iframe's
-  // contentWindow in its parent, and parent/top in an iframe. Each frame runs in its own
-  // isolate, so only postMessage reaches the other window.
-  const REMOTE = new WeakMap(); // RemoteWindow -> target (null: the parent, else an <iframe> id)
-  const remoteByFrame = new Map(); // <iframe> id -> RemoteWindow
-  let remoteParent = null;
+  // contentWindow, parent/top, and the frames reachable from them. Each document with
+  // script runs in its own isolate, so only postMessage reaches the other window. A
+  // window is named by its frame path: the <iframe> node ids from the page down (the
+  // page is []).
+  const REMOTE = new WeakMap(); // RemoteWindow -> frame path
+  const remoteByPath = new Map(); // path key -> RemoteWindow
+  const pathKey = (p) => p.join(',');
+  let ownPath = null;
+  function selfPath() {
+    if (ownPath === null) ownPath = typeof N.framePath === 'function' ? N.framePath() : [];
+    return ownPath;
+  }
   function remoteTarget(w) {
     if (!REMOTE.has(w)) throw L.illegal();
     return REMOTE.get(w);
   }
+  // The window of the frame at `path`: this window, or a remote one (one object per frame).
+  L.windowAt = function (path) {
+    const key = pathKey(path);
+    if (key === pathKey(selfPath())) return L.window;
+    let w = remoteByPath.get(key);
+    if (w === undefined) {
+      w = new Proxy(new RemoteWindow(INTERNAL, path), remoteHandler);
+      REMOTE.set(w, path);
+      remoteByPath.set(key, w);
+    }
+    return w;
+  };
+  // Child frames of the document at `path` in tree order ([id, name] pairs): live for
+  // this document, a snapshot kept by the host for the others.
+  function framesOf(path) {
+    if (pathKey(path) === pathKey(selfPath())) {
+      return L.childFrames().map((id) => [id, N.getAttr(id, 'name') || '']);
+    }
+    let list = null;
+    try { list = typeof N.frameList === 'function' ? N.frameList(path) : null; } catch (_) { list = null; }
+    return list || [];
+  }
+  const INDEX_RE = /^(0|[1-9][0-9]{0,8})$/;
+  function childWindow(path, name) {
+    const list = framesOf(path);
+    const e = INDEX_RE.test(name) ? list[+name] : (name === '' ? undefined : list.find((f) => f[1] === name));
+    return e === undefined ? undefined : L.windowAt([...path, e[0]]);
+  }
   const crossOriginErr = (what) => new DOMException(`Failed to read a named property '${what}' from 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
   const remoteLocation = Object.freeze({ replace() { }, set href(v) { }, toString() { return ''; } });
   class RemoteWindow {
-    constructor(token, target) {
+    constructor(token, path) {
       if (token !== INTERNAL) throw L.illegal();
-      REMOTE.set(this, target);
+      REMOTE.set(this, path);
     }
     postMessage(message, targetOrigin, transfer) {
-      const target = remoteTarget(this);
+      const path = remoteTarget(this);
       if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
       let t = targetOrigin !== null && typeof targetOrigin === 'object'
         ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
@@ -288,50 +323,67 @@
         if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
         t = p[10];
       }
-      N.framePost(target, message, t);
+      N.framePost(path, message, t);
     }
     get window() { remoteTarget(this); return this; }
     get self() { remoteTarget(this); return this; }
     get frames() { remoteTarget(this); return this; }
-    get parent() { return remoteTarget(this) === null ? this : L.window; }
-    get top() { return remoteTarget(this) === null ? this : L.windowTop(); }
+    get parent() { const p = remoteTarget(this); return p.length === 0 ? this : L.windowAt(p.slice(0, -1)); }
+    get top() { remoteTarget(this); return L.windowAt([]); }
     get opener() { remoteTarget(this); return null; }
     get closed() { remoteTarget(this); return false; }
-    get length() { remoteTarget(this); return 0; }
+    get length() { return framesOf(remoteTarget(this)).length; }
     get location() { remoteTarget(this); return remoteLocation; }
     set location(v) { remoteTarget(this); }
-    get document() { throw crossOriginErr('document'); }
+    get document() {
+      const p = remoteTarget(this);
+      // A child frame of this document that isn't cross-origin: not scriptable from here
+      // yet (null rather than a SecurityError).
+      const own = selfPath();
+      if (p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(p[p.length - 1])) return null;
+      throw crossOriginErr('document');
+    }
     focus() { remoteTarget(this); }
     blur() { remoteTarget(this); }
     close() { remoteTarget(this); }
   }
   Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
-  L.remoteWindowFor = function (id) {
-    let w = remoteByFrame.get(id);
-    if (w === undefined) { w = new RemoteWindow(INTERNAL, id); remoteByFrame.set(id, w); }
-    return w;
+  // Named and indexed access to a remote window's child frames (`parent.frames['__tcfapiLocator']`, `top[0]`).
+  const remoteHandler = {
+    get(t, p, r) {
+      if (typeof p === 'string' && !(p in t)) {
+        const w = childWindow(REMOTE.get(t), p);
+        if (w !== undefined) return w;
+      }
+      return Reflect.get(t, p, r);
+    },
+    has(t, p) {
+      return Reflect.has(t, p) || (typeof p === 'string' && childWindow(REMOTE.get(t), p) !== undefined);
+    },
   };
-  const isFrame = () => typeof N.isFrame === 'function' && N.isFrame();
+  // The window of this document's <iframe> `id`.
+  L.remoteWindowFor = (id) => L.windowAt([...selfPath(), id]);
   L.parentWindow = function () {
-    if (!isFrame()) return L.window;
-    if (remoteParent === null) remoteParent = new RemoteWindow(INTERNAL, null);
-    return remoteParent;
+    const own = selfPath();
+    return own.length === 0 ? L.window : L.windowAt(own.slice(0, -1));
   };
-  L.windowTop = L.parentWindow;
-  // An iframe's contentWindow: a remote window for cross-origin http(s) documents (they may
-  // run in their own runtime); same-origin and about:blank documents aren't scriptable
-  // from here yet (null, as before).
+  L.windowTop = () => L.windowAt([]);
   L.iframeWindow = function (el, id) {
     if (!N.isConnected(id)) return null;
-    const src = N.getAttr(id, 'src');
-    if (src === null || src.trim() === '' || N.getAttr(id, 'srcdoc') !== null) return null;
-    const p = N.urlParse(src.trim(), L.baseURL());
-    if (p === null || (p[1] !== 'https:' && p[1] !== 'http:') || p[10] === L.location.origin) return null;
     return L.remoteWindowFor(id);
   };
+  function frameIsCrossOrigin(id) {
+    const src = N.getAttr(id, 'src');
+    if (src === null || src.trim() === '' || N.getAttr(id, 'srcdoc') !== null) return false;
+    const p = N.urlParse(src.trim(), L.baseURL());
+    return p !== null && (p[1] === 'https:' || p[1] === 'http:') && p[10] !== L.location.origin;
+  }
+  // Child frames of this document in tree order (window.length, window[i]).
+  L.childFrames = function () {
+    try { return N.querySelectorAll(L.documentId, 'iframe,frame'); } catch (_) { return []; }
+  };
   L.onMessage = function (source, origin, data) {
-    const src = source === null ? L.parentWindow() : L.remoteWindowFor(source);
-    L.fire(L.window, 'message', { data, origin, source: src, ports: [], lastEventId: '' }, L.MessageEvent);
+    L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports: [], lastEventId: '' }, L.MessageEvent);
   };
   L.windowPostMessage = function (message, targetOrigin, transfer) {
     let target = '/';
