@@ -36,64 +36,59 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The build matrix: every platform for a tag push, only the requested ones for a
+  # manual run. Platforms left out never request a runner at all (a skipped-steps job
+  # still has to wait for one, which can take forever for macOS).
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        shell: bash
+        env:
+          WANT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.platforms || 'windows,linux,macos' }}
+        run: |
+          all='[{"os":"windows-latest","target":"x86_64-pc-windows-msvc","key":"windows"},{"os":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu","key":"linux"},{"os":"macos-14","target":"aarch64-apple-darwin","key":"macos"}]'
+          keys=$(echo "$WANT" | tr -d ' ' | jq -R -c 'split(",")')
+          m=$(echo "$all" | jq -c --argjson k "$keys" '{include: [.[] | select(.key as $x | $k | index($x))]}')
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          echo "$m"
+
   build:
     name: Build ${{ matrix.target }}
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            platform_key: windows
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-            platform_key: linux
-          - os: macos-14
-            target: aarch64-apple-darwin
-            platform_key: macos
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     env:
       # Compiled into the binary: where the updater looks for new releases.
       BROWSER_UPDATE_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      # A manual run only builds the requested subset; a tag push always builds all
-      # three. (Job-level `if:` can't see the `matrix` context on this API, so every
-      # step below repeats this instead — cheap steps too, so a platform a manual run
-      # didn't ask for barely spins up its runner.)
     steps:
-      - name: Wanted this run?
-        id: wanted
-        shell: bash
-        run: echo "yes=${{ github.event_name != 'workflow_dispatch' || contains(github.event.inputs.platforms, matrix.platform_key) }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: steps.wanted.outputs.yes == 'true'
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.wanted.outputs.yes == 'true'
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-        if: steps.wanted.outputs.yes == 'true'
         with:
           key: release-${{ matrix.target }}
       - name: Linux build dependencies
-        if: steps.wanted.outputs.yes == 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld libfontconfig1-dev libxkbcommon-dev libwayland-dev
       - name: Check tag matches Cargo version
-        if: steps.wanted.outputs.yes == 'true'
         shell: bash
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           test "v$version" = "${RELEASE_TAG}" || { echo "tag ${RELEASE_TAG} != v$version"; exit 1; }
       - name: Build
-        if: steps.wanted.outputs.yes == 'true'
         run: cargo build --release --locked --target ${{ matrix.target }} -p browser-core -p browser-launcher
       - name: Package
-        if: steps.wanted.outputs.yes == 'true'
         run: cargo xtask package --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
-        if: steps.wanted.outputs.yes == 'true'
         with:
           name: package-${{ matrix.target }}
           path: dist/*.zip
