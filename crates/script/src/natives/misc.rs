@@ -1186,11 +1186,20 @@ pub(crate) fn n_frame_element(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+// `v8::Isolate::GetIncumbentContext()`, which the v8 crate doesn't bind: the context of
+// the most recently entered author function, i.e. the realm whose script called the
+// running native (V8 keeps API functions off that count).
+//
+// Only bound on non-Windows targets: it returns `Local<Context>` (a class with a
+// user-declared constructor) by value, and the two C++ ABIs disagree on how that's
+// passed back. Itanium (Linux/macOS) returns a trivially-sized handle like this in a
+// register, matching the plain pointer-returning `extern "C"` signature below — verified
+// against the actual symbol and at runtime. MSVC x64 instead returns any class with a
+// user-declared constructor through a hidden pointer, whose exact placement relative to
+// the implicit receiver argument for a non-static member function isn't something we can
+// verify without a Windows toolchain; see `incumbent_global`'s Windows fallback below.
+#[cfg(not(target_os = "windows"))]
 unsafe extern "C" {
-    /// `v8::Isolate::GetIncumbentContext()`, which the v8 crate doesn't bind: the context
-    /// of the most recently entered author function, i.e. the realm whose script called
-    /// the running native (V8 keeps API functions off that count). A `Local<Context>` is
-    /// one pointer, returned in a register.
     #[link_name = "_ZN2v87Isolate19GetIncumbentContextEv"]
     fn v8_isolate_get_incumbent_context(isolate: *mut std::ffi::c_void) -> *const v8::Context;
 }
@@ -1198,6 +1207,7 @@ unsafe extern "C" {
 /// The global object of the realm whose script called the running native, when it is a
 /// realm of this page with the callee's origin (the only kind that can call it);
 /// `None` when it is the callee's own realm or unknown.
+#[cfg(not(target_os = "windows"))]
 fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Object>> {
     let isolate: *mut std::ffi::c_void = {
         let i: &mut v8::Isolate = cx.scope;
@@ -1216,6 +1226,17 @@ fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Obj
         return None;
     }
     Some(ctx.global(cx.scope))
+}
+
+/// Windows fallback: verifying the hidden-return-pointer ABI for a member function
+/// without a Windows toolchain isn't something we can get right by inspection, and a
+/// wrong guess here would misread memory rather than just fail to build. `postMessage`'s
+/// `source` on Windows always falls back to the caller's own window (see the JS layer's
+/// `windowPostMessage`) instead of the true calling realm's.
+#[cfg(target_os = "windows")]
+fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Object>> {
+    let _ = cx;
+    None
 }
 
 /// Addition: `window.postMessage` itself (an API function, so V8 can tell which realm
