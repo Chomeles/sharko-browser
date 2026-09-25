@@ -312,6 +312,8 @@ pub struct BaseDocument {
     pub(crate) nodes_to_id: HashMap<String, SmallVec<[NodeId; 1]>>,
     /// Map of `<style>` and `<link>` node IDs to their associated stylesheet
     pub(crate) nodes_to_stylesheet: BTreeMap<NodeId, DocumentStyleSheet>,
+    /// PATCH: the source text of each `<link rel=stylesheet>`'s sheet (CSSOM `cssRules`).
+    pub(crate) linked_sheet_sources: HashMap<NodeId, std::sync::Arc<str>>,
     /// Stylesheets added by the useragent
     /// where the key is the hashed CSS
     pub(crate) ua_stylesheets: HashMap<String, DocumentStyleSheet>,
@@ -517,6 +519,7 @@ impl BaseDocument {
             url: base_url,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
+            linked_sheet_sources: HashMap::new(),
             font_ctx,
             #[cfg(feature = "parallel-construct")]
             thread_font_contexts: ThreadLocal::new(),
@@ -1399,6 +1402,7 @@ impl BaseDocument {
     }
 
     fn remove_stylesheet_for_node(&mut self, node_id: NodeId) {
+        self.linked_sheet_sources.remove(&node_id);
         if let Some(old) = self.nodes_to_stylesheet.remove(&node_id) {
             self.stylist.remove_stylesheet(old, &self.guard.read());
             self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
@@ -1632,6 +1636,7 @@ impl BaseDocument {
         match resource {
             Resource::Css(css, source) => {
                 let node_id = res.node_id.unwrap();
+                self.linked_sheet_sources.insert(node_id, source.clone());
                 // PATCH: linked stylesheets follow the same scoping as `<style>`.
                 match self.style_scope(node_id) {
                     StyleScope::Document => self.add_stylesheet_for_node(css, node_id),
@@ -2826,6 +2831,12 @@ impl BaseDocument {
         }
 
         Some(rects)
+    }
+
+    /// PATCH: the source text of the stylesheet a `<link rel=stylesheet>` loaded (`None`
+    /// until it has).
+    pub fn linked_stylesheet_source(&self, node_id: NodeId) -> Option<std::sync::Arc<str>> {
+        self.linked_sheet_sources.get(&node_id).cloned()
     }
 
     /// PATCH: the client rects of the text of text node `node_id` between the UTF-16

@@ -85,6 +85,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.getText(id)` | data of a Text or Comment node |
 | `N.setText(id, data)` | – |
 | `N.textContent(id)` | concatenated text of descendants (element/fragment/document) |
+| `N.linkSheetText(id)` | Source text of the stylesheet a `<link>` loaded, or `null` (CSSOM `cssRules` of linked sheets) |
 | `N.setTextContent(id, text)` | replaces all children with one text node (or none if `""`) |
 | `N.innerHTML(id)` | serialized children |
 | `N.setInnerHTML(id, html)` | parses as fragment in context of element and replaces children. Scripts inside are NOT executed (spec behaviour) |

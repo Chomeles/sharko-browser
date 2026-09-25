@@ -208,3 +208,6 @@ Patches so far:
     resource and fires `load`; changing a `<link>`'s `rel` loads or drops its stylesheet
     (the async-CSS pattern `rel=preload as=style` + `rel='stylesheet'` from script left
     welt.de unstyled).
+66. `blitz-dom/src/document.rs`, `mutator.rs`: `linked_stylesheet_source()` keeps the
+    source text of each `<link rel=stylesheet>`'s sheet (CSSOM `cssRules` of linked
+    sheets).

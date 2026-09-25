@@ -3379,6 +3379,7 @@
     }
     get ownerRule() { return null; }
     get cssRules() {
+      checkSheetAccess(this, 'cssRules');
       syncSheet(this);
       let l = ruleLists.get(this);
       if (l === undefined) { l = new CSSRuleList(INTERNAL, () => { syncSheet(this); return sheetDataOf(this).rules; }); ruleLists.set(this, l); }
@@ -3386,6 +3387,7 @@
     }
     get rules() { return this.cssRules; }
     insertRule(rule, index = 0) {
+      checkSheetAccess(this, 'insertRule');
       syncSheet(this);
       const d = sheetDataOf(this);
       const idx = index >>> 0;
@@ -3401,6 +3403,7 @@
       return idx;
     }
     deleteRule(index) {
+      checkSheetAccess(this, 'deleteRule');
       syncSheet(this);
       const d = sheetDataOf(this);
       const idx = index >>> 0;
@@ -3426,15 +3429,33 @@
       markSheetDirty(this);
     }
   }
-  // Bring the JS rule list in sync with the owner <style>'s text (if it changed externally).
+  // Bring the JS rule list in sync with the owner <style>'s text (if it changed externally),
+  // or parse a <link>'s sheet once it has loaded.
   function syncSheet(s) {
     const d = sheetDataOf(s);
-    if (d.owner === null || d.linked) return;
+    if (d.owner === null) return;
+    if (d.linked) {
+      if (d.text !== null) return;
+      const text = N.linkSheetText(idOf(d.owner));
+      if (text === null) return;
+      d.text = text;
+      d.rules = splitRules(text).map((i) => makeRule(i, s, null));
+      return;
+    }
     if (d.pending !== '' || d.rewrite) return; // our own changes not flushed yet: JS state is authoritative
     const text = N.textContent(idOf(d.owner));
     if (text === d.text) return;
     d.text = text;
     d.rules = splitRules(text).map((i) => makeRule(i, s, null));
+  }
+  // A linked sheet from another origin hides its rules (as in browsers).
+  function checkSheetAccess(s, what) {
+    const d = sheetDataOf(s);
+    if (!d.linked || d.href === null) return;
+    const p = N.urlParse(d.href, null);
+    const origin = p === null ? null : p[10];
+    if (origin !== null && origin !== 'null' && origin === L.location.origin) return;
+    throw new DOMException(`Failed to ${what === 'cssRules' ? "read the 'cssRules' property from" : `execute '${what}' on`} 'CSSStyleSheet': Cannot access rules`, 'SecurityError');
   }
   function flushSheet(s) {
     const d = sheetData.get(s);

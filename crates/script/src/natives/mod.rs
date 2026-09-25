@@ -146,6 +146,7 @@ natives_table! {
     "getText" => tree::n_get_text,
     "setText" => tree::n_set_text,
     "textContent" => tree::n_text_content,
+    "linkSheetText" => tree::n_link_sheet_text,
     "setTextContent" => tree::n_set_text_content,
     "innerHTML" => tree::n_inner_html,
     "setInnerHTML" => tree::n_set_inner_html,

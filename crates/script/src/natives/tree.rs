@@ -441,6 +441,18 @@ pub(crate) fn n_set_text(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.linkSheetText(id)` -> the source text of the stylesheet a `<link>` loaded,
+/// or `null` (not loaded, or not a stylesheet link).
+pub(crate) fn n_link_sheet_text(cx: &mut Cx) -> NResult {
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    match doc.linked_stylesheet_source(id) {
+        Some(text) => cx.ret_str(&text),
+        None => cx.ret_null(),
+    }
+    Ok(())
+}
+
 pub(crate) fn n_text_content(cx: &mut Cx) -> NResult {
     let doc = cx.st.doc()?;
     let id = cx.node(doc, 0)?;
