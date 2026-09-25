@@ -95,7 +95,7 @@ pub(super) fn align_and_position_item(
     container_border_box_width: f32,
     container_border: Rect<f32>,
     #[cfg(feature = "content_size")] container_is_scroll_container: bool,
-) -> (Rect<f32>, f32, f32) {
+) -> (Rect<f32>, Point<f32>, f32, f32) {
     let grid_area_size = Size { width: grid_area.right - grid_area.left, height: grid_area.bottom - grid_area.top };
 
     let style = tree.get_grid_child_style(node);
@@ -396,7 +396,7 @@ pub(super) fn align_and_position_item(
     );
 
     #[cfg(feature = "content_size")]
-    let contribution = {
+    let (contribution, margin_end) = {
         // Contributions to the container's scrollable overflow rect are measured from the
         // container's padding-box origin (mirrored for RTL), matching the scrollable overflow region.
         let contribution_location = if direction.is_rtl() {
@@ -404,19 +404,41 @@ pub(super) fn align_and_position_item(
         } else {
             Point { x: x - container_border.left, y: y - container_border.top }
         };
-        compute_scrollable_overflow_contribution(
+        let contribution = compute_scrollable_overflow_contribution(
             contribution_location,
             Size { width, height },
             layout_output.scrollable_overflow_rect,
             overflow,
             contain,
             container_is_scroll_container,
-        )
+        );
+        // CSS Overflow 3 §2.2: a grid item's margin box is part of the container's scrollable
+        // overflow (unless it lies wholly in a scroll container's unreachable region); the
+        // container's end padding is added past the items' margin boxes by the caller.
+        let (start_margin_x, end_margin_x) = if direction.is_rtl() {
+            (resolved_margin.right, resolved_margin.left)
+        } else {
+            (resolved_margin.left, resolved_margin.right)
+        };
+        let margin_box = Rect {
+            left: contribution_location.x - start_margin_x,
+            right: contribution_location.x + width + end_margin_x,
+            top: contribution_location.y - resolved_margin.top,
+            bottom: contribution_location.y + height + resolved_margin.bottom,
+        };
+        // Zero-area boxes contribute nothing (as for their border boxes).
+        let zero_area = width <= 0.0 || height <= 0.0;
+        let unreachable = container_is_scroll_container && (margin_box.right <= 0.0 || margin_box.bottom <= 0.0);
+        if zero_area || unreachable {
+            (contribution, Point { x: 0.0f32, y: 0.0f32 })
+        } else {
+            (contribution.union(margin_box), Point { x: margin_box.right, y: margin_box.bottom })
+        }
     };
     #[cfg(not(feature = "content_size"))]
-    let contribution = Rect::ZERO;
+    let (contribution, margin_end) = (Rect::ZERO, Point { x: 0.0f32, y: 0.0f32 });
 
-    (contribution, y, height)
+    (contribution, margin_end, y, height)
 }
 
 /// Align and size a grid item along a single axis

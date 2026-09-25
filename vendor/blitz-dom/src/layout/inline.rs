@@ -545,6 +545,7 @@ impl BaseDocument {
         // float next to an inline-block made otto.de end after the first screen).
         #[allow(unused_mut)]
         let mut float_overflow: Option<taffy::Rect<f32>> = None;
+        let mut inline_box_overflow: Option<taffy::Rect<f32>> = None;
 
         // Perform inline layout
         #[cfg(feature = "floats")]
@@ -648,6 +649,7 @@ impl BaseDocument {
 
                         let layout = self.nodes[node_id].unrounded_layout_mut();
                         layout.size = output.size;
+                        layout.scrollable_overflow_rect = output.scrollable_overflow_rect;
                         layout.location.x = pos.x + margin.left + container_pb.left;
                         layout.location.y = pos.y + margin.top + container_pb.top;
                         let (x, y) = (layout.location.x, layout.location.y);
@@ -869,13 +871,15 @@ impl BaseDocument {
                         layout.border = border; //.map(|p| p / scale);
                         self.mark_layout_dirty(NodeId::from_u64(ibox.id));
                     } else {
-                        // Re-measure the box to get its border-box size (this hits the layout
-                        // cache). The size cannot be recovered from `ibox` dimensions as the
-                        // space reserved in the line is clamped to be non-negative.
-                        let size = self
-                            .compute_child_layout(taffy::NodeId::from(ibox.id), child_inputs)
-                            .size;
+                        // Re-measure the box to get its border-box size and scrollable overflow
+                        // (this hits the layout cache). The size cannot be recovered from `ibox`
+                        // dimensions as the space reserved in the line is clamped to be
+                        // non-negative.
+                        let output =
+                            self.compute_child_layout(taffy::NodeId::from(ibox.id), child_inputs);
+                        let size = output.size;
                         let node = &mut self.nodes[NodeId::from_u64(ibox.id)];
+                        let box_overflow = node.style().overflow;
 
                         // Resolve relative inset offsets against the containing block
                         // (the content box of the inline container).
@@ -910,6 +914,9 @@ impl BaseDocument {
 
                         let layout = node.unrounded_layout_mut();
                         layout.size = size;
+                        // PATCH: the overflow rect is this pass's, not a stale one from a
+                        // layout of the box as a block (`scrollWidth` reported the old width).
+                        layout.scrollable_overflow_rect = output.scrollable_overflow_rect;
                         layout.location.x =
                             (ibox.x / scale) + margin.left + container_pb.left + inset_offset.x;
                         // A negative `margin-top` shrinks the space the box reserves in the
@@ -921,6 +928,36 @@ impl BaseDocument {
                             + inset_offset.y;
                         layout.padding = padding; //.map(|p| p / scale);
                         layout.border = border; //.map(|p| p / scale);
+                        // PATCH: an atomic inline's own overflow escapes into the inline
+                        // container's scrollable overflow where its `overflow` is visible.
+                        let (x, y) = (layout.location.x, layout.location.y);
+                        let clips = box_overflow.x.is_scroll_container()
+                            || box_overflow.y.is_scroll_container();
+                        let propagates_x = !clips && box_overflow.x == taffy::Overflow::Visible;
+                        let propagates_y = !clips && box_overflow.y == taffy::Overflow::Visible;
+                        let rect = taffy::Rect {
+                            left: x,
+                            top: y,
+                            right: x + if propagates_x {
+                                size.width.max(output.scrollable_overflow_rect.right)
+                            } else {
+                                size.width
+                            },
+                            bottom: y + if propagates_y {
+                                size.height.max(output.scrollable_overflow_rect.bottom)
+                            } else {
+                                size.height
+                            },
+                        };
+                        inline_box_overflow = Some(match inline_box_overflow {
+                            None => rect,
+                            Some(r) => taffy::Rect {
+                                left: r.left.min(rect.left),
+                                top: r.top.min(rect.top),
+                                right: r.right.max(rect.right),
+                                bottom: r.bottom.max(rect.bottom),
+                            },
+                        });
                         self.mark_layout_dirty(NodeId::from_u64(ibox.id));
                     }
                 }
@@ -959,15 +996,16 @@ impl BaseDocument {
                     top: 0.0,
                     bottom: content_extent.height,
                 };
-                match float_overflow {
-                    Some(f) => taffy::Rect {
-                        left: content.left.min(f.left),
-                        top: content.top.min(f.top),
-                        right: content.right.max(f.right),
-                        bottom: content.bottom.max(f.bottom),
-                    },
-                    None => content,
+                let mut rect = content;
+                for extra in [float_overflow, inline_box_overflow].into_iter().flatten() {
+                    rect = taffy::Rect {
+                        left: rect.left.min(extra.left),
+                        top: rect.top.min(extra.top),
+                        right: rect.right.max(extra.right),
+                        bottom: rect.bottom.max(extra.bottom),
+                    };
                 }
+                rect
             },
             baselines: taffy::Baselines::from_first(first_baseline),
             top_margin: CollapsibleMarginSet::ZERO,

@@ -234,3 +234,15 @@ Patches so far:
     dropped by a later box rebuild, and a native click arriving between a DOM mutation
     and the next resolve then panicked (`invalid SlotMap key`; `tools/fuzz/run.js
     --clicks=30`, seeds 108 and 136).
+72. `taffy/src/compute/block.rs`, `flexbox.rs`, `grid/mod.rs`, `grid/alignment.rs`: scrollable
+    overflow per CSS Overflow 3 §2.2. A scroll container's end padding extends the overflow
+    region past the end edges of its in-flow children's margin boxes; it was added on top
+    of whatever overflow the descendants contributed, so a child overflowing by its border
+    box got the padding a second time and negative margins never pulled it back in
+    (`scrollWidth`/`scrollHeight` too large, phantom scrollbars). Flex and grid items'
+    margin boxes are part of the region. Zero-area boxes still contribute nothing.
+73. `blitz-dom/src/layout/inline.rs`: atomic inline boxes (inline-block, inline-flex, …)
+    and floats take the scrollable overflow rect of the layout pass that placed them (it
+    stayed stale from an earlier layout of the element as a block, so an inline-block's
+    `scrollWidth` reported the former block width), and where their `overflow` is visible
+    it escapes into the inline container's scrollable overflow.

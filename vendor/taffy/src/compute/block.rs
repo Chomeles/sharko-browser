@@ -771,12 +771,35 @@ fn compute_inner(
     #[cfg(feature = "content_size")]
     {
         // A scroll container's own padding at the end of the content is part of its scrollable
-        // overflow region, so it is included in the in-flow overflow rect. Boxes that are not
-        // scroll containers do not extend their overflow region by their own padding.
+        // overflow region: CSS Overflow 3 §2.2 extends the region past the end edges of the
+        // in-flow children's margin boxes (line boxes have none) by the end padding. It is not
+        // added on top of overflow that descendants contribute, and negative margins pull the
+        // padding back in. Boxes that are not scroll containers do not extend their overflow
+        // region by their own padding.
         if is_scroll_container {
-            inflow_overflow_rect.right +=
-                if direction.is_rtl() { resolved_padding.left } else { resolved_padding.right };
-            inflow_overflow_rect.bottom += resolved_padding.bottom;
+            let mut margin_end = Point { x: 0.0f32, y: 0.0f32 };
+            for item in items.iter() {
+                if let Some(layout) = item.final_layout.as_ref() {
+                    // Zero-area boxes contribute nothing (as for their border boxes above).
+                    if layout.size.width <= 0.0 || layout.size.height <= 0.0 {
+                        continue;
+                    }
+                    let (x, end_margin_x) = if direction.is_rtl() {
+                        (
+                            container_outer_width - (layout.location.x + layout.size.width) - resolved_border.right,
+                            layout.margin.left,
+                        )
+                    } else {
+                        (layout.location.x - resolved_border.left, layout.margin.right)
+                    };
+                    let y = layout.location.y - resolved_border.top;
+                    margin_end.x = margin_end.x.max(x + layout.size.width + end_margin_x);
+                    margin_end.y = margin_end.y.max(y + layout.size.height + layout.margin.bottom);
+                }
+            }
+            let end_padding_x = if direction.is_rtl() { resolved_padding.left } else { resolved_padding.right };
+            inflow_overflow_rect.right = inflow_overflow_rect.right.max(margin_end.x + end_padding_x);
+            inflow_overflow_rect.bottom = inflow_overflow_rect.bottom.max(margin_end.y + resolved_padding.bottom);
         }
         output.scrollable_overflow_rect = inflow_overflow_rect.union(absolute_overflow_rect);
     }
