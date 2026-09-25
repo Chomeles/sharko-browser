@@ -804,7 +804,11 @@ impl<'a> TElement for BlitzNode<'a> {
     }
 
     fn has_animations(&self, context: &SharedStyleContext) -> bool {
-        self.has_css_animations(context, None) || self.has_css_transitions(context, None)
+        self.has_css_animations(context, None)
+            || self.has_css_transitions(context, None)
+            || self
+                .element_data()
+                .is_some_and(|el| el.script_animation_declarations.is_some())
     }
 
     fn has_css_animations(
@@ -830,11 +834,29 @@ impl<'a> TElement for BlitzNode<'a> {
         context: &SharedStyleContext,
     ) -> Option<Arc<Locked<PropertyDeclarationBlock>>> {
         let opaque = TNode::opaque(&TElement::as_node(self));
-        context.animations.get_animation_declarations(
+        let css = context.animations.get_animation_declarations(
             &AnimationSetKey::new_for_non_pseudo(opaque),
             context.current_time_for_animations,
             self.guard(),
-        )
+        );
+        // PATCH: script animations (`Element.animate`) come after CSS animations.
+        let script = self
+            .element_data()
+            .and_then(|el| el.script_animation_declarations.clone());
+        match (css, script) {
+            (css, None) => css,
+            (None, script) => script,
+            (Some(css), Some(script)) => {
+                let lock = self.guard();
+                let read = lock.read();
+                let mut block = css.read_with(&read).clone();
+                for (decl, importance) in script.read_with(&read).declaration_importance_iter() {
+                    block.push(decl.clone(), importance);
+                }
+                drop(read);
+                Some(Arc::new(lock.wrap(block)))
+            }
+        }
     }
 
     fn transition_rule(

@@ -177,6 +177,7 @@ natives_table! {
     "styleGet" => crate::style::n_style_get,
     "styleGetPriority" => crate::style::n_style_get_priority,
     "styleSet" => crate::style::n_style_set,
+    "setAnimationStyle" => crate::style::n_set_animation_style,
     "styleRemove" => crate::style::n_style_remove,
     "styleCssText" => crate::style::n_style_css_text,
     "styleSetCssText" => crate::style::n_style_set_css_text,

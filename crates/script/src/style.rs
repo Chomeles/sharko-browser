@@ -211,6 +211,42 @@ pub(crate) fn n_style_set(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.setAnimationStyle(id, pairs)`: the values of the element's script
+/// animations (`Element.animate`), cascaded at the animation level (not part of its style
+/// attribute). `pairs` is `name\0value\0name\0value...`; empty removes them.
+pub(crate) fn n_set_animation_style(cx: &mut Cx) -> NResult {
+    let pairs = cx.string(1)?;
+    let doc = cx.st.doc()?;
+    let id = cx.node(doc, 0)?;
+    element_ok(cx.st, doc, id)?;
+    let mut block = PropertyDeclarationBlock::new();
+    let parts: Vec<&str> = if pairs.is_empty() { Vec::new() } else { pairs.split('\0').collect() };
+    for pair in parts.chunks_exact(2) {
+        let (name, value) = (pair[0], pair[1]);
+        let Some(pid) = parse_property(doc, name) else { continue };
+        let Some(mut decls) = parse_value(doc, &pid, value) else { continue };
+        let mut updates = SourcePropertyDeclarationUpdate::default();
+        if block.prepare_for_update(&decls, Importance::Normal, &mut updates) {
+            block.update(decls.drain(), Importance::Normal, &mut updates);
+        }
+    }
+    let guard = doc.guard().clone();
+    let Some(node) = doc.get_node_mut(id) else { return Ok(()) };
+    let Some(el) = node.element_data_mut() else { return Ok(()) };
+    let had = el.script_animation_declarations.is_some();
+    el.script_animation_declarations = if block.is_empty() {
+        None
+    } else {
+        Some(ServoArc::new(guard.wrap(block)))
+    };
+    if had || el.script_animation_declarations.is_some() {
+        node.set_restyle_hint(blitz_dom::RestyleHint::RESTYLE_SELF);
+        node.set_dirty_descendants();
+        cx.st.invalidate_layout();
+    }
+    Ok(())
+}
+
 pub(crate) fn n_style_remove(cx: &mut Cx) -> NResult {
     let name = cx.string(1)?;
     let doc = cx.st.doc()?;

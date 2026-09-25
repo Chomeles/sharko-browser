@@ -548,6 +548,7 @@
   const PageTransitionEvent = simpleEvent('PageTransitionEvent', Event, { persisted: false });
   const AnimationEvent = simpleEvent('AnimationEvent', Event, { animationName: '', elapsedTime: 0, pseudoElement: '' });
   const TransitionEvent = simpleEvent('TransitionEvent', Event, { propertyName: '', elapsedTime: 0, pseudoElement: '' });
+  const AnimationPlaybackEvent = simpleEvent('AnimationPlaybackEvent', Event, { currentTime: null, timelineTime: null });
   const SubmitEvent = simpleEvent('SubmitEvent', Event, { submitter: null });
   const FormDataEvent = simpleEvent('FormDataEvent', Event, { formData: null });
   const PromiseRejectionEvent = simpleEvent('PromiseRejectionEvent', Event, { promise: null, reason: undefined });
@@ -1171,14 +1172,14 @@
   Object.assign(L, {
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
-    HashChangeEvent, PageTransitionEvent, AnimationEvent, TransitionEvent, SubmitEvent, FormDataEvent,
+    HashChangeEvent, PageTransitionEvent, AnimationEvent, AnimationPlaybackEvent, TransitionEvent, SubmitEvent, FormDataEvent,
     PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
     BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   });
   for (const [name, C] of Object.entries({
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
-    HashChangeEvent, PageTransitionEvent, AnimationEvent, TransitionEvent, SubmitEvent, FormDataEvent,
+    HashChangeEvent, PageTransitionEvent, AnimationEvent, AnimationPlaybackEvent, TransitionEvent, SubmitEvent, FormDataEvent,
     PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
     BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   })) L.expose(name, C);

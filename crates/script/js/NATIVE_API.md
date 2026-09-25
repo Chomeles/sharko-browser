@@ -121,6 +121,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.styleGet(id, cssPropName)` | value string (`""` if not set). Property names are CSS names (`background-color`, `--custom`) |
 | `N.styleGetPriority(id, cssPropName)` | `"important"` or `""` |
 | `N.styleSet(id, cssPropName, value, priority)` | – (`value === ""` removes) |
+| `N.setAnimationStyle(id, pairs)` | Values of the element's script animations (`name\0value\0...`), cascaded at the animation level, not in the style attribute; `''` removes them |
 | `N.styleRemove(id, cssPropName)` | previous value string |
 | `N.styleCssText(id)` | serialized declaration block |
 | `N.styleSetCssText(id, text)` | – |

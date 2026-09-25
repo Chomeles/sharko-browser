@@ -177,6 +177,8 @@ and reports differences (for layout development).
   `position: sticky` only vertically
 - Web Crypto covers SHA, HMAC, AES (GCM/CBC/CTR/KW), PBKDF2 and HKDF; no ECDSA, ECDH,
   RSA or Ed25519 yet
+- Web Animations (`Element.animate`) interpolate numbers, lengths, colors and transform
+  lists; no `composite` modes, scroll timelines or pseudo-element targets yet
 - No downloads, bookmarks, extensions, password manager yet
 - Bot-protection pages (Cloudflare challenges etc.) may block the browser
 

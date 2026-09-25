@@ -2099,7 +2099,8 @@
     },
     releasePointerCapture(pointerId) { const s = pointerCaptures.get(this); if (s) s.delete(Number(pointerId)); },
     hasPointerCapture(pointerId) { const s = pointerCaptures.get(this); return !!s && s.has(Number(pointerId)); },
-    getAnimations() { return []; },
+    getAnimations(options) { return L.elementAnimations(this, options); },
+    animate(keyframes, options) { return L.elementAnimate(this, keyframes, options); },
   });
   L.defineEventHandlers(Element.prototype, ['onfullscreenchange', 'onfullscreenerror', 'onbeforecopy', 'onbeforecut', 'onbeforepaste', 'onsearch']);
   const elementNsOther = new WeakMap();
@@ -2482,6 +2483,8 @@
   const EMPTY_TITLE_DOC = '';
 
   L.mixin(Document.prototype, {
+    get timeline() { return L.documentTimeline; },
+    getAnimations() { return L.documentAnimations(this); },
     get implementation() {
       let m = docCollections.get(this);
       return docCollection(this, 'impl', () => new DOMImplementation(INTERNAL, this));

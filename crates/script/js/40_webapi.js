@@ -127,6 +127,7 @@
   L.onFrame = function (ts) {
     frameRequested = false;
     const t = Number(ts);
+    try { L.tickAnimations(); } catch (e) { L.reportException(e); }
     const maxId = rafId;
     for (const [id, cb] of rafCallbacks) {
       if (id > maxId) break;
@@ -4732,6 +4733,677 @@
     clearData(format) { if (format === undefined) this.#data.clear(); else this.#data.delete(normalizeFormat(format)); }
     setDragImage() { }
   }
+
+  // =======================================================================================
+  // Web Animations (Element.animate, Animation, KeyframeEffect, document.timeline)
+  // Effects run on the animation frames: the animated values are written into the target's
+  // inline style natively (no style attribute mutation records), and a property's own
+  // inline value comes back when no animation affects it any more.
+  // =======================================================================================
+  function cubicBezier(x1, y1, x2, y2) {
+    const bx = (t) => 3 * x1 * t * (1 - t) * (1 - t) + 3 * x2 * t * t * (1 - t) + t * t * t;
+    const by = (t) => 3 * y1 * t * (1 - t) * (1 - t) + 3 * y2 * t * t * (1 - t) + t * t * t;
+    const dx = (t) => 3 * x1 * (1 - t) * (1 - t) + 6 * (x2 - x1) * t * (1 - t) + 3 * (1 - x2) * t * t;
+    return (x) => {
+      if (x <= 0) return x1 > 0 ? (y1 / x1) * x : 0;
+      if (x >= 1) return x2 < 1 ? 1 + ((y2 - 1) / (x2 - 1)) * (x - 1) : 1;
+      let t = x;
+      for (let i = 0; i < 8; i++) {
+        const e = bx(t) - x;
+        if (Math.abs(e) < 1e-6) break;
+        const d = dx(t);
+        if (Math.abs(d) < 1e-6) break;
+        t -= e / d;
+      }
+      if (t < 0 || t > 1 || Math.abs(bx(t) - x) > 1e-4) {
+        let lo = 0, hi = 1; t = x;
+        for (let i = 0; i < 30; i++) { if (bx(t) < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+      }
+      return by(t);
+    };
+  }
+  const NAMED_EASINGS = {
+    linear: (x) => x, ease: cubicBezier(0.25, 0.1, 0.25, 1), 'ease-in': cubicBezier(0.42, 0, 1, 1),
+    'ease-out': cubicBezier(0, 0, 0.58, 1), 'ease-in-out': cubicBezier(0.42, 0, 0.58, 1),
+  };
+  function steps(n, pos) {
+    const jumps = pos === 'jump-none' ? n - 1 : pos === 'jump-both' ? n + 1 : n;
+    const startJump = pos === 'start' || pos === 'jump-start' || pos === 'jump-both';
+    return (x) => {
+      let step = Math.floor(x * n);
+      if (startJump) step++;
+      if (x >= 0 && step < 0) step = 0;
+      if (x <= 1 && step > jumps) step = jumps;
+      return step / jumps;
+    };
+  }
+  function parseEasing(value) {
+    const s = `${value}`.trim();
+    if (Object.prototype.hasOwnProperty.call(NAMED_EASINGS, s)) return NAMED_EASINGS[s];
+    if (s === 'step-start') return steps(1, 'start');
+    if (s === 'step-end') return steps(1, 'end');
+    let m = /^cubic-bezier\(\s*([^,]+),([^,]+),([^,]+),([^)]+)\)$/.exec(s);
+    if (m) {
+      const v = m.slice(1).map(Number);
+      if (v.every(Number.isFinite) && v[0] >= 0 && v[0] <= 1 && v[2] >= 0 && v[2] <= 1) return cubicBezier(v[0], v[1], v[2], v[3]);
+    }
+    m = /^steps\(\s*(\d+)\s*(?:,\s*(start|end|jump-start|jump-end|jump-none|jump-both)\s*)?\)$/.exec(s);
+    if (m && +m[1] > 0 && !(m[2] === 'jump-none' && +m[1] < 2)) return steps(+m[1], m[2] || 'end');
+    m = /^linear\((.*)\)$/.exec(s);
+    if (m) {
+      // linear(): points with optional percentages, evenly spaced otherwise.
+      const pts = m[1].split(',').map((p) => p.trim().split(/\s+/));
+      const out = pts.map((p) => [Number(p[0]), p[1] !== undefined ? parseFloat(p[1]) / 100 : null]);
+      if (out.length >= 2 && out.every((p) => Number.isFinite(p[0]))) {
+        if (out[0][1] === null) out[0][1] = 0;
+        if (out[out.length - 1][1] === null) out[out.length - 1][1] = 1;
+        for (let i = 1; i < out.length - 1; i++) {
+          if (out[i][1] !== null) continue;
+          let j = i; while (out[j][1] === null) j++;
+          const a = out[i - 1][1], b = out[j][1];
+          for (let k = i; k < j; k++) out[k][1] = a + ((b - a) * (k - i + 1)) / (j - i + 1);
+        }
+        return (x) => {
+          for (let i = 1; i < out.length; i++) {
+            if (x <= out[i][1] || i === out.length - 1) {
+              const [y0, x0] = out[i - 1], [y1, x1] = out[i];
+              return x1 === x0 ? y1 : y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+            }
+          }
+          return x;
+        };
+      }
+    }
+    throw new TypeError(`'${s}' is not a valid value for easing`);
+  }
+
+  const FILLS = ['none', 'forwards', 'backwards', 'both', 'auto'];
+  const DIRECTIONS = ['normal', 'reverse', 'alternate', 'alternate-reverse'];
+  function makeTiming(options, base) {
+    const t = base ? { ...base } : {
+      delay: 0, endDelay: 0, fill: 'auto', iterationStart: 0, iterations: 1, duration: 'auto',
+      direction: 'normal', easing: 'linear',
+    };
+    if (options === undefined || options === null) return t;
+    if (typeof options !== 'object') {
+      const d = Number(options);
+      if (Number.isNaN(d) || d < 0) throw new TypeError("Failed to execute 'animate' on 'Element': The provided duration is invalid.");
+      t.duration = d;
+      return t;
+    }
+    if (options.delay !== undefined) { t.delay = Number(options.delay); if (!Number.isFinite(t.delay)) throw new TypeError('delay must be finite'); }
+    if (options.endDelay !== undefined) { t.endDelay = Number(options.endDelay); if (!Number.isFinite(t.endDelay)) throw new TypeError('endDelay must be finite'); }
+    if (options.fill !== undefined) { if (!FILLS.includes(`${options.fill}`)) throw new TypeError(`The provided value '${options.fill}' is not a valid enum value of type FillMode.`); t.fill = `${options.fill}`; }
+    if (options.iterationStart !== undefined) { t.iterationStart = Number(options.iterationStart); if (!(t.iterationStart >= 0)) throw new TypeError('iterationStart must be non-negative'); }
+    if (options.iterations !== undefined) { t.iterations = Number(options.iterations); if (Number.isNaN(t.iterations) || t.iterations < 0) throw new TypeError('iterations must be non-negative'); }
+    if (options.duration !== undefined) {
+      if (options.duration === 'auto') t.duration = 'auto';
+      else { const d = Number(options.duration); if (Number.isNaN(d) || d < 0 || typeof options.duration === 'string') throw new TypeError('The provided duration is invalid.'); t.duration = d; }
+    }
+    if (options.direction !== undefined) { if (!DIRECTIONS.includes(`${options.direction}`)) throw new TypeError(`The provided value '${options.direction}' is not a valid enum value of type PlaybackDirection.`); t.direction = `${options.direction}`; }
+    if (options.easing !== undefined) { parseEasing(options.easing); t.easing = `${options.easing}`; }
+    return t;
+  }
+
+  // CSS property name of a keyframe member (camelCase, `cssFloat`, `cssOffset`).
+  function cssProp(k) {
+    if (k === 'cssFloat') return 'float';
+    if (k === 'cssOffset') return 'offset';
+    if (k.startsWith('--')) return k;
+    return k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  }
+  const KEYFRAME_META = new Set(['offset', 'easing', 'composite']);
+  function normalizeKeyframes(keyframes) {
+    if (keyframes === null || keyframes === undefined) return [];
+    let frames = [];
+    if (typeof keyframes[Symbol.iterator] === 'function') {
+      for (const kf of keyframes) {
+        if (kf === null || typeof kf !== 'object') throw new TypeError("Failed to execute 'animate' on 'Element': Keyframes must be objects.");
+        const f = { offset: kf.offset === undefined || kf.offset === null ? null : Number(kf.offset), easing: kf.easing === undefined ? 'linear' : `${kf.easing}`, composite: kf.composite === undefined ? 'auto' : `${kf.composite}`, props: {} };
+        for (const k of Object.keys(kf)) if (!KEYFRAME_META.has(k)) f.props[cssProp(k)] = `${kf[k]}`;
+        frames.push(f);
+      }
+    } else if (typeof keyframes === 'object') {
+      // Property-indexed: { opacity: [0, 1], offset: [...], easing: ... }
+      const lists = {};
+      let count = 0;
+      for (const k of Object.keys(keyframes)) {
+        if (KEYFRAME_META.has(k)) continue;
+        const v = keyframes[k];
+        const list = Array.isArray(v) ? v.map(String) : [`${v}`];
+        lists[cssProp(k)] = list;
+      }
+      const offsets = keyframes.offset === undefined ? [] : [].concat(keyframes.offset);
+      const easings = keyframes.easing === undefined ? [] : [].concat(keyframes.easing);
+      // Each property's values are spaced evenly on their own, then merged by offset.
+      const merged = new Map();
+      for (const [prop, list] of Object.entries(lists)) {
+        count = Math.max(count, list.length);
+        list.forEach((val, i) => {
+          const off = list.length === 1 ? 1 : i / (list.length - 1);
+          const key = String(off);
+          let f = merged.get(key);
+          if (f === undefined) { f = { offset: off, easing: 'linear', composite: 'auto', props: {}, computed: true }; merged.set(key, f); }
+          f.props[prop] = val;
+        });
+      }
+      frames = Array.from(merged.values()).sort((a, b) => a.offset - b.offset);
+      // Evenly spaced lists keep their spacing implicit (`offset: null`, as in browsers).
+      const lengths = new Set(Object.values(lists).map((l) => l.length));
+      if (lengths.size <= 1) frames.forEach((f, i) => { if (!(frames.length === 1 && i === 0)) f.offset = null; });
+      if (frames.length === 1) frames[0].offset = null;
+      frames.forEach((f, i) => {
+        if (offsets[i] !== undefined && offsets[i] !== null) f.offset = Number(offsets[i]);
+        if (easings.length) f.easing = `${easings[i % easings.length]}`;
+      });
+    } else {
+      throw new TypeError("Failed to execute 'animate' on 'Element': parameter 1 is not of type 'object'.");
+    }
+    let prev = -Infinity;
+    for (const f of frames) {
+      if (f.offset !== null) {
+        if (!(f.offset >= 0 && f.offset <= 1)) throw new TypeError('Offsets must be null or in the range [0,1].');
+        if (f.offset < prev) throw new TypeError('Offsets must be monotonically non-decreasing.');
+        prev = f.offset;
+      }
+      parseEasing(f.easing);
+    }
+    return frames;
+  }
+  // Computed offsets: missing ones spaced evenly between their neighbours.
+  function computedOffsets(frames) {
+    const offs = frames.map((f) => f.offset);
+    if (offs.length === 0) return offs;
+    if (offs.length > 1 && offs[0] === null) offs[0] = 0;
+    if (offs[offs.length - 1] === null) offs[offs.length - 1] = 1;
+    for (let i = 1; i < offs.length - 1; i++) {
+      if (offs[i] !== null) continue;
+      let j = i; while (offs[j] === null) j++;
+      const a = offs[i - 1], b = offs[j];
+      for (let k = i; k < j; k++) offs[k] = a + ((b - a) * (k - i + 1)) / (j - i + 1);
+    }
+    return offs;
+  }
+
+  // Interpolation of two computed-ish values: numbers inside matching text, colors,
+  // `none` transforms against function lists; anything else switches halfway.
+  const NUM_RE = /[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi;
+  function splitNums(s) {
+    const nums = [];
+    const text = s.replace(NUM_RE, (m) => { nums.push(Number(m)); return '\u0000'; });
+    return [text, nums];
+  }
+  function parseRgba(s) {
+    try { const c = N.parseColor(s); return c === null || c === undefined ? null : c; } catch (_) { return null; }
+  }
+  function identityTransform(fns) {
+    return fns.replace(/([a-zA-Z0-9]+)\(([^)]*)\)/g, (m, name, args) => {
+      const one = /^scale/i.test(name);
+      if (/^matrix3d$/i.test(name)) return 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)';
+      if (/^matrix$/i.test(name)) return 'matrix(1, 0, 0, 1, 0, 0)';
+      return `${name}(${args.split(',').map((a) => a.trim().replace(NUM_RE, one ? '1' : '0')).join(', ')})`;
+    });
+  }
+  function fmtNum(n) { return String(Math.round(n * 10000) / 10000); }
+  function interpolate(prop, a, b, p) {
+    if (p <= 0) return a;
+    if (p >= 1) return b;
+    if (a === b) return a;
+    if (prop === 'transform' || prop === 'translate' || prop === 'rotate' || prop === 'scale') {
+      if (a === 'none') a = identityTransform(b);
+      else if (b === 'none') b = identityTransform(a);
+    }
+    const [ta, na] = splitNums(a), [tb, nb] = splitNums(b);
+    if (ta === tb && na.length === nb.length && na.length > 0) {
+      let i = 0;
+      return ta.replace(/\u0000/g, () => { const v = fmtNum(na[i] + (nb[i] - na[i]) * p); i++; return v; });
+    }
+    if (/color|fill|stroke|background$/.test(prop) || /^(#|rgb|hsl|hwb|lab|lch|oklab|oklch|color\()/i.test(a)) {
+      const ca = parseRgba(a), cb = parseRgba(b);
+      if (ca && cb) {
+        const mix = (i) => ca[i] + (cb[i] - ca[i]) * p;
+        return `rgba(${Math.round(mix(0))}, ${Math.round(mix(1))}, ${Math.round(mix(2))}, ${fmtNum(mix(3))})`;
+      }
+    }
+    return p < 0.5 ? a : b;
+  }
+
+  const ANIMATIONS = new Set(); // relevant animations, in creation order
+  let animSeq = 0;
+  class AnimationTimeline {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    get currentTime() { return N.now(); }
+    get duration() { return null; }
+  }
+  class DocumentTimeline extends AnimationTimeline {
+    #origin;
+    constructor(options) {
+      super(INTERNAL);
+      this.#origin = options && options.originTime !== undefined ? Number(options.originTime) : 0;
+    }
+    get currentTime() { return N.now() - this.#origin; }
+  }
+  const documentTimeline = new DocumentTimeline();
+  L.documentTimeline = documentTimeline;
+
+  class AnimationEffect {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+  }
+  const EFFECT = new WeakMap(); // KeyframeEffect -> state
+  function effectState(e) { const s = EFFECT.get(e); if (s === undefined) throw L.illegal(); return s; }
+  function activeDuration(t) {
+    const d = t.duration === 'auto' ? 0 : t.duration;
+    return d * t.iterations;
+  }
+  function endTime(t) { return Math.max(t.delay + activeDuration(t) + t.endDelay, 0); }
+  // Computed timing at local time `lt` (null: idle).
+  function computeTiming(t, lt, rate) {
+    const d = t.duration === 'auto' ? 0 : t.duration;
+    const ad = activeDuration(t);
+    const end = endTime(t);
+    const out = {
+      delay: t.delay, endDelay: t.endDelay, fill: t.fill === 'auto' ? 'none' : t.fill, iterationStart: t.iterationStart,
+      iterations: t.iterations, duration: d, direction: t.direction, easing: t.easing,
+      endTime: end, activeDuration: ad, localTime: lt, progress: null, currentIteration: null,
+    };
+    if (lt === null) return out;
+    const fill = out.fill;
+    const before = lt < Math.max(Math.min(t.delay, end), 0) || (rate < 0 && lt === Math.max(Math.min(t.delay, end), 0));
+    const after = lt > Math.max(Math.min(t.delay + ad, end), 0) || (rate >= 0 && lt === Math.max(Math.min(t.delay + ad, end), 0));
+    let activeTime;
+    if (before) {
+      if (fill !== 'backwards' && fill !== 'both') return out;
+      activeTime = Math.max(lt - t.delay, 0);
+    } else if (after) {
+      if (fill !== 'forwards' && fill !== 'both') return out;
+      activeTime = Math.max(Math.min(lt - t.delay, ad), 0);
+    } else {
+      activeTime = lt - t.delay;
+    }
+    let overall = d === 0 ? (after ? t.iterations + t.iterationStart : t.iterationStart) : activeTime / d + t.iterationStart;
+    let simple = Number.isFinite(overall) ? overall % 1 : t.iterationStart % 1;
+    if (simple === 0 && (after || (d === 0 && !before)) && t.iterations !== 0 && overall !== 0 && (activeTime === ad || d === 0)) simple = 1;
+    let iteration = (after || d === 0) && simple === 1 ? Math.floor(overall) - 1 : Math.floor(overall);
+    if (!Number.isFinite(iteration)) iteration = Infinity;
+    let forward = true;
+    if (t.direction === 'reverse') forward = false;
+    else if (t.direction === 'alternate') forward = iteration % 2 === 0;
+    else if (t.direction === 'alternate-reverse') forward = iteration % 2 !== 0;
+    let dir = forward ? simple : 1 - simple;
+    out.progress = parseEasing(t.easing)(dir);
+    out.currentIteration = iteration;
+    return out;
+  }
+  class KeyframeEffect extends AnimationEffect {
+    constructor(target, keyframes, options) {
+      super(INTERNAL);
+      if (target instanceof KeyframeEffect) {
+        const src = effectState(target);
+        EFFECT.set(this, { target: src.target, pseudo: src.pseudo, frames: src.frames.map((f) => ({ ...f, props: { ...f.props } })), timing: { ...src.timing }, composite: src.composite, animation: null });
+        return;
+      }
+      if (target !== null && !(target instanceof L.Element)) throw new TypeError("Failed to construct 'KeyframeEffect': parameter 1 is not of type 'Element'.");
+      const timing = makeTiming(options);
+      EFFECT.set(this, {
+        target, pseudo: options && typeof options === 'object' && options.pseudoElement ? `${options.pseudoElement}` : null,
+        frames: normalizeKeyframes(keyframes), timing,
+        composite: options && typeof options === 'object' && options.composite ? `${options.composite}` : 'replace',
+        animation: null,
+      });
+    }
+    get target() { return effectState(this).target; }
+    set target(v) { effectState(this).target = v instanceof L.Element ? v : null; scheduleAnimations(); }
+    get pseudoElement() { return effectState(this).pseudo; }
+    set pseudoElement(v) { effectState(this).pseudo = v === null ? null : `${v}`; }
+    get composite() { return effectState(this).composite; }
+    set composite(v) { if (['replace', 'add', 'accumulate'].includes(`${v}`)) effectState(this).composite = `${v}`; }
+    get iterationComposite() { return 'replace'; }
+    getKeyframes() {
+      const s = effectState(this);
+      const offs = computedOffsets(s.frames);
+      return s.frames.map((f, i) => {
+        const o = { offset: f.offset, easing: f.easing, composite: f.composite };
+        for (const [k, v] of Object.entries(f.props)) o[k.startsWith('--') ? k : k.replace(/-([a-z])/g, (m, c) => c.toUpperCase()).replace(/^float$/, 'cssFloat')] = v;
+        o.computedOffset = offs[i];
+        return o;
+      });
+    }
+    setKeyframes(keyframes) { effectState(this).frames = normalizeKeyframes(keyframes); scheduleAnimations(); }
+    getTiming() {
+      const t = effectState(this).timing;
+      return { delay: t.delay, direction: t.direction, duration: t.duration, easing: t.easing, endDelay: t.endDelay, fill: t.fill, iterationStart: t.iterationStart, iterations: t.iterations };
+    }
+    getComputedTiming() {
+      const s = effectState(this);
+      const a = s.animation;
+      const lt = a === null ? null : animCurrentTime(a);
+      return computeTiming(s.timing, lt, a === null ? 1 : ANIM.get(a).rate);
+    }
+    updateTiming(timing) { const s = effectState(this); s.timing = makeTiming(timing, s.timing); scheduleAnimations(); }
+  }
+
+  const ANIM = new WeakMap(); // Animation -> state
+  function animState(a) { const s = ANIM.get(a); if (s === undefined) throw L.illegal(); return s; }
+  function animCurrentTime(a) {
+    const s = ANIM.get(a);
+    if (s.hold !== null) return s.hold;
+    if (s.start === null || s.timeline === null) return null;
+    return (s.timeline.currentTime - s.start) * s.rate;
+  }
+  function effectEnd(s) { return s.effect === null ? 0 : endTime(effectState(s.effect).timing); }
+  function newFinished(s, a) {
+    s.finished = L.newPromise((res, rej) => { s.resolveFinished = res; s.rejectFinished = rej; });
+    L.promiseThen.call(s.finished, null, () => {});
+    s.finishedResolved = false;
+  }
+  function playStateOf(a) {
+    const s = ANIM.get(a);
+    const ct = animCurrentTime(a);
+    if (ct === null && s.start === null && !s.pendingPlay) return 'idle';
+    if (s.paused) return 'paused';
+    if (ct !== null && ((s.rate > 0 && ct >= effectEnd(s)) || (s.rate < 0 && ct <= 0))) return 'finished';
+    return 'running';
+  }
+  function fireAnimEvent(a, type, ct) {
+    L.fire(a, type, { currentTime: ct, timelineTime: documentTimeline.currentTime }, L.AnimationPlaybackEvent);
+  }
+  // Update the finished state after a time change (possibly firing `finish`).
+  function updateFinished(a, sync) {
+    const s = ANIM.get(a);
+    const end = effectEnd(s);
+    const ct = animCurrentTime(a);
+    if (ct !== null && s.start !== null && !s.pendingPlay) {
+      if (s.rate > 0 && ct >= end) { s.hold = end; s.start = null; }
+      else if (s.rate < 0 && ct <= 0) { s.hold = 0; s.start = null; }
+    }
+    const done = playStateOf(a) === 'finished' && !s.pendingPlay && !s.paused;
+    if (done && !s.finishedResolved) {
+      s.finishedResolved = true;
+      const finish = () => {
+        if (playStateOf(a) !== 'finished') return;
+        s.resolveFinished(a);
+        // The `finished` promise's reactions run before the event.
+        const ct = animCurrentTime(a);
+        L.microtask(() => fireAnimEvent(a, 'finish', ct));
+      };
+      if (sync) finish(); else L.microtask(finish);
+    } else if (!done && s.finishedResolved) {
+      newFinished(s, a);
+    }
+  }
+  class Animation extends EventTarget {
+    constructor(effect, timeline) {
+      super();
+      if (effect !== undefined && effect !== null && !(effect instanceof KeyframeEffect)) throw new TypeError("Failed to construct 'Animation': parameter 1 is not of type 'AnimationEffect'.");
+      const s = {
+        effect: effect === undefined ? null : effect, timeline: timeline === undefined ? documentTimeline : timeline,
+        start: null, hold: null, rate: 1, paused: false, pendingPlay: false, id: '', seq: ++animSeq,
+        finished: null, resolveFinished: null, rejectFinished: null, finishedResolved: false,
+        ready: L.resolvedPromise(), replaceState: 'active',
+      };
+      ANIM.set(this, s);
+      newFinished(s, this);
+      if (s.effect) {
+        const es = effectState(s.effect);
+        if (es.animation && es.animation !== this) ANIM.get(es.animation).effect = null;
+        es.animation = this;
+      }
+    }
+    get id() { return animState(this).id; }
+    set id(v) { animState(this).id = `${v}`; }
+    get effect() { return animState(this).effect; }
+    set effect(v) { const s = animState(this); s.effect = v instanceof KeyframeEffect ? v : null; if (s.effect) effectState(s.effect).animation = this; scheduleAnimations(); }
+    get timeline() { return animState(this).timeline; }
+    set timeline(v) { animState(this).timeline = v; }
+    get startTime() { return animState(this).start; }
+    set startTime(v) {
+      const s = animState(this);
+      if (v === null) { s.hold = animCurrentTime(this); s.start = null; }
+      else { s.start = Number(v); s.hold = null; s.pendingPlay = false; s.paused = false; ANIMATIONS.add(this); }
+      updateFinished(this, true); applyAnimations(); scheduleAnimations();
+    }
+    get currentTime() { return animCurrentTime(this); }
+    set currentTime(v) {
+      const s = animState(this);
+      if (v === null) { if (animCurrentTime(this) !== null) throw new TypeError('currentTime cannot be set to null'); return; }
+      const t = Number(v);
+      if (s.hold !== null || s.start === null || s.paused || s.pendingPlay) s.hold = t;
+      else s.start = s.timeline.currentTime - t / s.rate;
+      ANIMATIONS.add(this);
+      updateFinished(this, true); applyAnimations(); scheduleAnimations();
+    }
+    get playbackRate() { return animState(this).rate; }
+    set playbackRate(v) {
+      const s = animState(this);
+      const ct = animCurrentTime(this);
+      s.rate = Number(v);
+      if (ct !== null) this.currentTime = ct;
+    }
+    get playState() { return playStateOf(this); }
+    get pending() { return animState(this).pendingPlay; }
+    get replaceState() { return animState(this).replaceState; }
+    get ready() { return animState(this).ready; }
+    get finished() { return animState(this).finished; }
+    play() {
+      const s = animState(this);
+      const end = effectEnd(s);
+      let ct = animCurrentTime(this);
+      if (s.rate > 0 && (ct === null || ct < 0 || ct >= end)) s.hold = 0;
+      else if (s.rate < 0 && (ct === null || ct <= 0 || ct > end)) {
+        if (end === Infinity) throw new DOMException('Cannot play reversed Animation with infinite target effect end.', 'InvalidStateError');
+        s.hold = end;
+      } else if (s.rate === 0 && ct === null) s.hold = 0;
+      else if (s.start !== null && !s.paused) { s.hold = ct; }
+      s.start = null;
+      s.paused = false;
+      s.pendingPlay = true;
+      if (s.finishedResolved) newFinished(s, this);
+      ANIMATIONS.add(this);
+      let resolveReady;
+      s.ready = L.newPromise((res) => { resolveReady = res; });
+      s.resolveReady = resolveReady;
+      applyAnimations();
+      scheduleAnimations();
+    }
+    pause() {
+      const s = animState(this);
+      if (s.paused) return;
+      let ct = animCurrentTime(this);
+      if (ct === null) ct = s.rate >= 0 ? 0 : effectEnd(s);
+      s.hold = ct;
+      s.start = null;
+      s.paused = true;
+      s.pendingPlay = false;
+      ANIMATIONS.add(this);
+      const ready = s.resolveReady;
+      if (ready) { s.resolveReady = null; L.microtask(() => ready(this)); }
+      else s.ready = L.resolvedPromise(this);
+      applyAnimations();
+      scheduleAnimations();
+    }
+    finish() {
+      const s = animState(this);
+      const end = effectEnd(s);
+      if (s.rate === 0 || (s.rate > 0 && end === Infinity)) throw new DOMException("Failed to execute 'finish' on 'Animation': Cannot finish Animation with a playbackRate of 0 or an infinite target effect end.", 'InvalidStateError');
+      const limit = s.rate > 0 ? end : 0;
+      s.paused = false;
+      if (s.pendingPlay || s.start === null) { s.pendingPlay = false; if (s.resolveReady) { const r = s.resolveReady; s.resolveReady = null; r(this); } }
+      s.hold = null;
+      s.start = s.timeline.currentTime - limit / s.rate;
+      ANIMATIONS.add(this);
+      updateFinished(this, true);
+      applyAnimations();
+    }
+    cancel() {
+      const s = animState(this);
+      if (playStateOf(this) !== 'idle') {
+        if (s.resolveReady) { s.resolveReady = null; s.ready = L.rejectedPromise(new DOMException('The user aborted a request.', 'AbortError')); L.promiseThen.call(s.ready, null, () => {}); }
+        if (!s.finishedResolved) s.rejectFinished(new DOMException('The user aborted a request.', 'AbortError'));
+        newFinished(s, this);
+        s.start = null; s.hold = null; s.paused = false; s.pendingPlay = false;
+        L.microtask(() => fireAnimEvent(this, 'cancel', null));
+      }
+      ANIMATIONS.delete(this);
+      applyAnimations();
+    }
+    reverse() {
+      const s = animState(this);
+      s.rate = -s.rate;
+      this.play();
+    }
+    updatePlaybackRate(rate) { this.playbackRate = rate; }
+    persist() { animState(this).replaceState = 'persisted'; }
+    commitStyles() {
+      const s = animState(this);
+      if (!s.effect) return;
+      const target = effectState(s.effect).target;
+      if (!target) return;
+      for (const [prop, v] of currentValues(target)) target.style.setProperty(prop, v);
+    }
+  }
+  L.defineEventHandlers(Animation.prototype, ['onfinish', 'oncancel', 'onremove']);
+
+  // Values each property of `target` has from its relevant animations (later ones win).
+  function currentValues(target) {
+    const out = new Map();
+    for (const a of ANIMATIONS) {
+      const s = ANIM.get(a);
+      if (!s.effect) continue;
+      const es = effectState(s.effect);
+      if (es.target !== target || es.pseudo) continue;
+      const timing = computeTiming(es.timing, animCurrentTime(a), s.rate);
+      if (timing.progress === null) continue;
+      const frames = es.frames;
+      if (frames.length === 0) continue;
+      const offs = computedOffsets(frames);
+      const props = new Set();
+      for (const f of frames) for (const k of Object.keys(f.props)) props.add(k);
+      for (const prop of props) {
+        const pf = [];
+        frames.forEach((f, i) => { if (f.props[prop] !== undefined) pf.push([offs[i], f.props[prop], f.easing]); });
+        const base = () => baseValue(target, prop);
+        if (pf[0][0] !== 0) pf.unshift([0, base(), 'linear']);
+        if (pf[pf.length - 1][0] !== 1) pf.push([1, base(), 'linear']);
+        const p = timing.progress;
+        let i = 0;
+        if (p >= 1) i = pf.length - 2;
+        else if (p > 0) { while (i < pf.length - 2 && pf[i + 1][0] <= p) i++; }
+        const [o1, v1, e1] = pf[i], [o2, v2] = pf[i + 1];
+        const local = o2 === o1 ? 0 : (p - o1) / (o2 - o1);
+        const eased = parseEasing(e1)(local);
+        out.set(prop, interpolate(prop, v1, v2, eased));
+      }
+    }
+    return out;
+  }
+  // The value a property has without script animations (its computed value).
+  function baseValue(target, prop) {
+    const id = idOf(target);
+    const rec = animatedStyles.get(target);
+    if (rec === undefined) {
+      try { return N.computedStyle(id, prop, ''); } catch (_) { return ''; }
+    }
+    N.setAnimationStyle(id, '');
+    let v = '';
+    try { v = N.computedStyle(id, prop, ''); } catch (_) { v = ''; }
+    N.setAnimationStyle(id, rec.pairs);
+    return v;
+  }
+  const animatedStyles = new Map(); // Element -> { pairs } (its current animation values)
+  function applyAnimations() {
+    const targets = new Set();
+    for (const a of ANIMATIONS) {
+      const s = ANIM.get(a);
+      if (s.effect && effectState(s.effect).target) targets.add(effectState(s.effect).target);
+    }
+    for (const t of animatedStyles.keys()) targets.add(t);
+    let changed = false;
+    for (const target of targets) {
+      let values;
+      try { values = currentValues(target); } catch (e) { values = new Map(); L.reportException(e); }
+      const parts = [];
+      for (const [prop, v] of values) parts.push(prop, v);
+      const pairs = parts.join('\u0000');
+      const rec = animatedStyles.get(target);
+      if ((rec === undefined && pairs === '') || (rec !== undefined && rec.pairs === pairs)) continue;
+      try { N.setAnimationStyle(idOf(target), pairs); } catch (_) { }
+      changed = true;
+      if (pairs === '') animatedStyles.delete(target);
+      else animatedStyles.set(target, { pairs });
+    }
+    if (changed && L.observersDirty !== null && L.observersDirty !== undefined) L.observersDirty();
+  }
+  let animFrameScheduled = false;
+  function scheduleAnimations() {
+    if (animFrameScheduled) return;
+    animFrameScheduled = true;
+    L.requestFrame();
+  }
+  // Called at the start of each animation frame (before requestAnimationFrame callbacks).
+  L.tickAnimations = function () {
+    if (!animFrameScheduled && ANIMATIONS.size === 0 && animatedStyles.size === 0) return;
+    animFrameScheduled = false;
+    const now = documentTimeline.currentTime;
+    for (const a of Array.from(ANIMATIONS)) {
+      const s = ANIM.get(a);
+      if (s.pendingPlay) {
+        s.pendingPlay = false;
+        const hold = s.hold === null ? 0 : s.hold;
+        s.start = s.rate === 0 ? now : now - hold / s.rate;
+        s.hold = null;
+        if (s.resolveReady) { const r = s.resolveReady; s.resolveReady = null; r(a); }
+      }
+      updateFinished(a, false);
+    }
+    applyAnimations();
+    // Keep ticking while something runs; drop finished animations that fill nothing.
+    let running = false;
+    for (const a of Array.from(ANIMATIONS)) {
+      const st = playStateOf(a);
+      const s = ANIM.get(a);
+      if (st === 'running') running = true;
+      if (st === 'idle' || (st === 'finished' && s.effect && computeTiming(effectState(s.effect).timing, animCurrentTime(a), s.rate).progress === null)) {
+        if (st === 'idle' || s.finishedResolved) ANIMATIONS.delete(a);
+      }
+      if (!s.effect && st !== 'running') ANIMATIONS.delete(a);
+    }
+    if (running) scheduleAnimations();
+  };
+  function relevantAnimations(filter) {
+    const out = [];
+    for (const a of ANIMATIONS) {
+      const s = ANIM.get(a);
+      if (!s.effect) continue;
+      const st = playStateOf(a);
+      const es = effectState(s.effect);
+      const timing = computeTiming(es.timing, animCurrentTime(a), s.rate);
+      const current = st === 'running' || st === 'paused' || s.pendingPlay;
+      if (!current && timing.progress === null) continue;
+      if (st === 'idle') continue;
+      if (filter(es.target)) out.push(a);
+    }
+    return out;
+  }
+  L.elementAnimations = function (el, options) {
+    const subtree = !!(options && options.subtree);
+    const id = idOf(el);
+    return relevantAnimations((t) => t !== null && (t === el || (subtree && N.contains(id, idOf(t)))));
+  };
+  L.documentAnimations = function (doc) {
+    return relevantAnimations((t) => t !== null && N.isConnected(idOf(t)));
+  };
+  L.elementAnimate = function (el, keyframes, options) {
+    const effect = new KeyframeEffect(el, keyframes, options);
+    const a = new Animation(effect, documentTimeline);
+    if (options && typeof options === 'object' && options.id !== undefined) a.id = options.id;
+    a.play();
+    return a;
+  };
+  L.expose('AnimationTimeline', AnimationTimeline);
+  L.expose('DocumentTimeline', DocumentTimeline);
+  L.expose('AnimationEffect', AnimationEffect);
+  L.expose('KeyframeEffect', KeyframeEffect);
+  L.expose('Animation', Animation);
 
   // =======================================================================================
   // Exports

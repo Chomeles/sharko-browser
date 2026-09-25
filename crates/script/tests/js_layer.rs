@@ -772,3 +772,32 @@ fn js_layer_text_range_rects() {
     );
     assert_eq!(r, "[30,true,true,0,true,1,true,true]");
 }
+
+/// Element.animate(): keyframe values are cascaded at the animation level (the style
+/// attribute is untouched), follow currentTime/pause/finish/cancel, and are listed by
+/// getAnimations().
+#[test]
+fn js_layer_web_animations() {
+    let mut e = js_env(
+        r#"<!DOCTYPE html><html><body><div id="box" style="width:10px">x</div></body></html>"#,
+    );
+    let r = e.eval(
+        r#"
+        const el = document.getElementById('box');
+        const a = el.animate([{ opacity: 0, width: '100px' }, { opacity: 1, width: '200px' }], { duration: 1000, fill: 'forwards' });
+        a.pause(); a.currentTime = 250;
+        const mid = [a.playState, getComputedStyle(el).opacity, getComputedStyle(el).width, el.getAttribute('style'),
+          el.getAnimations().length, document.getAnimations().length, a.effect.getComputedTiming().progress];
+        a.finish();
+        const end = [a.playState, getComputedStyle(el).opacity, el.getAnimations().length];
+        a.cancel();
+        const gone = [a.playState, getComputedStyle(el).opacity, getComputedStyle(el).width, el.getAnimations().length];
+        let err = 'none'; try { el.animate([{ opacity: 0 }], { easing: 'nope' }); } catch (x) { err = x.name; }
+        [mid, end, gone, err, typeof document.timeline.currentTime]
+    "#,
+    );
+    assert_eq!(
+        r,
+        r#"[["paused","0.25","125px","width:10px",1,1,0.25],["finished","1",1],["idle","1","10px",0],"TypeError","number"]"#
+    );
+}
