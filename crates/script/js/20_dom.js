@@ -878,13 +878,16 @@
     }
   }
   const upperCache = new Map();
+  // The HTML-uppercased qualified name (prefix included): "DIV", "X:B", but "svg".
   function tagNameOf(w) {
     const ln = lnOf(w);
-    if (nsOf(w) !== HTML) return ln;
-    let u = upperCache.get(ln);
+    const p = elementPrefix.get(w);
+    const q = p ? p + ':' + ln : ln;
+    if (nsOf(w) !== HTML) return q;
+    let u = upperCache.get(q);
     if (u === undefined) {
-      u = L.asciiUpper(ln);
-      upperCache.set(ln, u);
+      u = L.asciiUpper(q);
+      upperCache.set(q, u);
     }
     return u;
   }
@@ -1855,10 +1858,7 @@
     },
     get prefix() { return elementPrefix.get(this) || null; },
     get localName() { return lnOf(this); },
-    get tagName() {
-      const p = elementPrefix.get(this);
-      return p ? p + ':' + tagNameOf(this) : tagNameOf(this);
-    },
+    get tagName() { return tagNameOf(this); },
     get id() { const v = N.getAttr(idOf(this), 'id'); return v === null ? '' : v; },
     set id(v) { setAttrCore(this, idOf(this), 'id', `${v}`); },
     get className() { const v = N.getAttr(idOf(this), 'class'); return v === null ? '' : v; },
@@ -2938,6 +2938,7 @@
       if (token !== INTERNAL) throw L.illegal();
       this.#el = el; this.#mode = mode; this.#pseudo = pseudo || ''; this.#decls = decls || null;
     }
+    *[Symbol.iterator]() { for (let i = 0, n = this.length; i < n; i++) yield this.item(i); }
     static {
       L.sdGet = (o, name) => {
         const m = o.#mode;
@@ -3256,6 +3257,7 @@
     set name(v) { const d = rd(this); d.prelude = '@keyframes ' + v; d.text = null; ruleChanged(this); }
     get cssRules() { return ruleList(this); }
     get length() { return rd(this).children.length; }
+    *[Symbol.iterator]() { yield* this.cssRules; }
     appendRule(rule) { insertRuleInto(rd(this), this, `${rule}`, rd(this).children.length, true); }
     deleteRule(select) { const d = rd(this); const i = d.children.findIndex((c) => rd(c).prelude === `${select}`); if (i >= 0) { deleteRuleFrom(d, i); ruleChanged(this); } }
     findRule(select) { return rd(this).children.find((c) => rd(c).prelude === `${select}`) || null; }
@@ -4262,6 +4264,11 @@
     get anchorOffset() { const r = this.#range; return r === null ? 0 : (this.#backward ? r.endOffset : r.startOffset); }
     get focusNode() { const r = this.#range; return r === null ? null : (this.#backward ? r.startContainer : r.endContainer); }
     get focusOffset() { const r = this.#range; return r === null ? 0 : (this.#backward ? r.startOffset : r.endOffset); }
+    // Legacy aliases (WebKit/Blink).
+    get baseNode() { return this.anchorNode; }
+    get baseOffset() { return this.anchorOffset; }
+    get extentNode() { return this.focusNode; }
+    get extentOffset() { return this.focusOffset; }
     get isCollapsed() { return this.#range === null || this.#range.collapsed; }
     get rangeCount() { return this.#range === null ? 0 : 1; }
     get type() { return this.#range === null ? 'None' : this.#range.collapsed ? 'Caret' : 'Range'; }

@@ -3338,6 +3338,7 @@
     'transferSize', 'encodedBodySize', 'decodedBodySize', 'renderBlockingStatus', 'responseStatus', 'deliveryType']) {
     Object.defineProperty(PerformanceResourceTiming.prototype, k, { get() { const v = L.prtData(this)[k]; return v === undefined ? (typeof v === 'string' ? '' : 0) : v; }, enumerable: true, configurable: true });
   }
+  Object.defineProperty(PerformanceResourceTiming.prototype, 'serverTiming', { get() { return Object.freeze([]); }, enumerable: true, configurable: true });
   PerformanceResourceTiming.prototype.toJSON = function () { return Object.assign(PerformanceEntry.prototype.toJSON.call(this), L.prtData(this)); };
   class PerformanceNavigationTiming extends PerformanceResourceTiming { }
   for (const k of ['unloadEventStart', 'unloadEventEnd', 'domInteractive', 'domContentLoadedEventStart', 'domContentLoadedEventEnd',
@@ -3770,6 +3771,7 @@
     get length() { return this.#mimes.length; }
     item(i) { return this.#mimes[Number(i) >>> 0] || null; }
     namedItem(n) { return this.#mimes.find((m) => m.type === `${n}`) || null; }
+    *[Symbol.iterator]() { yield* this.#mimes; }
   }
   L.makeIndexed(Plugin.prototype, (o, i) => L.pluginMimes(o)[i], 4);
   class PluginArray {
@@ -4011,6 +4013,17 @@
   }
   const navState = {};
   function lazy(key, make) { if (navState[key] === undefined) navState[key] = make(); return navState[key]; }
+  // HTML "user activation": sticky once any trusted activation event was seen, transient
+  // for a few seconds after it (10_events.js records L.lastActivation).
+  class UserActivation {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    get hasBeenActive() { return L.lastActivation !== 0; }
+    get isActive() { return L.lastActivation !== 0 && Date.now() - L.lastActivation < 5000; }
+  }
+  class Scheduling {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    isInputPending() { return false; }
+  }
   class Navigator {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     get userAgent() { return ua(); }
@@ -4046,6 +4059,8 @@
     get webkitPersistentStorage() { return lazy('webkitPersistentStorage', () => new DeprecatedStorageQuota(INTERNAL)); }
     get geolocation() { return lazy('geolocation', () => new Geolocation(INTERNAL)); }
     get locks() { return lazy('locks', () => new LockManager(INTERNAL)); }
+    get userActivation() { return lazy('userActivation', () => new UserActivation(INTERNAL)); }
+    get scheduling() { return lazy('scheduling', () => new Scheduling(INTERNAL)); }
     // No `serviceWorker` / `mediaDevices` members (like Chrome in an insecure context):
     // sites test `'serviceWorker' in navigator` and then call methods on it.
     sendBeacon(url, data) {
@@ -4774,6 +4789,7 @@
     }
     remove(index) { L.dtRemove(this.#dt, Number(index) >>> 0); }
     clear() { this.#dt.clearData(); }
+    *[Symbol.iterator]() { yield* L.dtItems(this.#dt); }
   }
   L.makeIndexed(DataTransferItemList.prototype, (o, i) => L.dtItems(L.dtilOwner(o))[i], 8);
   class DataTransfer {
@@ -5051,6 +5067,17 @@
 
   class AnimationEffect {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    getTiming() {
+      const t = effectState(this).timing;
+      return { delay: t.delay, direction: t.direction, duration: t.duration, easing: t.easing, endDelay: t.endDelay, fill: t.fill, iterationStart: t.iterationStart, iterations: t.iterations };
+    }
+    getComputedTiming() {
+      const s = effectState(this);
+      const a = s.animation;
+      const lt = a === null ? null : animCurrentTime(a);
+      return computeTiming(s.timing, lt, a === null ? 1 : ANIM.get(a).rate);
+    }
+    updateTiming(timing) { const s = effectState(this); s.timing = makeTiming(timing, s.timing); scheduleAnimations(); }
   }
   const EFFECT = new WeakMap(); // KeyframeEffect -> state
   function effectState(e) { const s = EFFECT.get(e); if (s === undefined) throw L.illegal(); return s; }
@@ -5132,17 +5159,6 @@
       });
     }
     setKeyframes(keyframes) { effectState(this).frames = normalizeKeyframes(keyframes); scheduleAnimations(); }
-    getTiming() {
-      const t = effectState(this).timing;
-      return { delay: t.delay, direction: t.direction, duration: t.duration, easing: t.easing, endDelay: t.endDelay, fill: t.fill, iterationStart: t.iterationStart, iterations: t.iterations };
-    }
-    getComputedTiming() {
-      const s = effectState(this);
-      const a = s.animation;
-      const lt = a === null ? null : animCurrentTime(a);
-      return computeTiming(s.timing, lt, a === null ? 1 : ANIM.get(a).rate);
-    }
-    updateTiming(timing) { const s = effectState(this); s.timing = makeTiming(timing, s.timing); scheduleAnimations(); }
   }
 
   const ANIM = new WeakMap(); // Animation -> state
@@ -5481,6 +5497,7 @@
     PerformanceNavigationTiming, PerformanceTiming, PerformanceNavigation, PerformanceObserver, PerformanceObserverEntryList,
     Navigator, MimeType, MimeTypeArray, Plugin, PluginArray, Permissions, PermissionStatus, Clipboard, ClipboardItem,
     NavigatorUAData, NetworkInformation, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
+    UserActivation, Scheduling,
     Screen, ScreenOrientation, VisualViewport, Location, History, DOMStringList, Storage, MediaQueryList,
     IntersectionObserver, IntersectionObserverEntry, ResizeObserver, ResizeObserverEntry, ResizeObserverSize,
     FontFace, FontFaceSet, DataTransfer, DataTransferItem, DataTransferItemList,

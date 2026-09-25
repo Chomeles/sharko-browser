@@ -317,7 +317,9 @@ impl BaseDocument {
                                 default_object_size,
                             )
                         }
-                        _ => unreachable!(),
+                        // PATCH: never panic on unexpected element data (a stylesheet or
+                        // table context on a replaced tag); fall back to the tag's sizes.
+                        _ => tag_intrinsic_sizes(&element_data.name.local, attr_size),
                     };
 
                     let replaced_context = ReplacedContext {

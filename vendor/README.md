@@ -223,3 +223,8 @@ Patches so far:
     document as `Resource::NestedCss` and hooked into its import rule (and its fonts
     fetched) on the document's thread; the network callback thread wrote the shared
     style lock, which panicked while the page was styling (nytimes.com: 20 panics).
+70. `blitz-dom/src/layout/construct.rs`, `layout/mod.rs`: a replaced element (img, canvas,
+    video, iframe, embed) never builds boxes for its children, so `display: table` on it
+    no longer replaces its image/canvas data with a table context (the replaced layout
+    then panicked at `unreachable!()`; the fallback now uses the tag's intrinsic sizes).
+    Found by `tools/fuzz/run.js`.

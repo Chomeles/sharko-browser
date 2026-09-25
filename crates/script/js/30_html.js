@@ -1899,7 +1899,10 @@
     end(i) { throw new DOMException(`Failed to execute 'end' on 'TimeRanges': The index provided (${i}) is greater than or equal to the maximum bound (0).`, 'IndexSizeError'); }
   }
   class MediaError {
-    constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
+    #code; #message;
+    constructor(token, code = 4, message = '') { if (token !== INTERNAL) throw L.illegal(); this.#code = code; this.#message = message; }
+    get code() { return this.#code; }
+    get message() { return this.#message; }
   }
   L.defineConstants([MediaError, MediaError.prototype], { MEDIA_ERR_ABORTED: 1, MEDIA_ERR_NETWORK: 2, MEDIA_ERR_DECODE: 3, MEDIA_ERR_SRC_NOT_SUPPORTED: 4 });
   class TrackListBase extends L.EventTarget {
@@ -2436,6 +2439,7 @@
   const submittingForms = new WeakSet();
   {
     const P = HTMLFormElement.prototype;
+    P[Symbol.iterator] = function* () { yield* this.elements; };
     R.str(P, 'acceptCharset', 'accept-charset'); R.str(P, 'name'); R.str(P, 'target'); R.str(P, 'rel');
     R.tokens(P, 'relList', 'rel', ['noreferrer', 'noopener', 'opener']);
     R.bool(P, 'noValidate', 'novalidate');
@@ -3173,6 +3177,7 @@
   const HTMLSelectElement = htmlClass('HTMLSelectElement', ['select']);
   {
     const P = HTMLSelectElement.prototype;
+    P[Symbol.iterator] = function* () { yield* this.options; };
     R.str(P, 'autocomplete'); R.bool(P, 'disabled'); R.bool(P, 'multiple'); R.str(P, 'name'); R.bool(P, 'required');
     R.ulong(P, 'size');
     L.mixin(P, ConstraintValidation);

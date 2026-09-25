@@ -971,6 +971,7 @@
   L.currentEvent = undefined; // window.event
   L.eventParent = function () { return null; }; // replaced by 20_dom.js
   L.activation = null; // click activation behaviour, installed by 30_html.js
+  L.lastActivation = 0; // Date.now() of the last trusted activation event (0: none yet)
 
   function buildPath(target, event) {
     const path = [target];
@@ -1029,6 +1030,11 @@
     // Inline handler discovery (content attributes set by the parser / innerHTML / clone)
     if (TYPE_TO_ATTR.has(type)) {
       for (let i = 0; i < path.length; i++) discoverInline(path[i], type);
+    }
+
+    // User activation (navigator.userActivation): a trusted activation-triggering event.
+    if (event.isTrusted && (type === 'click' || type === 'mousedown' || type === 'pointerdown' || type === 'keydown' || type === 'touchend')) {
+      L.lastActivation = Date.now();
     }
 
     let act = null;

@@ -541,6 +541,18 @@ fn collect_layout_children_with_wrap(
         }
     }
 
+    // PATCH: a replaced element (img, canvas, video, iframe, embed) generates no boxes
+    // for its children whatever its `display` says (like Blink, the inner display type
+    // is ignored). In particular `display: table` must not turn it into a table root:
+    // that replaced its image/canvas data, and its replaced layout then hit
+    // `unreachable!()` (found by tools/fuzz).
+    if doc.nodes[container_node_id]
+        .element_data()
+        .is_some_and(|el| is_replaced_element(&el.name.local))
+    {
+        return;
+    }
+
     let container_display = doc.nodes[container_node_id].display_style().unwrap_or(
         match doc.nodes[container_node_id].data.kind() {
             NodeKind::AnonymousBlock => Display::Block,
