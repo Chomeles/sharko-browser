@@ -23,6 +23,10 @@ encoding_rs = "0.8"
 getrandom = "0.3"
 # Web Crypto primitives (already built for rustls).
 aws-lc-rs = "1.18"
+# Canvas 2D: rasterization, and text via the document's fonts.
+tiny-skia = "0.11"
+parley = "0.11"
+skrifa = "0.44"
 serde_json = "1"
 keyboard-types = "0.7"
 # Stylo (exactly the versions blitz-dom 0.3.0-beta.2 uses) for inline/computed style,

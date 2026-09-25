@@ -533,3 +533,30 @@ pub(crate) fn n_match_media(cx: &mut Cx) -> NResult {
     cx.ret_bool(r);
     Ok(())
 }
+
+/// Addition: `N.parseColor(css)` -> `[r, g, b, a]` (0-255, alpha 0-1) of a CSS color
+/// (`currentcolor` resolves to black), or `null` if it isn't one. For canvas styles.
+pub(crate) fn n_parse_color(cx: &mut Cx) -> NResult {
+    use style::color::AbsoluteColor;
+    use style::parser::Parse;
+    let s = cx.string(0)?;
+    let doc = cx.st.doc()?;
+    let color = with_context(doc, CssRuleType::Style, |ctx| {
+        let mut input = ParserInput::new(&s);
+        let mut parser = Parser::new(&mut input);
+        parser
+            .parse_entirely(|p| style::values::specified::Color::parse(ctx, p))
+            .ok()
+            .and_then(|c| c.to_computed_color(None).ok())
+            .map(|c| c.resolve_to_absolute(&AbsoluteColor::BLACK).into_srgb_legacy())
+    });
+    match color {
+        Some(c) => {
+            let [r, g, b, a] = *c.raw_components();
+            let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as f64;
+            cx.ret_f64s(&[byte(r), byte(g), byte(b), a.clamp(0.0, 1.0) as f64]);
+        }
+        None => cx.ret_null(),
+    }
+    Ok(())
+}

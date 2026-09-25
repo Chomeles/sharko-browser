@@ -1728,6 +1728,39 @@ impl BaseDocument {
         }
     }
 
+    /// PATCH: the document's font context (shared with the embedder, e.g. for canvas text).
+    pub fn font_context(&self) -> Arc<Mutex<parley::FontContext>> {
+        self.font_ctx.clone()
+    }
+
+    /// PATCH: show `rgba` (straight RGBA, `width`×`height`) as the content of a `<canvas>`
+    /// (the pixels of its 2D context); painted like an image.
+    pub fn set_canvas_pixels(&mut self, node_id: NodeId, width: u32, height: u32, rgba: Vec<u8>) {
+        let Some(node) = self.nodes.get_mut(node_id) else {
+            return;
+        };
+        let Some(el) = node.element_data_mut() else {
+            return;
+        };
+        let same_size = el
+            .raster_image_data()
+            .is_some_and(|r| r.width == width && r.height == height);
+        el.special_data = if width == 0 || height == 0 || rgba.len() != (width * height * 4) as usize {
+            SpecialElementData::None
+        } else {
+            SpecialElementData::Image(Box::new(ImageData::Raster(RasterImageData::new(
+                width,
+                height,
+                Arc::new(rgba),
+            ))))
+        };
+        if !same_size {
+            node.cache_mut().clear();
+            node.insert_damage(ALL_DAMAGE);
+        }
+        self.shell_provider.request_redraw();
+    }
+
     /// Cache a loaded image and apply it to all nodes waiting on it
     /// (`<img>` elements, `background-image` layers and `mask-image` layers).
     fn apply_loaded_image(&mut self, url: &str, image: ImageData) {

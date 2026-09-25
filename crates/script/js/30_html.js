@@ -1203,12 +1203,23 @@
   Image.prototype = HTMLImageElement.prototype;
 
   // --- canvas ---
+  // The 2D context keeps the drawing state; natives rasterize (see crates/script/src/canvas.rs).
+  // Paths are kept in device space (points are transformed when they are added, as the
+  // spec's current path is); Path2D objects keep user space and are transformed when used.
   const HTMLCanvasElement = htmlClass('HTMLCanvasElement', ['canvas']);
   const ctxCache = new WeakMap();
+  const canvasDim = (id, name, def) => {
+    const v = N.getAttr(id, name);
+    if (v === null) return def;
+    const n = parseNonNeg(v);
+    return n === null ? def : n;
+  };
   {
     const P = HTMLCanvasElement.prototype;
-    R.ulong(P, 'width', 'width', 300);
-    R.ulong(P, 'height', 'height', 150);
+    def(P, 'width', function () { return canvasDim(idOf(this), 'width', 300); },
+      function (v) { setAttr(this, idOf(this), 'width', String(L.toULong(v))); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
+    def(P, 'height', function () { return canvasDim(idOf(this), 'height', 150); },
+      function (v) { setAttr(this, idOf(this), 'height', String(L.toULong(v))); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
     L.mixin(P, {
       getContext(type, attrs) {
         const t = `${type}`;
@@ -1217,17 +1228,106 @@
         if (c === undefined) { c = new CanvasRenderingContext2D(INTERNAL, this, attrs); ctxCache.set(this, c); }
         return c;
       },
-      toDataURL() { return 'data:,'; },
-      toBlob(callback) {
+      toDataURL(type, quality) {
+        const id = idOf(this);
+        const c = ctxCache.get(this);
+        if (c) L.ctxSync(c);
+        const w = canvasDim(id, 'width', 300), h = canvasDim(id, 'height', 150);
+        if (w === 0 || h === 0) return 'data:,';
+        return N.canvasToDataURL(id, w, h);
+      },
+      toBlob(callback, type, quality) {
         if (typeof callback !== 'function') throw new TypeError("Failed to execute 'toBlob' on 'HTMLCanvasElement': The callback provided as parameter 1 is not a function.");
-        L.postTask(() => L.safeCall(callback, undefined, [null]));
+        const url = this.toDataURL(type, quality);
+        L.postTask(() => {
+          let blob = null;
+          if (url !== 'data:,') {
+            const bin = atob(url.slice(url.indexOf(',') + 1));
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            blob = new L.Blob([bytes], { type: 'image/png' });
+          }
+          L.safeCall(callback, undefined, [blob]);
+        });
       },
       captureStream() { throw new DOMException("Failed to execute 'captureStream' on 'HTMLCanvasElement': not supported", 'NotSupportedError'); },
       transferControlToOffscreen() { throw new DOMException("Failed to execute 'transferControlToOffscreen' on 'HTMLCanvasElement': not supported", 'NotSupportedError'); },
     });
   }
-  class CanvasGradient { constructor(token) { if (token !== INTERNAL) throw L.illegal(); } addColorStop(offset, color) { } }
-  class CanvasPattern { constructor(token) { if (token !== INTERNAL) throw L.illegal(); } setTransform() { } }
+
+  // Colors: [r, g, b, a] (0-255, alpha 0-1) from N.parseColor.
+  function colorString(c) {
+    if (c[3] >= 1) return '#' + [c[0], c[1], c[2]].map((v) => v.toString(16).padStart(2, '0')).join('');
+    let a = String(Math.round(c[3] * 255) / 255);
+    if (a.length > 8) a = c[3].toFixed(8).replace(/0+$/, '');
+    return `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`;
+  }
+  const GRADIENT = new WeakMap(); // CanvasGradient -> { kind, coords, stops }
+  class CanvasGradient {
+    constructor(token, kind, coords) {
+      if (token !== INTERNAL) throw L.illegal();
+      GRADIENT.set(this, { kind, coords, stops: [] });
+    }
+    addColorStop(offset, color) {
+      const g = GRADIENT.get(this);
+      const o = Number(offset);
+      if (!(o >= 0 && o <= 1)) throw new DOMException(`Failed to execute 'addColorStop' on 'CanvasGradient': The provided value (${offset}) is outside the range (0.0, 1.0).`, 'IndexSizeError');
+      const c = N.parseColor(`${color}`);
+      if (c === null) throw new DOMException(`Failed to execute 'addColorStop' on 'CanvasGradient': The value provided ('${color}') could not be parsed as a color.`, 'SyntaxError');
+      g.stops.push([o, c]);
+      g.stops.sort((a, b) => a[0] - b[0]);
+    }
+  }
+  const PATTERN = new WeakMap(); // CanvasPattern -> { source: [kind, src, w, h], repetition, matrix }
+  class CanvasPattern {
+    constructor(token, source, repetition) {
+      if (token !== INTERNAL) throw L.illegal();
+      PATTERN.set(this, { source, repetition, matrix: [1, 0, 0, 1, 0, 0] });
+    }
+    setTransform(m) {
+      const p = PATTERN.get(this);
+      if (m === undefined) { p.matrix = [1, 0, 0, 1, 0, 0]; return; }
+      const d = L.DOMMatrix.fromMatrix(m);
+      p.matrix = [d.a, d.b, d.c, d.d, d.e, d.f];
+    }
+  }
+  function paintOf(style) {
+    if (Array.isArray(style)) return [0, style[0], style[1], style[2], style[3]];
+    const g = GRADIENT.get(style);
+    if (g !== undefined) {
+      const stops = [];
+      for (const [o, c] of g.stops) stops.push(o, c[0], c[1], c[2], c[3]);
+      if (g.kind === 'conic') return g.stops.length ? [0, g.stops[0][1][0], g.stops[0][1][1], g.stops[0][1][2], g.stops[0][1][3]] : [0, 0, 0, 0, 0];
+      return [g.kind === 'linear' ? 1 : 2, ...g.coords, ...stops];
+    }
+    return [0, 0, 0, 0, 0];
+  }
+  function patternOf(style) {
+    const p = PATTERN.get(style);
+    if (p === undefined) return null;
+    return [p.source[0], p.source[1], p.source[2], p.source[3], p.repetition, ...p.matrix];
+  }
+  // An image source as [kind, source, width, height] (kind 0: element id, 1: RGBA bytes),
+  // or null while it has no pixels. Throws for unusable sources.
+  function imageSource(image, what) {
+    if (image instanceof HTMLImageElement) {
+      if (!image.complete || image.naturalWidth === 0) return null;
+      const s = N.imageSize(idOf(image));
+      return s ? [0, idOf(image), s[0], s[1]] : null;
+    }
+    if (image instanceof HTMLCanvasElement) {
+      const id = idOf(image);
+      const w = canvasDim(id, 'width', 300), h = canvasDim(id, 'height', 150);
+      if (w === 0 || h === 0) throw new DOMException(`Failed to execute '${what}' on 'CanvasRenderingContext2D': The image argument is a canvas element with a width or height of 0.`, 'InvalidStateError');
+      const c = ctxCache.get(image);
+      if (c) L.ctxSync(c);
+      return [0, id, w, h];
+    }
+    if (image instanceof ImageData) return [1, image.data, image.width, image.height];
+    if (image !== null && typeof image === 'object' && L.imageBitmapPixels && L.imageBitmapPixels(image)) return L.imageBitmapPixels(image);
+    if (image !== null && typeof image === 'object' && (image.tagName === 'VIDEO' || image.tagName === 'svg')) return null;
+    throw new TypeError(`Failed to execute '${what}' on 'CanvasRenderingContext2D': The provided value is not of type '(CSSImageValue or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or OffscreenCanvas or SVGImageElement or VideoFrame)'.`);
+  }
   class TextMetrics {
     #m;
     constructor(token, m) { if (token !== INTERNAL) throw L.illegal(); this.#m = m; }
@@ -1256,75 +1356,530 @@
     get data() { return this.#data; }
     get colorSpace() { return this.#cs; }
   }
-  class Path2D {
-    constructor(path) { }
-    addPath() { } closePath() { } moveTo() { } lineTo() { } bezierCurveTo() { } quadraticCurveTo() { }
-    arc() { } arcTo() { } ellipse() { } rect() { } roundRect() { }
+
+  // --- paths ---
+  // Commands: 0 x y (move), 1 x y (line), 2 cx cy x y (quad), 3 c1x c1y c2x c2y x y (cubic), 4 (close).
+  const T = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+  class PathSink {
+    constructor() { this.cmds = []; this.cur = null; this.start = null; }
+    moveTo(m, x, y) { this.cmds.push(0, ...T(m, x, y)); this.cur = [x, y]; this.start = [x, y]; }
+    ensure(m, x, y) { if (this.cur === null) this.moveTo(m, x, y); }
+    lineTo(m, x, y) { if (this.cur === null) { this.moveTo(m, x, y); return; } this.cmds.push(1, ...T(m, x, y)); this.cur = [x, y]; }
+    quadTo(m, cx, cy, x, y) { this.ensure(m, cx, cy); this.cmds.push(2, ...T(m, cx, cy), ...T(m, x, y)); this.cur = [x, y]; }
+    cubicTo(m, c1x, c1y, c2x, c2y, x, y) { this.ensure(m, c1x, c1y); this.cmds.push(3, ...T(m, c1x, c1y), ...T(m, c2x, c2y), ...T(m, x, y)); this.cur = [x, y]; }
+    close() { if (this.cur === null) return; this.cmds.push(4); this.cur = this.start; }
+    rect(m, x, y, w, h) { this.moveTo(m, x, y); this.lineTo(m, x + w, y); this.lineTo(m, x + w, y + h); this.lineTo(m, x, y + h); this.close(); }
+    // An elliptical arc as cubic Béziers (at most 90° each).
+    ellipse(m, x, y, rx, ry, rot, a0, a1, ccw) {
+      const TAU = Math.PI * 2;
+      let sweep;
+      if (!ccw && a1 - a0 >= TAU) sweep = TAU;
+      else if (ccw && a0 - a1 >= TAU) sweep = -TAU;
+      else if (!ccw) { sweep = (a1 - a0) % TAU; if (sweep < 0) sweep += TAU; }
+      else { sweep = (a0 - a1) % TAU; if (sweep < 0) sweep += TAU; sweep = -sweep; }
+      const cr = Math.cos(rot), sr = Math.sin(rot);
+      const pt = (a) => { const px = rx * Math.cos(a), py = ry * Math.sin(a); return [x + px * cr - py * sr, y + px * sr + py * cr]; };
+      const d = (a) => { const px = -rx * Math.sin(a), py = ry * Math.cos(a); return [px * cr - py * sr, px * sr + py * cr]; };
+      const p0 = pt(a0);
+      if (this.cur === null) this.moveTo(m, p0[0], p0[1]); else this.lineTo(m, p0[0], p0[1]);
+      const n = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2) - 1e-9));
+      const step = sweep / n;
+      const k = (4 / 3) * Math.tan(step / 4);
+      let a = a0;
+      for (let i = 0; i < n; i++) {
+        const b = a + step;
+        const pa = pt(a), pb = pt(b), da = d(a), db = d(b);
+        this.cubicTo(m, pa[0] + k * da[0], pa[1] + k * da[1], pb[0] - k * db[0], pb[1] - k * db[1], pb[0], pb[1]);
+        a = b;
+      }
+    }
+    arcTo(m, x1, y1, x2, y2, r) {
+      if (r < 0) throw new DOMException(`Failed to execute 'arcTo' on 'CanvasRenderingContext2D': The radius provided (${r}) is negative.`, 'IndexSizeError');
+      if (this.cur === null) this.moveTo(m, x1, y1);
+      const [x0, y0] = this.cur;
+      const v1x = x0 - x1, v1y = y0 - y1, v2x = x2 - x1, v2y = y2 - y1;
+      const l1 = Math.hypot(v1x, v1y), l2 = Math.hypot(v2x, v2y);
+      const cross = v1x * v2y - v1y * v2x;
+      if (r === 0 || l1 === 0 || l2 === 0 || Math.abs(cross) < 1e-9) { this.lineTo(m, x1, y1); return; }
+      const angle = Math.acos(Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / (l1 * l2))));
+      const t = r / Math.tan(angle / 2);
+      const ax = x1 + (v1x / l1) * t, ay = y1 + (v1y / l1) * t;
+      const bx = x1 + (v2x / l2) * t, by = y1 + (v2y / l2) * t;
+      // Center: along the bisector at distance r / sin(angle/2).
+      const bisx = v1x / l1 + v2x / l2, bisy = v1y / l1 + v2y / l2;
+      const bl = Math.hypot(bisx, bisy);
+      const dist = r / Math.sin(angle / 2);
+      const cx = x1 + (bisx / bl) * dist, cy = y1 + (bisy / bl) * dist;
+      const s = Math.atan2(ay - cy, ax - cx), e = Math.atan2(by - cy, bx - cx);
+      this.lineTo(m, ax, ay);
+      this.ellipse(m, cx, cy, r, r, 0, s, e, cross > 0);
+    }
+    roundRect(m, x, y, w, h, radii) {
+      let rs = radii === undefined ? [0] : (typeof radii === 'object' && radii !== null && typeof radii[Symbol.iterator] === 'function' ? [...radii] : [radii]);
+      if (rs.length < 1 || rs.length > 4) throw new RangeError(`Failed to execute 'roundRect' on 'CanvasRenderingContext2D': ${rs.length} radii provided. Between one and four radii are necessary.`);
+      rs = rs.map((r) => (typeof r === 'object' && r !== null ? [Number(r.x) || 0, Number(r.y) || 0] : [Number(r) || 0, Number(r) || 0]));
+      for (const [a, b] of rs) if (a < 0 || b < 0) throw new RangeError("Failed to execute 'roundRect' on 'CanvasRenderingContext2D': Radius value is negative.");
+      const [tl, tr, br, bl] = rs.length === 1 ? [rs[0], rs[0], rs[0], rs[0]] : rs.length === 2 ? [rs[0], rs[1], rs[0], rs[1]]
+        : rs.length === 3 ? [rs[0], rs[1], rs[2], rs[1]] : rs;
+      const f = Math.min(1, Math.abs(w) / (tl[0] + tr[0] || 1), Math.abs(w) / (bl[0] + br[0] || 1), Math.abs(h) / (tl[1] + bl[1] || 1), Math.abs(h) / (tr[1] + br[1] || 1));
+      const R = (r) => [r[0] * f, r[1] * f];
+      const [a, b, c, d] = [R(tl), R(tr), R(br), R(bl)];
+      const H = Math.PI / 2;
+      this.moveTo(m, x + a[0], y);
+      this.lineTo(m, x + w - b[0], y);
+      if (b[0] || b[1]) this.ellipse(m, x + w - b[0], y + b[1], b[0], b[1], 0, -H, 0, false);
+      this.lineTo(m, x + w, y + h - c[1]);
+      if (c[0] || c[1]) this.ellipse(m, x + w - c[0], y + h - c[1], c[0], c[1], 0, 0, H, false);
+      this.lineTo(m, x + d[0], y + h);
+      if (d[0] || d[1]) this.ellipse(m, x + d[0], y + h - d[1], d[0], d[1], 0, H, Math.PI, false);
+      this.lineTo(m, x, y + a[1]);
+      if (a[0] || a[1]) this.ellipse(m, x + a[0], y + a[1], a[0], a[1], 0, Math.PI, 3 * H, false);
+      this.close();
+      this.moveTo(m, x, y);
+    }
   }
+  const ID = [1, 0, 0, 1, 0, 0];
+  const SINK = Symbol('path'), MAT = Symbol('matrix');
+  const finite = (...v) => v.every((x) => Number.isFinite(x));
+  // Path methods shared by the context (device space, current transform) and Path2D (user space).
+  const pathMethods = {
+    closePath() { this[SINK]().close(); },
+    moveTo(x, y) { x = +x; y = +y; if (finite(x, y)) this[SINK]().moveTo(this[MAT](), x, y); },
+    lineTo(x, y) { x = +x; y = +y; if (finite(x, y)) this[SINK]().lineTo(this[MAT](), x, y); },
+    quadraticCurveTo(cx, cy, x, y) { const a = [+cx, +cy, +x, +y]; if (finite(...a)) this[SINK]().quadTo(this[MAT](), ...a); },
+    bezierCurveTo(a, b, c, d, e, f) { const v = [+a, +b, +c, +d, +e, +f]; if (finite(...v)) this[SINK]().cubicTo(this[MAT](), ...v); },
+    arcTo(x1, y1, x2, y2, r) { const v = [+x1, +y1, +x2, +y2, +r]; if (finite(...v)) this[SINK]().arcTo(this[MAT](), ...v); },
+    rect(x, y, w, h) { const v = [+x, +y, +w, +h]; if (finite(...v)) this[SINK]().rect(this[MAT](), ...v); },
+    roundRect(x, y, w, h, radii) { const v = [+x, +y, +w, +h]; if (finite(...v)) this[SINK]().roundRect(this[MAT](), ...v, radii); },
+    arc(x, y, r, s, e, ccw) {
+      const v = [+x, +y, +r, +s, +e];
+      if (!finite(...v)) return;
+      if (v[2] < 0) throw new DOMException(`Failed to execute 'arc' on '${this instanceof Path2D ? 'Path2D' : 'CanvasRenderingContext2D'}': The radius provided (${r}) is negative.`, 'IndexSizeError');
+      this[SINK]().ellipse(this[MAT](), v[0], v[1], v[2], v[2], 0, v[3], v[4], !!ccw);
+    },
+    ellipse(x, y, rx, ry, rot, s, e, ccw) {
+      const v = [+x, +y, +rx, +ry, +rot, +s, +e];
+      if (!finite(...v)) return;
+      if (v[2] < 0 || v[3] < 0) throw new DOMException(`Failed to execute 'ellipse' on '${this instanceof Path2D ? 'Path2D' : 'CanvasRenderingContext2D'}': The radius provided is negative.`, 'IndexSizeError');
+      this[SINK]().ellipse(this[MAT](), ...v, !!ccw);
+    },
+  };
+  const PATH2D = new WeakMap(); // Path2D -> PathSink (user space)
+  function parseSvgPath(sink, d) {
+    const toks = `${d}`.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) || [];
+    let i = 0, cmd = '', cx = 0, cy = 0, sx = 0, sy = 0, lcx = 0, lcy = 0, lcmd = '';
+    const num = () => Number(toks[i++]);
+    const isNum = () => i < toks.length && !/[a-zA-Z]/.test(toks[i]);
+    while (i < toks.length) {
+      if (/[a-zA-Z]/.test(toks[i])) cmd = toks[i++];
+      else if (cmd === '') return;
+      const rel = cmd === cmd.toLowerCase();
+      const ox = rel ? cx : 0, oy = rel ? cy : 0;
+      switch (cmd.toUpperCase()) {
+        case 'M': { cx = ox + num(); cy = oy + num(); sink.moveTo(ID, cx, cy); sx = cx; sy = cy; cmd = rel ? 'l' : 'L'; break; }
+        case 'L': { cx = ox + num(); cy = oy + num(); sink.lineTo(ID, cx, cy); break; }
+        case 'H': { cx = ox + num(); sink.lineTo(ID, cx, cy); break; }
+        case 'V': { cy = oy + num(); sink.lineTo(ID, cx, cy); break; }
+        case 'C': { const a = [ox + num(), oy + num(), ox + num(), oy + num(), ox + num(), oy + num()]; sink.cubicTo(ID, ...a); lcx = a[2]; lcy = a[3]; cx = a[4]; cy = a[5]; break; }
+        case 'S': { const r1 = /[CS]/i.test(lcmd) ? [2 * cx - lcx, 2 * cy - lcy] : [cx, cy]; const a = [ox + num(), oy + num(), ox + num(), oy + num()]; sink.cubicTo(ID, r1[0], r1[1], ...a); lcx = a[0]; lcy = a[1]; cx = a[2]; cy = a[3]; break; }
+        case 'Q': { const a = [ox + num(), oy + num(), ox + num(), oy + num()]; sink.quadTo(ID, ...a); lcx = a[0]; lcy = a[1]; cx = a[2]; cy = a[3]; break; }
+        case 'T': { const r1 = /[QT]/i.test(lcmd) ? [2 * cx - lcx, 2 * cy - lcy] : [cx, cy]; const a = [ox + num(), oy + num()]; sink.quadTo(ID, r1[0], r1[1], ...a); lcx = r1[0]; lcy = r1[1]; cx = a[0]; cy = a[1]; break; }
+        case 'A': {
+          const rx = Math.abs(num()), ry = Math.abs(num()), rot = num() * Math.PI / 180, large = num() !== 0, sweep = num() !== 0;
+          const x = ox + num(), y = oy + num();
+          svgArc(sink, cx, cy, rx, ry, rot, large, sweep, x, y); cx = x; cy = y; break;
+        }
+        case 'Z': { sink.close(); cx = sx; cy = sy; break; }
+        default: return;
+      }
+      lcmd = cmd;
+      if (!isNum() && i < toks.length && !/[a-zA-Z]/.test(toks[i])) return;
+    }
+  }
+  function svgArc(sink, x1, y1, rx, ry, phi, large, sweep, x2, y2) {
+    if (rx === 0 || ry === 0) { sink.lineTo(ID, x2, y2); return; }
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+    const x1p = c * dx + s * dy, y1p = -s * dx + c * dy;
+    const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+    const num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+    let k = Math.sqrt(Math.max(0, num / (rx * rx * y1p * y1p + ry * ry * x1p * x1p)));
+    if (large === sweep) k = -k;
+    const cxp = (k * rx * y1p) / ry, cyp = (-k * ry * x1p) / rx;
+    const cx = c * cxp - s * cyp + (x1 + x2) / 2, cy = s * cxp + c * cyp + (y1 + y2) / 2;
+    const ang = (ux, uy, vx, vy) => Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy);
+    const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+    let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+    if (!sweep && dt > 0) dt -= 2 * Math.PI; else if (sweep && dt < 0) dt += 2 * Math.PI;
+    sink.ellipse(ID, cx, cy, rx, ry, phi, t1, t1 + dt, dt < 0);
+  }
+  class Path2D {
+    constructor(path) {
+      const sink = new PathSink();
+      PATH2D.set(this, sink);
+      if (path instanceof Path2D) { const o = PATH2D.get(path); sink.cmds = o.cmds.slice(); sink.cur = o.cur; sink.start = o.start; }
+      else if (path !== undefined) parseSvgPath(sink, path);
+    }
+    [SINK]() { return PATH2D.get(this); }
+    [MAT]() { return ID; }
+    addPath(path, transform) {
+      if (!(path instanceof Path2D)) throw new TypeError("Failed to execute 'addPath' on 'Path2D': parameter 1 is not of type 'Path2D'.");
+      const m = transform === undefined ? ID : (() => { const d = L.DOMMatrix.fromMatrix(transform); return [d.a, d.b, d.c, d.d, d.e, d.f]; })();
+      const sink = PATH2D.get(this);
+      sink.cmds.push(...transformCmds(PATH2D.get(path).cmds, m));
+    }
+  }
+  Object.assign(Path2D.prototype, pathMethods);
+  function transformCmds(cmds, m) {
+    if (m === ID) return cmds.slice();
+    const out = [];
+    for (let i = 0; i < cmds.length;) {
+      const c = cmds[i];
+      const n = c === 0 || c === 1 ? 1 : c === 2 ? 2 : c === 3 ? 3 : 0;
+      out.push(c);
+      for (let k = 0; k < n; k++) out.push(...T(m, cmds[i + 1 + 2 * k], cmds[i + 2 + 2 * k]));
+      i += 1 + 2 * n;
+    }
+    return out;
+  }
+  // Point-in-path on a flattened path (curves sampled).
+  function pointInPath(cmds, x, y, evenOdd) {
+    let wind = 0, px = 0, py = 0, sx = 0, sy = 0;
+    const edge = (x0, y0, x1, y1) => {
+      if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
+        const xi = x0 + ((y - y0) / (y1 - y0)) * (x1 - x0);
+        if (xi > x) wind += y1 > y0 ? 1 : -1;
+      }
+    };
+    for (let i = 0; i < cmds.length;) {
+      const c = cmds[i];
+      if (c === 0) { if (px !== sx || py !== sy) edge(px, py, sx, sy); px = sx = cmds[i + 1]; py = sy = cmds[i + 2]; i += 3; }
+      else if (c === 1) { edge(px, py, cmds[i + 1], cmds[i + 2]); px = cmds[i + 1]; py = cmds[i + 2]; i += 3; }
+      else if (c === 2 || c === 3) {
+        const pts = c === 2 ? [px, py, cmds[i + 1], cmds[i + 2], cmds[i + 3], cmds[i + 4]] : [px, py, cmds[i + 1], cmds[i + 2], cmds[i + 3], cmds[i + 4], cmds[i + 5], cmds[i + 6]];
+        let lx = px, ly = py;
+        for (let s = 1; s <= 16; s++) {
+          const t = s / 16, u = 1 - t;
+          let qx, qy;
+          if (c === 2) { qx = u * u * pts[0] + 2 * u * t * pts[2] + t * t * pts[4]; qy = u * u * pts[1] + 2 * u * t * pts[3] + t * t * pts[5]; }
+          else { qx = u * u * u * pts[0] + 3 * u * u * t * pts[2] + 3 * u * t * t * pts[4] + t * t * t * pts[6]; qy = u * u * u * pts[1] + 3 * u * u * t * pts[3] + 3 * u * t * t * pts[5] + t * t * t * pts[7]; }
+          edge(lx, ly, qx, qy); lx = qx; ly = qy;
+        }
+        px = lx; py = ly; i += c === 2 ? 5 : 7;
+      } else { edge(px, py, sx, sy); px = sx; py = sy; i += 1; }
+    }
+    if (px !== sx || py !== sy) edge(px, py, sx, sy);
+    return evenOdd ? (wind & 1) !== 0 : wind !== 0;
+  }
+
+  // --- the 2D context ---
   const CTX_DEFAULTS = {
     globalAlpha: 1, globalCompositeOperation: 'source-over', filter: 'none', imageSmoothingEnabled: true,
-    imageSmoothingQuality: 'low', strokeStyle: '#000000', fillStyle: '#000000', shadowOffsetX: 0, shadowOffsetY: 0,
+    imageSmoothingQuality: 'low', shadowOffsetX: 0, shadowOffsetY: 0,
     shadowBlur: 0, shadowColor: 'rgba(0, 0, 0, 0)', lineWidth: 1, lineCap: 'butt', lineJoin: 'miter', miterLimit: 10,
     lineDashOffset: 0, font: '10px sans-serif', textAlign: 'start', textBaseline: 'alphabetic', direction: 'inherit',
     fontKerning: 'auto', letterSpacing: '0px', wordSpacing: '0px', textRendering: 'auto', fontStretch: 'normal',
     fontVariantCaps: 'normal', lang: 'inherit',
   };
+  const COMPOSITE_OPS = ['source-over', 'source-in', 'source-out', 'source-atop', 'destination-over', 'destination-in',
+    'destination-out', 'destination-atop', 'lighter', 'copy', 'xor', 'multiply', 'screen', 'overlay', 'darken', 'lighten',
+    'color-dodge', 'color-burn', 'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'];
+  const ENUMS = {
+    lineCap: ['butt', 'round', 'square'], lineJoin: ['round', 'bevel', 'miter'],
+    textAlign: ['start', 'end', 'left', 'right', 'center'], textBaseline: ['top', 'hanging', 'middle', 'alphabetic', 'ideographic', 'bottom'],
+    direction: ['ltr', 'rtl', 'inherit'], imageSmoothingQuality: ['low', 'medium', 'high'],
+  };
+  // CSS `font` shorthand -> [family, sizePx, weight, italic] (null if invalid).
+  function parseFont(v) {
+    const m = /^\s*((?:(?:normal|italic|oblique|small-caps|bold|bolder|lighter|[1-9]00|ultra-condensed|extra-condensed|condensed|semi-condensed|semi-expanded|expanded|extra-expanded|ultra-expanded)\s+)*)((?:\d+\.?\d*|\.\d+)(?:px|pt|pc|em|rem|%|in|cm|mm|q|vw|vh)|xx-small|x-small|small|medium|large|x-large|xx-large|larger|smaller)(?:\s*\/\s*[^\s]+)?\s+(.+?)\s*$/i.exec(`${v}`);
+    if (m === null) return null;
+    const pre = m[1].toLowerCase().split(/\s+/).filter(Boolean);
+    let weight = 400, italic = false;
+    for (const t of pre) {
+      if (t === 'italic' || t === 'oblique') italic = true;
+      else if (t === 'bold' || t === 'bolder') weight = 700;
+      else if (t === 'lighter') weight = 300;
+      else if (/^[1-9]00$/.test(t)) weight = Number(t);
+    }
+    const sz = m[2].toLowerCase();
+    const KW = { 'xx-small': 9, 'x-small': 10, small: 13, medium: 16, large: 18, 'x-large': 24, 'xx-large': 32, larger: 12, smaller: 8 };
+    let size;
+    if (sz in KW) size = KW[sz];
+    else {
+      const n = parseFloat(sz), u = sz.replace(/^[\d.]+/, '');
+      size = u === 'px' ? n : u === 'pt' ? n * 4 / 3 : u === 'pc' ? n * 16 : u === 'em' || u === 'rem' ? n * 10 : u === '%' ? n / 10
+        : u === 'in' ? n * 96 : u === 'cm' ? n * 96 / 2.54 : u === 'mm' ? n * 96 / 25.4 : u === 'q' ? n * 96 / 101.6 : n;
+    }
+    return [m[3], size, weight, italic];
+  }
   class CanvasRenderingContext2D {
-    #canvas; #state; #stack = []; #dash = []; #transform = [1, 0, 0, 1, 0, 0]; #attrs;
+    #canvas; #id; #w = 0; #h = 0; #state; #stack = []; #attrs; #path = new PathSink();
     constructor(token, canvas, attrs) {
       if (token !== INTERNAL) throw L.illegal();
       this.#canvas = canvas;
-      this.#state = Object.assign({}, CTX_DEFAULTS);
-      this.#attrs = { alpha: true, colorSpace: 'srgb', desynchronized: false, willReadFrequently: !!(attrs && attrs.willReadFrequently) };
+      this.#id = idOf(canvas);
+      this.#attrs = { alpha: !(attrs && attrs.alpha === false), colorSpace: 'srgb', desynchronized: false, willReadFrequently: !!(attrs && attrs.willReadFrequently) };
+      this.#resetState();
+      this.#resize();
     }
-    static { L.ctxState = (c) => c.#state; }
+    #resetState() {
+      this.#state = Object.assign({}, CTX_DEFAULTS, { fill: [0, 0, 0, 1], stroke: [0, 0, 0, 1], dash: [], m: [1, 0, 0, 1, 0, 0], clips: [], fontSpec: ['sans-serif', 10, 400, false] });
+      this.#stack = [];
+      this.#path = new PathSink();
+    }
+    #resize() {
+      this.#w = canvasDim(this.#id, 'width', 300);
+      this.#h = canvasDim(this.#id, 'height', 150);
+      N.canvasReset(this.#id, this.#w, this.#h);
+    }
+    // The canvas' size changed (bitmap and state are reset).
+    #sync() {
+      if (canvasDim(this.#id, 'width', 300) !== this.#w || canvasDim(this.#id, 'height', 150) !== this.#h) {
+        this.#resetState();
+        this.#resize();
+      }
+    }
+    static {
+      L.ctxResize = (c) => { c.#resetState(); c.#resize(); };
+      L.ctxSync = (c) => c.#sync();
+      L.ctxState = (c) => c.#state;
+    }
+    [SINK]() { return this.#path; }
+    [MAT]() { return this.#state.m; }
     get canvas() { return this.#canvas; }
     getContextAttributes() { return Object.assign({}, this.#attrs); }
     isContextLost() { return false; }
-    save() { this.#stack.push([Object.assign({}, this.#state), this.#transform.slice(), this.#dash.slice()]); }
-    restore() { const s = this.#stack.pop(); if (s) { this.#state = s[0]; this.#transform = s[1]; this.#dash = s[2]; } }
-    reset() { this.#state = Object.assign({}, CTX_DEFAULTS); this.#stack = []; this.#transform = [1, 0, 0, 1, 0, 0]; this.#dash = []; }
-    scale(x, y) { const t = this.#transform; t[0] *= x; t[1] *= x; t[2] *= y; t[3] *= y; }
-    rotate() { }
-    translate(x, y) { const t = this.#transform; t[4] += t[0] * x + t[2] * y; t[5] += t[1] * x + t[3] * y; }
-    transform() { }
-    setTransform(a, b, c, d, e, f) {
-      if (a !== null && typeof a === 'object') { const m = L.DOMMatrix.fromMatrix(a); this.#transform = [m.a, m.b, m.c, m.d, m.e, m.f]; return; }
-      if (a === undefined) { this.#transform = [1, 0, 0, 1, 0, 0]; return; }
-      this.#transform = [+a, +b, +c, +d, +e, +f];
+    save() { const s = this.#state; this.#stack.push(Object.assign({}, s, { m: s.m.slice(), dash: s.dash.slice(), clips: s.clips.slice() })); }
+    restore() {
+      const s = this.#stack.pop();
+      if (!s) return;
+      const clipChanged = s.clips.length !== this.#state.clips.length || s.clips.some((c, i) => c !== this.#state.clips[i]);
+      this.#state = s;
+      if (clipChanged) this.#applyClip();
     }
-    getTransform() { return new L.DOMMatrix(this.#transform.slice()); }
-    resetTransform() { this.#transform = [1, 0, 0, 1, 0, 0]; }
-    createLinearGradient() { return new CanvasGradient(INTERNAL); }
-    createRadialGradient() { return new CanvasGradient(INTERNAL); }
-    createConicGradient() { return new CanvasGradient(INTERNAL); }
-    createPattern() { return new CanvasPattern(INTERNAL); }
-    clearRect() { } fillRect() { } strokeRect() { }
-    beginPath() { } fill() { } stroke() { } clip() { }
-    isPointInPath() { return false; } isPointInStroke() { return false; }
+    reset() { this.#resetState(); this.#resize(); }
+    #applyClip() { N.canvasClip(this.#id, this.#state.clips.flat()); }
+    // --- transforms ---
+    #mul(a, b, c, d, e, f) {
+      const m = this.#state.m;
+      this.#state.m = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]];
+    }
+    scale(x, y) { x = +x; y = +y; if (finite(x, y)) this.#mul(x, 0, 0, y, 0, 0); }
+    rotate(a) { a = +a; if (finite(a)) { const c = Math.cos(a), s = Math.sin(a); this.#mul(c, s, -s, c, 0, 0); } }
+    translate(x, y) { x = +x; y = +y; if (finite(x, y)) this.#mul(1, 0, 0, 1, x, y); }
+    transform(a, b, c, d, e, f) { const v = [+a, +b, +c, +d, +e, +f]; if (finite(...v)) this.#mul(...v); }
+    setTransform(a, b, c, d, e, f) {
+      if (a === undefined || (a !== null && typeof a === 'object')) {
+        const m = a === undefined ? new L.DOMMatrix() : L.DOMMatrix.fromMatrix(a);
+        this.#state.m = [m.a, m.b, m.c, m.d, m.e, m.f];
+        return;
+      }
+      const v = [+a, +b, +c, +d, +e, +f];
+      if (finite(...v)) this.#state.m = v;
+    }
+    getTransform() { return new L.DOMMatrix(this.#state.m.slice()); }
+    resetTransform() { this.#state.m = [1, 0, 0, 1, 0, 0]; }
+    // --- styles ---
+    get fillStyle() { const s = this.#state.fill; return Array.isArray(s) ? colorString(s) : s; }
+    set fillStyle(v) { const s = this.#style(v); if (s !== null) this.#state.fill = s; }
+    get strokeStyle() { const s = this.#state.stroke; return Array.isArray(s) ? colorString(s) : s; }
+    set strokeStyle(v) { const s = this.#style(v); if (s !== null) this.#state.stroke = s; }
+    #style(v) {
+      if (v instanceof CanvasGradient || v instanceof CanvasPattern) return v;
+      return N.parseColor(`${v}`);
+    }
+    createLinearGradient(x0, y0, x1, y1) {
+      const v = [+x0, +y0, +x1, +y1];
+      if (!finite(...v)) throw new TypeError("Failed to execute 'createLinearGradient' on 'CanvasRenderingContext2D': The provided double value is non-finite.");
+      return new CanvasGradient(INTERNAL, 'linear', v);
+    }
+    createRadialGradient(x0, y0, r0, x1, y1, r1) {
+      const v = [+x0, +y0, +r0, +x1, +y1, +r1];
+      if (!finite(...v)) throw new TypeError("Failed to execute 'createRadialGradient' on 'CanvasRenderingContext2D': The provided double value is non-finite.");
+      if (v[2] < 0 || v[5] < 0) throw new DOMException(`Failed to execute 'createRadialGradient' on 'CanvasRenderingContext2D': The ${v[2] < 0 ? 'r0' : 'r1'} provided is less than 0.`, 'IndexSizeError');
+      return new CanvasGradient(INTERNAL, 'radial', v);
+    }
+    createConicGradient(a, x, y) { return new CanvasGradient(INTERNAL, 'conic', [+a, +x, +y]); }
+    createPattern(image, repetition) {
+      const r = repetition === null || repetition === undefined || `${repetition}` === '' ? 'repeat' : `${repetition}`;
+      if (!['repeat', 'repeat-x', 'repeat-y', 'no-repeat'].includes(r)) throw new DOMException(`Failed to execute 'createPattern' on 'CanvasRenderingContext2D': The provided type ('${r}') is not one of 'repeat', 'no-repeat', 'repeat-x', or 'repeat-y'.`, 'SyntaxError');
+      const src = imageSource(image, 'createPattern');
+      if (src === null) return null;
+      // Snapshot canvas sources (a pattern keeps the pixels it was created with).
+      if (src[0] === 0 && image instanceof HTMLCanvasElement) {
+        const d = N.canvasGetImageData(src[1], 0, 0, src[2], src[3]);
+        return new CanvasPattern(INTERNAL, [1, new Uint8Array(d), src[2], src[3]], r);
+      }
+      return new CanvasPattern(INTERNAL, src, r);
+    }
+    setLineDash(segments) {
+      const d = Array.from(segments, Number);
+      if (d.some((x) => !Number.isFinite(x) || x < 0)) return;
+      this.#state.dash = d.length % 2 ? d.concat(d) : d;
+    }
+    getLineDash() { return this.#state.dash.slice(); }
+    // --- paths ---
+    beginPath() { this.#path = new PathSink(); }
+    #pathArg(path) {
+      if (path instanceof Path2D) return transformCmds(PATH2D.get(path).cmds, this.#state.m);
+      return this.#path.cmds;
+    }
+    #paintArgs(style) {
+      const s = this.#state;
+      return [paintOf(style), s.globalAlpha, s.globalCompositeOperation, s.m, patternOf(style)];
+    }
+    #fillCmds(cmds, evenOdd) {
+      if (cmds.length === 0) return;
+      const [paint, alpha, op, m, pattern] = this.#paintArgs(this.#state.fill);
+      N.canvasFill(this.#id, new Float64Array(cmds), evenOdd, paint, alpha, op, m, pattern);
+    }
+    #strokeCmds(cmds) {
+      if (cmds.length === 0) return;
+      const s = this.#state;
+      const [paint, alpha, op, m, pattern] = this.#paintArgs(s.stroke);
+      N.canvasStroke(this.#id, new Float64Array(cmds), paint, s.lineWidth, s.lineCap, s.lineJoin, s.miterLimit,
+        s.dash.length ? s.dash : null, s.lineDashOffset, m, alpha, op, pattern);
+    }
+    fill(a, b) {
+      this.#sync();
+      const path = a instanceof Path2D ? a : undefined;
+      const rule = path ? b : a;
+      this.#fillCmds(this.#pathArg(path), rule === 'evenodd');
+    }
+    stroke(path) { this.#sync(); this.#strokeCmds(this.#pathArg(path instanceof Path2D ? path : undefined)); }
+    clip(a, b) {
+      this.#sync();
+      const path = a instanceof Path2D ? a : undefined;
+      const rule = path ? b : a;
+      this.#state.clips = this.#state.clips.concat([[new Float64Array(this.#pathArg(path)), rule === 'evenodd']]);
+      this.#applyClip();
+    }
+    isPointInPath(a, b, c, d) {
+      let cmds, x, y, rule;
+      if (a instanceof Path2D) { cmds = this.#pathArg(a); x = +b; y = +c; rule = d; } else { cmds = this.#path.cmds; x = +a; y = +b; rule = c; }
+      if (!finite(x, y)) return false;
+      return pointInPath(cmds, x, y, rule === 'evenodd');
+    }
+    isPointInStroke() { return false; }
     drawFocusIfNeeded() { } scrollPathIntoView() { }
-    fillText() { } strokeText() { }
+    fillRect(x, y, w, h) {
+      const v = [+x, +y, +w, +h];
+      if (!finite(...v) || v[2] === 0 || v[3] === 0) return;
+      this.#sync();
+      const p = new PathSink(); p.rect(this.#state.m, ...v);
+      this.#fillCmds(p.cmds, false);
+    }
+    strokeRect(x, y, w, h) {
+      const v = [+x, +y, +w, +h];
+      if (!finite(...v)) return;
+      this.#sync();
+      const p = new PathSink(); p.rect(this.#state.m, ...v);
+      this.#strokeCmds(p.cmds);
+    }
+    clearRect(x, y, w, h) {
+      const v = [+x, +y, +w, +h];
+      if (!finite(...v)) return;
+      this.#sync();
+      N.canvasClearRect(this.#id, ...v, this.#state.m);
+    }
+    // --- text ---
+    get font() { return this.#state.font; }
+    set font(v) { const f = parseFont(v); if (f !== null) { this.#state.font = `${v}`.trim(); this.#state.fontSpec = f; } }
+    #text(text, x, y, maxWidth, fill) {
+      const v = [+x, +y];
+      if (!finite(...v)) return;
+      const mw = maxWidth === undefined ? NaN : +maxWidth;
+      if (maxWidth !== undefined && !(mw > 0)) return;
+      this.#sync();
+      const s = this.#state;
+      const style = fill ? s.fill : s.stroke;
+      const [paint, alpha, op, m, pattern] = this.#paintArgs(style);
+      const t = `${text}`.replace(/[\t\n\f\r]/g, ' ');
+      const align = s.direction === 'rtl' ? ({ start: 'right', end: 'left' })[s.textAlign] || s.textAlign : s.textAlign;
+      N.canvasText(this.#id, t, s.fontSpec, v[0], v[1], align, s.textBaseline, mw, fill, paint,
+        [String(s.lineWidth), s.lineCap, s.lineJoin, String(s.miterLimit)], m, alpha, op, pattern);
+    }
+    fillText(text, x, y, maxWidth) { this.#text(text, x, y, maxWidth, true); }
+    strokeText(text, x, y, maxWidth) { this.#text(text, x, y, maxWidth, false); }
     measureText(text) {
-      const m = /(\d+(?:\.\d+)?)px/.exec(this.#state.font);
-      const fs = m ? parseFloat(m[1]) : 10;
-      const w = `${text}`.length * fs * 0.55;
+      const s = this.#state;
+      const r = N.canvasMeasureText(s.fontSpec, `${text}`.replace(/[\t\n\f\r]/g, ' '));
+      const [w, il, ir, ia, id, fa, fd, ea, ed] = r;
+      const ax = s.textAlign === 'center' ? w / 2 : (s.textAlign === 'right' || (s.textAlign === 'end' && s.direction !== 'rtl') || (s.textAlign === 'start' && s.direction === 'rtl')) ? w : 0;
+      // Offset of the alphabetic baseline below the chosen one (em box, as in Chromium).
+      const by = s.textBaseline === 'top' ? ea : s.textBaseline === 'hanging' ? ea * 0.8 : s.textBaseline === 'middle' ? (ea - ed) / 2
+        : (s.textBaseline === 'bottom' || s.textBaseline === 'ideographic') ? -ed : 0;
       return new TextMetrics(INTERNAL, {
-        width: w, actualBoundingBoxLeft: 0, actualBoundingBoxRight: w, fontBoundingBoxAscent: fs * 0.91,
-        fontBoundingBoxDescent: fs * 0.21, actualBoundingBoxAscent: fs * 0.72, actualBoundingBoxDescent: fs * 0.2,
-        emHeightAscent: fs * 0.8, emHeightDescent: fs * 0.2, hangingBaseline: fs * 0.72, alphabeticBaseline: 0, ideographicBaseline: -fs * 0.21,
+        width: w, actualBoundingBoxLeft: il + ax, actualBoundingBoxRight: ir - ax,
+        fontBoundingBoxAscent: fa - by, fontBoundingBoxDescent: fd + by,
+        actualBoundingBoxAscent: ia - by, actualBoundingBoxDescent: id + by,
+        emHeightAscent: ea - by, emHeightDescent: ed + by, hangingBaseline: ea * 0.8 - by, alphabeticBaseline: -by, ideographicBaseline: -ed - by,
       });
     }
-    drawImage() { }
-    createImageData(a, b) { if (a instanceof ImageData) return new ImageData(a.width, a.height); return new ImageData(Math.abs(a) || 1, Math.abs(b) || 1); }
-    getImageData(sx, sy, sw, sh) { return new ImageData(Math.abs(sw) || 1, Math.abs(sh) || 1); }
-    putImageData() { }
-    setLineDash(segments) { this.#dash = Array.from(segments, Number); }
-    getLineDash() { return this.#dash.slice(); }
-    closePath() { } moveTo() { } lineTo() { } quadraticCurveTo() { } bezierCurveTo() { } arcTo() { } rect() { }
-    roundRect() { } arc() { } ellipse() { }
+    // --- images ---
+    drawImage(image, ...a) {
+      if (a.length !== 2 && a.length !== 4 && a.length !== 8) throw new TypeError(`Failed to execute 'drawImage' on 'CanvasRenderingContext2D': Valid arities are: [3, 5, 9], but ${a.length + 1} arguments provided.`);
+      const src = imageSource(image, 'drawImage');
+      if (src === null) return;
+      const [kind, source, sw0, sh0] = src;
+      let sx = 0, sy = 0, sw = sw0, sh = sh0, dx, dy, dw, dh;
+      if (a.length === 2) { [dx, dy] = a.map(Number); dw = sw0; dh = sh0; }
+      else if (a.length === 4) { [dx, dy, dw, dh] = a.map(Number); }
+      else { [sx, sy, sw, sh, dx, dy, dw, dh] = a.map(Number); }
+      if (!finite(sx, sy, sw, sh, dx, dy, dw, dh)) return;
+      this.#sync();
+      if (kind === 0 && source === this.#id) {
+        // Drawing a canvas onto itself: use a snapshot.
+        const d = N.canvasGetImageData(this.#id, 0, 0, sw0, sh0);
+        N.canvasDrawImage(this.#id, 1, new Uint8Array(d), sw0, sh0, sx, sy, sw, sh, dx, dy, dw, dh, this.#state.m, this.#state.globalAlpha, this.#state.globalCompositeOperation, this.#state.imageSmoothingEnabled);
+        return;
+      }
+      N.canvasDrawImage(this.#id, kind, source, sw0, sh0, sx, sy, sw, sh, dx, dy, dw, dh, this.#state.m, this.#state.globalAlpha, this.#state.globalCompositeOperation, this.#state.imageSmoothingEnabled);
+    }
+    createImageData(a, b, c) {
+      if (a instanceof ImageData) return new ImageData(a.width, a.height);
+      const w = Math.abs(Math.trunc(+a)), h = Math.abs(Math.trunc(+b));
+      if (w === 0 || h === 0) throw new DOMException(`Failed to execute 'createImageData' on 'CanvasRenderingContext2D': The source ${w === 0 ? 'width' : 'height'} is 0.`, 'IndexSizeError');
+      return new ImageData(w, h);
+    }
+    getImageData(sx, sy, sw, sh) {
+      let [x, y, w, h] = [sx, sy, sw, sh].map((v) => Math.trunc(+v));
+      if (![x, y, w, h].every(Number.isFinite)) throw new TypeError("Failed to execute 'getImageData' on 'CanvasRenderingContext2D': The provided double value is non-finite.");
+      if (w === 0 || h === 0) throw new DOMException(`Failed to execute 'getImageData' on 'CanvasRenderingContext2D': The source ${w === 0 ? 'width' : 'height'} is 0.`, 'IndexSizeError');
+      if (w < 0) { x += w; w = -w; }
+      if (h < 0) { y += h; h = -h; }
+      this.#sync();
+      return new ImageData(new Uint8ClampedArray(N.canvasGetImageData(this.#id, x, y, w, h)), w, h);
+    }
+    putImageData(imagedata, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH) {
+      if (!(imagedata instanceof ImageData)) throw new TypeError("Failed to execute 'putImageData' on 'CanvasRenderingContext2D': parameter 1 is not of type 'ImageData'.");
+      const w = imagedata.width, h = imagedata.height;
+      let rx = 0, ry = 0, rw = w, rh = h;
+      if (dirtyX !== undefined) {
+        [rx, ry, rw, rh] = [dirtyX, dirtyY, dirtyW, dirtyH].map((v) => Math.trunc(+v) || 0);
+        if (rw < 0) { rx += rw; rw = -rw; }
+        if (rh < 0) { ry += rh; rh = -rh; }
+      }
+      this.#sync();
+      N.canvasPutImageData(this.#id, imagedata.data, w, h, Math.trunc(+dx) || 0, Math.trunc(+dy) || 0, rx, ry, rw, rh);
+    }
   }
+  Object.assign(CanvasRenderingContext2D.prototype, pathMethods);
   for (const k in CTX_DEFAULTS) {
-    def(CanvasRenderingContext2D.prototype, k, function () { return L.ctxState(this)[k]; }, function (v) { L.ctxState(this)[k] = v; });
+    if (k === 'font') continue;
+    def(CanvasRenderingContext2D.prototype, k, function () { return L.ctxState(this)[k]; }, function (v) {
+      const s = L.ctxState(this);
+      if (k === 'globalAlpha') { const n = +v; if (Number.isFinite(n) && n >= 0 && n <= 1) s[k] = n; return; }
+      if (k === 'lineWidth' || k === 'miterLimit') { const n = +v; if (Number.isFinite(n) && n > 0) s[k] = n; return; }
+      if (k === 'lineDashOffset' || k === 'shadowOffsetX' || k === 'shadowOffsetY') { const n = +v; if (Number.isFinite(n)) s[k] = n; return; }
+      if (k === 'shadowBlur') { const n = +v; if (Number.isFinite(n) && n >= 0) s[k] = n; return; }
+      if (k === 'globalCompositeOperation') { if (COMPOSITE_OPS.includes(`${v}`)) s[k] = `${v}`; return; }
+      if (k === 'imageSmoothingEnabled') { s[k] = !!v; return; }
+      if (k === 'shadowColor') { const c = N.parseColor(`${v}`); if (c !== null) s[k] = colorString(c); return; }
+      if (k in ENUMS) { if (ENUMS[k].includes(`${v}`)) s[k] = `${v}`; return; }
+      s[k] = `${v}`;
+    });
   }
 
   // --- media ---

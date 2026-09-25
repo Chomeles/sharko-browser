@@ -246,6 +246,8 @@ pub(crate) struct RuntimeState {
     pub(crate) snapshot_taint: Cell<Option<&'static str>>,
     /// The document is an iframe's (`window.parent` is another window).
     pub(crate) is_frame: Cell<bool>,
+    /// Canvas 2D surfaces.
+    pub(crate) canvases: RefCell<crate::canvas::Canvases>,
 }
 
 impl RuntimeState {
@@ -304,6 +306,7 @@ impl RuntimeState {
             snapshotting: Cell::new(false),
             snapshot_taint: Cell::new(None),
             is_frame: Cell::new(false),
+            canvases: RefCell::new(Default::default()),
         }
     }
 

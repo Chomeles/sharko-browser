@@ -163,7 +163,8 @@ and reports differences (for layout development).
 
 ## 🚧 Known limitations
 
-- No `<canvas>` drawing, video/audio, WebGL yet; Web Workers run on the page's thread
+- Canvas 2D has no shadows or filters, and there is no video/audio or WebGL yet; Web
+  Workers run on the page's thread
   (no parallelism yet, no module workers or SharedWorker)
 - iframes run JavaScript in their own runtime and talk to the page with `postMessage`
   (enough for consent dialogs); the page can't reach into same-origin iframes yet and

@@ -168,3 +168,5 @@ Patches so far:
 54. `blitz-dom/src/node/node.rs`: hit testing always tries a stacking context's hoisted
     children; its `content_area` is computed before layout and was stale or empty, so
     z-indexed boxes nested in another stacking context could not be clicked.
+55. `blitz-dom/src/document.rs`: `font_context()` and `set_canvas_pixels()` for the
+    embedder's canvas 2D implementation (the canvas' pixels are shown as its image).

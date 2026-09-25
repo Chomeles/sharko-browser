@@ -627,3 +627,44 @@ fn js_layer_frame_runtimes() {
     assert_eq!(late.eval(&mut frame_doc, "2 + 2").unwrap(), "4");
     drop(late);
 }
+
+/// Canvas 2D (tiny-skia natives): fills, strokes, transforms, gradients, clipping, pixel
+/// access, text metrics and PNG export; the pixels reach the element's image data.
+#[test]
+fn js_layer_canvas_2d() {
+    let mut e = js_env(
+        r#"<!DOCTYPE html><html><body><canvas id="c" width="100" height="60"></canvas></body></html>"#,
+    );
+    let r = e.eval(
+        r#"(() => {
+          const c = document.getElementById('c'), x = c.getContext('2d');
+          const px = (a, b) => Array.from(x.getImageData(a, b, 1, 1).data).join(',');
+          x.fillStyle = 'red'; x.fillRect(0, 0, 10, 10);
+          x.save(); x.translate(20, 0); x.rotate(Math.PI / 2); x.fillStyle = 'rgb(0, 0, 255)'; x.fillRect(0, 0, 10, 10); x.restore();
+          x.beginPath(); x.rect(30, 0, 10, 10); x.clip(); x.fillStyle = 'lime'; x.fillRect(0, 0, 100, 60);
+          x.restore(); x.save();
+          const g = x.createLinearGradient(0, 0, 100, 0); g.addColorStop(0, '#000'); g.addColorStop(1, '#fff');
+          x.globalAlpha = 1;
+          const out = [px(5, 5), px(15, 5), px(35, 5), px(50, 5), x.fillStyle, x.getTransform().e];
+          const y = document.createElement('canvas').getContext('2d');
+          y.canvas.width = 50; y.canvas.height = 20;
+          y.fillStyle = g; y.fillRect(0, 0, 50, 20);
+          y.lineWidth = 4; y.strokeStyle = '#008000'; y.beginPath(); y.moveTo(0, 18); y.lineTo(50, 18); y.stroke();
+          const d = y.getImageData(0, 0, 50, 20).data;
+          out.push(d[0] < d[4 * 40], d[(18 * 50 + 10) * 4 + 1], y.measureText('Hallo').width > 10, c.toDataURL().startsWith('data:image/png;base64,iVBOR'));
+          y.putImageData(new ImageData(new Uint8ClampedArray([1, 2, 3, 255]), 1, 1), 0, 0);
+          out.push(Array.from(y.getImageData(0, 0, 1, 1).data).join(','));
+          return out;
+        })()"#,
+    );
+    assert_eq!(
+        r,
+        r##"["255,0,0,255","0,0,255,255","0,255,0,255","0,0,0,0","#00ff00",0,true,128,true,true,"1,2,3,255"]"##
+    );
+    // The pixels were handed to the document for painting.
+    let id = e.doc.get_element_by_id("c").unwrap();
+    let el = e.doc.get_node(id).unwrap().element_data().unwrap();
+    let img = el.raster_image_data().expect("canvas image data");
+    assert_eq!((img.width, img.height), (100, 60));
+    assert_eq!(&img.data.data()[..4], &[255, 0, 0, 255]);
+}

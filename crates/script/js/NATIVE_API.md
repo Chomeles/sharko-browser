@@ -193,6 +193,14 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
 | `N.cryptoAes(mode, encrypt, key, iv, aad, tagBits, data)` | ArrayBuffer; `mode` is `GCM`, `CBC`, `CTR` or `KW`; throws `OperationError` (e.g. failed authentication) |
 | `N.cryptoPbkdf2(hash, password, salt, iterations, bits)`, `N.cryptoHkdf(hash, ikm, salt, info, bits)` | ArrayBuffer |
+| `N.parseColor(css)` | `[r, g, b, a]` (0-255, alpha 0-1) or `null` |
+| `N.canvasReset(id, w, h)` | (re)create the 2D surface of a `<canvas>` |
+| `N.canvasFill(id, path, evenOdd, paint, alpha, op, ctm, pattern)`, `N.canvasStroke(id, path, paint, lineWidth, cap, join, miterLimit, dash, dashOffset, ctm, alpha, op, pattern)` | draw a device-space path (`Float64Array` of commands `0 x y` move, `1 x y` line, `2 cx cy x y` quad, `3 ...` cubic, `4` close); `paint` is `[0, r, g, b, a]`, `[1, x0, y0, x1, y1, stops...]` or `[2, x0, y0, r0, x1, y1, r1, stops...]` |
+| `N.canvasClip(id, [path, evenOdd, ...])`, `N.canvasClearRect(id, x, y, w, h, ctm)` | clip (intersection; empty = none), clear |
+| `N.canvasDrawImage(id, kind, source, srcW, srcH, sx, sy, sw, sh, dx, dy, dw, dh, ctm, alpha, op, smoothing)` | `kind` 0: element id, 1: RGBA bytes |
+| `N.canvasGetImageData(id, x, y, w, h)`, `N.canvasPutImageData(id, bytes, w, h, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH)` | straight RGBA |
+| `N.canvasText(id, text, [family, size, weight, italic], x, y, align, baseline, maxWidth, fill, paint, stroke, ctm, alpha, op, pattern)`, `N.canvasMeasureText(font, text)` | text via the document's fonts; metrics `[width, inkLeft, inkRight, inkAscent, inkDescent, fontAscent, fontDescent, emAscent, emDescent]` |
+| `N.canvasToDataURL(id, w, h)` | PNG `data:` URL |
 | `N.pendingResourceCount()` | number of subresources (stylesheets/images/fonts) still loading – used to decide when to fire `window.load` |
 
 ## Hooks (JS → registered once with `N.setHooks(obj)`)

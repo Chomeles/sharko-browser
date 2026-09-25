@@ -936,6 +936,10 @@ pub(crate) fn end_of_task(scope: &mut v8::PinScope, st: &RuntimeState) {
         return;
     }
     end_of_task_inner(scope, st);
+    // Canvases drawn to in this task show their new pixels.
+    if let Ok(doc) = st.doc() {
+        st.canvases.borrow_mut().flush(doc);
+    }
     st.in_checkpoint.set(false);
 }
 
