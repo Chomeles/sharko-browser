@@ -221,68 +221,174 @@
   // ---------------------------------------------------------------------------------------
   // innerText
   // ---------------------------------------------------------------------------------------
-  const INNERTEXT_SKIP = new Set(['script', 'style', 'template', 'noscript', 'head', 'title', 'meta', 'link', 'base', 'datalist', 'iframe', 'object', 'embed']);
-  const BLOCKISH = new Set(['block', 'flex', 'grid', 'list-item', 'table', 'flow-root', 'table-caption', 'table-row-group', 'table-header-group', 'table-footer-group']);
-  function innerTextCollect(id, items, pre) {
+  // The HTML "rendered text collection steps" (https://html.spec.whatwg.org/#rendered-text-
+  // collection-steps), driven by computed styles. Items are text chunks `{s, pre, atomic}`
+  // (pre: whitespace is preserved; atomic: an inline-block/replaced box, which behaves like
+  // a character for whitespace collapsing) and required line break counts (numbers).
+  // Soft line wrapping is ignored, ::first-line / ::first-letter styles are not applied.
+  const BLOCK_LEVEL = new Set(['block', 'flex', 'grid', 'table', 'list-item', 'flow-root', 'table-caption', '-webkit-box']);
+  const ATOMIC_INLINE = new Set(['inline-block', 'inline-flex', 'inline-grid', 'inline-table', '-webkit-inline-box']);
+  // Elements whose children generate no boxes (replaced, or rendered from other data).
+  const INNERTEXT_LEAF = new Set(['input', 'textarea', 'img', 'iframe', 'canvas', 'audio', 'video', 'embed', 'object', 'br', 'wbr', 'template', 'frame']);
+  const SVG_HIDDEN = new Set(['defs', 'symbol', 'title', 'desc', 'metadata', 'clipPath', 'mask', 'pattern', 'marker', 'linearGradient', 'radialGradient', 'style', 'script']);
+  const TABLE_INTERNAL = new Set(['table', 'inline-table', 'table-row-group', 'table-header-group', 'table-footer-group', 'table-row']);
+  function innerTextWS(s, ws) {
+    if (ws === 'pre' || ws === 'pre-wrap' || ws === 'break-spaces') return s;
+    if (ws === 'pre-line') return s.replace(/[\t\f\r ]*\n[\t\f\r ]*/g, '\n').replace(/[\t\f\r ]+/g, ' ');
+    return s.replace(/[\t\n\f\r ]+/g, ' ');
+  }
+  function innerTextTransform(s, tt) {
+    if (tt === 'uppercase') return s.toUpperCase();
+    if (tt === 'lowercase') return s.toLowerCase();
+    if (tt === 'capitalize') return s.replace(/(^|[^\p{L}\p{N}'])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+    return s;
+  }
+  // Collect the items of `id`'s children. `visible`: the parent's box is rendered (its
+  // visibility is visible); `mode`: 'html' | 'svg' | 'select' | 'optgroup'.
+  function innerTextCollect(id, items, visible, mode) {
+    const ws = N.computedStyle(id, 'white-space', '');
+    const tt = N.computedStyle(id, 'text-transform', '');
+    // Whitespace-only text directly in a table, row group or row gets no box.
+    const tableCtx = TABLE_INTERNAL.has(N.computedStyle(id, 'display', ''));
     for (let c = N.firstChild(id); c !== 0; c = N.nextSibling(c)) {
       const t = N.nodeType(c);
       if (t === 3) {
-        let s = N.getText(c);
-        if (!pre) s = s.replace(/[\t\n\f\r ]+/g, ' ');
-        if (s !== '') items.push(s);
+        if (!visible || mode === 'select' || mode === 'optgroup') continue;
+        const raw = N.getText(c);
+        if (tableCtx && /^[\t\n\f\r ]*$/.test(raw)) continue;
+        const s = innerTextTransform(innerTextWS(raw, ws), tt);
+        if (s !== '') items.push({ s, pre: ws === 'pre' || ws === 'pre-wrap' || ws === 'break-spaces', atomic: false });
         continue;
       }
       if (t !== 1) continue;
       const ln = N.localName(c);
-      if (INNERTEXT_SKIP.has(ln)) continue;
-      const disp = N.computedStyle(c, 'display', '');
-      if (disp === 'none') continue;
-      if (ln === 'br') { items.push('\n'); continue; }
-      const ws = N.computedStyle(c, 'white-space', '');
-      const cpre = ws === 'pre' || ws === 'pre-wrap' || ws === 'pre-line' || ws === 'break-spaces' || (ws === '' && (ln === 'pre' || ln === 'textarea' || ln === 'listing' || ln === 'xmp'));
-      const block = BLOCKISH.has(disp) || (disp === '' && /^(div|p|h[1-6]|ul|ol|li|section|article|header|footer|nav|main|aside|form|table|tr|blockquote|pre|address|dl|dt|dd|figure|figcaption|fieldset|hr|details|summary)$/.test(ln));
-      const cell = disp === 'table-cell' || (disp === '' && (ln === 'td' || ln === 'th'));
-      const row = disp === 'table-row' || (disp === '' && ln === 'tr');
-      if (ln === 'p') items.push(2);
-      else if (block || row) items.push(1);
-      const start = items.length;
-      innerTextCollect(c, items, cpre);
-      if (cell && N.nextSibling(c) !== 0) {
-        let n = N.nextSibling(c);
-        while (n !== 0 && N.nodeType(n) !== 1) n = N.nextSibling(n);
-        if (n !== 0) items.push('\t');
+      if (mode === 'select' && ln !== 'option' && ln !== 'optgroup') continue;
+      if (mode === 'optgroup' && ln !== 'option') continue;
+      const svg = mode === 'svg' || (N.namespaceURI(c) === L.NS.SVG && ln !== 'foreignObject');
+      if (svg && SVG_HIDDEN.has(ln)) continue;
+      let disp = N.computedStyle(c, 'display', '');
+      if (disp === 'none') {
+        // A select's options count as block-level boxes even when the widget hides them.
+        if (mode === 'select' || mode === 'optgroup') disp = 'block'; else continue;
       }
-      if (ln === 'p') items.push(2);
-      else if (block || row) items.push(1);
-      void start;
+      const vis = N.computedStyle(c, 'visibility', '') === 'visible';
+      if (ln === 'br') { if (vis) items.push({ s: '\n', pre: true, atomic: false }); continue; }
+      if (disp === 'contents') { innerTextCollect(c, items, vis, svg ? 'svg' : 'html'); continue; }
+      const childMode = svg ? 'svg' : ln === 'select' ? 'select' : ln === 'optgroup' ? 'optgroup' : 'html';
+      if (INNERTEXT_LEAF.has(ln) || (svg && ln !== 'foreignObject' && ln !== 'text' && ln !== 'tspan' && ln !== 'textPath' && ln !== 'a' && ln !== 'g' && ln !== 'svg' && ln !== 'switch')) {
+        // A replaced element: an atomic inline (or block) box without text of its own.
+        if (INNERTEXT_LEAF.has(ln) && vis) {
+          if (BLOCK_LEVEL.has(disp)) items.push(1);
+          items.push({ s: '', pre: false, atomic: true });
+          if (BLOCK_LEVEL.has(disp)) items.push(1);
+        }
+        continue;
+      }
+      const cell = disp === 'table-cell', row = disp === 'table-row';
+      const blockLevel = BLOCK_LEVEL.has(disp) || ln === 'option' || ln === 'optgroup';
+      // A select's box only holds its option boxes, whose line breaks flow into the parent.
+      const atomic = ATOMIC_INLINE.has(disp) && ln !== 'select';
+      const required = ln === 'p' ? 2 : blockLevel ? 1 : 0;
+      if (required) items.push(required);
+      if (atomic) {
+        // Its own inline formatting context: leading/trailing collapsible whitespace goes.
+        const inner = [];
+        innerTextCollect(c, inner, vis, childMode);
+        items.push({ s: innerTextConcat(inner), pre: true, atomic: true });
+        if (required) items.push(required);
+        continue;
+      }
+      innerTextCollect(c, items, vis, childMode);
+      if (cell && vis) {
+        // Not the last cell of its row: a tab.
+        let n = N.nextSibling(c);
+        while (n !== 0 && !(N.nodeType(n) === 1 && N.computedStyle(n, 'display', '') === 'table-cell')) n = N.nextSibling(n);
+        if (n !== 0) items.push({ s: '\t', pre: true, atomic: false });
+      }
+      if (row && vis && !innerTextLastRow(c)) items.push({ s: '\n', pre: true, atomic: false });
+      if (required) items.push(required);
     }
+  }
+  // Whether a table-row box is the last row of its table (rows may sit in row groups).
+  function innerTextLastRow(rowId) {
+    let n = rowId;
+    for (;;) {
+      let s = N.nextSibling(n);
+      while (s !== 0) {
+        if (N.nodeType(s) === 1) {
+          const d = N.computedStyle(s, 'display', '');
+          if (d === 'table-row') return false;
+          if (d === 'table-row-group' || d === 'table-header-group' || d === 'table-footer-group') {
+            for (let r = N.firstChild(s); r !== 0; r = N.nextSibling(r)) if (N.nodeType(r) === 1 && N.computedStyle(r, 'display', '') === 'table-row') return false;
+          }
+        }
+        s = N.nextSibling(s);
+      }
+      const p = N.parent(n);
+      if (p === 0) return true;
+      const pd = N.computedStyle(p, 'display', '');
+      if (pd !== 'table-row-group' && pd !== 'table-header-group' && pd !== 'table-footer-group') return true;
+      n = p;
+    }
+  }
+  // Concatenate items: collapsible spaces merge across chunks and vanish at line starts and
+  // ends, required line breaks become the maximum run of newlines (none at the very start
+  // or end).
+  function innerTextConcat(items) {
+    let out = '';
+    let tail = 0; // collapsible spaces at the end of `out`
+    let pendingBreak = 0;
+    let lineStart = true;
+    const dropTail = () => { if (tail) { out = out.slice(0, out.length - tail); tail = 0; } };
+    const flushBreak = () => {
+      if (pendingBreak === 0) return;
+      dropTail();
+      out += '\n'.repeat(pendingBreak);
+      pendingBreak = 0;
+      lineStart = true;
+    };
+    for (const it of items) {
+      if (typeof it === 'number') {
+        // Collapsible whitespace before a block boundary goes; breaks before any text don't count.
+        dropTail();
+        if (out !== '') pendingBreak = Math.max(pendingBreak, it);
+        continue;
+      }
+      let s = it.s;
+      if (it.atomic) {
+        // An inline-block / replaced box: like a character for whitespace collapsing, but an
+        // empty one contributes no text (line breaks around it still merge).
+        if (s !== '') { flushBreak(); out += s; }
+        tail = 0; lineStart = false;
+        continue;
+      }
+      flushBreak();
+      if (s.startsWith('\n')) dropTail();
+      if (it.pre) {
+        out += s; tail = 0; lineStart = s.endsWith('\n');
+        continue;
+      }
+      // Collapsible text: drop leading spaces at a line start or after a collapsible space.
+      if (lineStart || tail) s = s.replace(/^ +/, '');
+      if (s === '') continue;
+      const m = / +$/.exec(s);
+      out += s;
+      tail = m ? m[0].length : 0;
+      lineStart = s.endsWith('\n');
+    }
+    dropTail();
+    return out;
   }
   function innerTextGet(el) {
     const id = idOf(el);
     L.flushSheets();
     if (!N.isConnected(id) || N.computedStyle(id, 'display', '') === 'none') return N.textContent(id);
+    const ln = lnOf(el);
+    if (INNERTEXT_LEAF.has(ln)) return '';
+    const svg = nsOf(el) === SVG && ln !== 'foreignObject';
     const items = [];
-    innerTextCollect(id, items, false);
-    // Resolve: strip spaces around line breaks, collapse required line breaks
-    let out = '';
-    let pendingBreak = 0;
-    let atLineStart = true;
-    for (const it of items) {
-      if (typeof it === 'number') { if (out !== '') pendingBreak = Math.max(pendingBreak, it); continue; }
-      let s = it;
-      if (pendingBreak) {
-        out = out.replace(/ +$/, '');
-        out += '\n'.repeat(pendingBreak);
-        pendingBreak = 0;
-        atLineStart = true;
-      }
-      if (atLineStart) s = s.replace(/^ +/, '');
-      if (s === '') continue;
-      if (out.endsWith(' ') && s.startsWith(' ')) s = s.slice(1);
-      out += s;
-      atLineStart = s.endsWith('\n');
-    }
-    return out.replace(/ +(\n)/g, '$1').replace(/ +$/, '');
+    innerTextCollect(id, items, N.computedStyle(id, 'visibility', '') === 'visible', svg ? 'svg' : ln === 'select' ? 'select' : ln === 'optgroup' ? 'optgroup' : 'html');
+    return innerTextConcat(items);
   }
   function innerTextSet(el, v) {
     const id = idOf(el);
