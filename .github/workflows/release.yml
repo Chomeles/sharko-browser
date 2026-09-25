@@ -65,7 +65,7 @@ jobs:
         id: wanted
         shell: bash
         run: echo "yes=${{ github.event_name != 'workflow_dispatch' || contains(github.event.inputs.platforms, matrix.platform_key) }}" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.wanted.outputs.yes == 'true'
       - uses: dtolnay/rust-toolchain@stable
         if: steps.wanted.outputs.yes == 'true'
@@ -106,7 +106,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
