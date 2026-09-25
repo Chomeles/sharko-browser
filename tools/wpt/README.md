@@ -12,7 +12,7 @@ and compares every subtest with `expected.json`, so a change shows up as
 # 1. A sparse checkout next to the repository (about 300 MB for the directories below).
 git clone --depth 1 --filter=blob:none --sparse https://github.com/web-platform-tests/wpt.git ../wpt
 cd ../wpt
-git sparse-checkout set --no-cone /wpt /wpt.py /docs/commands.json resources common tools \
+git sparse-checkout set --no-cone /wpt /wpt.py /docs/commands.json resources common tools interfaces \
   dom html/webappapis html/browsers html/dom html/semantics/scripting-1 html/semantics/forms \
   html/infrastructure fetch/api url encoding streams xhr websockets workers custom-elements \
   shadow-dom css/cssom css/cssom-view css/css-grid css/css-flexbox css/css-position \
