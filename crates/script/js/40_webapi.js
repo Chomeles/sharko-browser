@@ -347,6 +347,21 @@
     focus() { remoteTarget(this); }
     blur() { remoteTarget(this); }
     close() { remoteTarget(this); }
+    // Listeners on a same-origin child window (its document isn't scriptable from here, so
+    // they never fire); a cross-origin window blocks them, as in browsers.
+    addEventListener(type, listener, options) { remoteEventTarget(this, 'addEventListener').addEventListener(type, listener, options); }
+    removeEventListener(type, listener, options) { remoteEventTarget(this, 'removeEventListener').removeEventListener(type, listener, options); }
+    dispatchEvent(event) { return remoteEventTarget(this, 'dispatchEvent').dispatchEvent(event); }
+  }
+  const REMOTE_TARGETS = new WeakMap();
+  function remoteEventTarget(w, what) {
+    const p = remoteTarget(w);
+    const own = selfPath();
+    const child = p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own);
+    if (!child || frameIsCrossOrigin(p[p.length - 1])) throw new DOMException(`Failed to execute '${what}' on 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+    let t = REMOTE_TARGETS.get(w);
+    if (t === undefined) { t = new EventTarget(); REMOTE_TARGETS.set(w, t); }
+    return t;
   }
   Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
   // Named and indexed access to a remote window's child frames (`parent.frames['__tcfapiLocator']`, `top[0]`).

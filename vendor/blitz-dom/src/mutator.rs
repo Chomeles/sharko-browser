@@ -1188,12 +1188,24 @@ impl<'doc> DocumentMutator<'doc> {
     }
 
     fn unload_stylesheet(&mut self, node_id: NodeId) {
-        let node = &mut self.doc.nodes[node_id];
-        let Some(element) = node.element_data_mut() else {
-            unreachable!();
+        // PATCH: the sheet may only be registered in `nodes_to_stylesheet` (the element's
+        // special data replaced meanwhile): drop whichever exists instead of panicking.
+        let registered = self.doc.nodes_to_stylesheet.remove(&node_id);
+        let Some(node) = self.doc.nodes.get_mut(node_id) else {
+            return;
         };
-        let SpecialElementData::Stylesheet(stylesheet) = element.special_data.take() else {
-            unreachable!();
+        let taken = match node.element_data_mut() {
+            Some(element) if matches!(element.special_data, SpecialElementData::Stylesheet(_)) => {
+                match element.special_data.take() {
+                    SpecialElementData::Stylesheet(sheet) => Some(sheet),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let Some(stylesheet) = taken.or(registered) else {
+            self.doc.linked_sheet_sources.remove(&node_id);
+            return;
         };
 
         let guard = self.doc.guard.read();
