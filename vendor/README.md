@@ -192,3 +192,7 @@ Patches so far:
 61. `parley/src/shape/mod.rs`: a pictograph with the default text presentation (e.g.
     ▶ ✔ ❤, Emoji_Presentation=No) and no U+FE0F is shaped with the text fonts and their
     fallbacks instead of the emoji font first (its color bitmaps didn't render: blank).
+62. `parley/src/layout/line_break.rs`: the empty line after a trailing newline (kept for
+    the cursor with an empty run) doesn't count toward the layout's height: `text<br>`,
+    `<br>` and `<pre>a\n</pre>` are one line tall, as in browsers (every block ending in
+    a `<br>` had an extra blank line).
