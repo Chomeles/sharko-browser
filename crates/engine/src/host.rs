@@ -235,6 +235,8 @@ pub struct RendererHost {
     pub frame: Option<Vec<u64>>,
     /// The document's origin (sender of its `postMessage`s).
     pub origin: String,
+    /// The initial `window.name` (an iframe document's `<iframe name>`).
+    pub window_name: String,
     /// `postMessage`s between the page and its iframes, delivered by the renderer.
     pub messages: Rc<RefCell<Vec<FrameMessage>>>,
     /// The `<iframe>`s of each document of the page (by frame path) in tree order as
@@ -434,6 +436,10 @@ impl script::ScriptHost for RendererHost {
             data,
         });
         self.shared.redraw.store(true, Ordering::SeqCst);
+    }
+
+    fn window_name(&self) -> String {
+        self.window_name.clone()
     }
 
     fn frame_path(&self) -> Vec<u64> {

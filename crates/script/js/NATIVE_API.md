@@ -188,6 +188,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.textDecode(arrayBufferOrView, label, fatal)` | string (throws on unknown label or on invalid data if fatal) |
 | `N.userAgent()` | UA string |
 | `N.structuredClone(value)` | deep clone using V8's ValueSerializer |
+| `N.initialWindowName()` | The initial `window.name` (an iframe document's: its `<iframe name>`) |
 | `N.framePath()` | This document's frame path: the `<iframe>` node ids from the page down (each in its parent's document); `[]` for the page |
 | `N.framePost(path, message, targetOrigin)` | `postMessage` to the window of the frame at `path`; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
 | `N.frameList(path)` | The frames of the document at `path` in tree order as `[id, name]` pairs (`parent.frames[name]`, `top.length`), or `null` if unknown |

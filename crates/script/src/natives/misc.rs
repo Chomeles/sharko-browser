@@ -604,6 +604,14 @@ pub(crate) fn n_referrer(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.initialWindowName()` -> the initial `window.name` (an iframe document's:
+/// its `<iframe name>`).
+pub(crate) fn n_initial_window_name(cx: &mut Cx) -> NResult {
+    let r = cx.st.host.window_name();
+    cx.ret_str(&r);
+    Ok(())
+}
+
 /// Addition: `N.openWindow(url, target, features)` (`window.open` with a new browsing
 /// context): opens a tab.
 pub(crate) fn n_open_window(cx: &mut Cx) -> NResult {

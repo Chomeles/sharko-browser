@@ -137,8 +137,14 @@
   defGetter('length', () => L.childFrames().length, { replaceable: true });
   defGetter('opener', () => null, { replaceable: true });
   defGetter('frameElement', () => null);
-  let windowName = '';
-  defGetter('name', () => windowName, { set(v) { windowName = `${v}`; } });
+  let windowName = null; // read from the host on first use (not while snapshotting)
+  const getWindowName = () => {
+    if (windowName === null) {
+      try { windowName = N.initialWindowName(); } catch (_) { windowName = ''; }
+    }
+    return windowName;
+  };
+  defGetter('name', getWindowName, { set(v) { windowName = `${v}`; } });
   let windowStatus = '';
   defGetter('status', () => windowStatus, { set(v) { windowStatus = `${v}`; } });
   const vp = () => N.viewport();
@@ -206,7 +212,7 @@
     const p = N.urlParse(u, L.baseURL());
     if (p === null) throw new DOMException(`Failed to execute 'open' on 'Window': Unable to open a window with invalid URL '${u}'.`, 'SyntaxError');
     const t = target === undefined || target === null || `${target}` === '' ? '_blank' : `${target}`;
-    if (t === '_self' || t === '_top' || t === '_parent' || (windowName !== '' && t === windowName)) {
+    if (t === '_self' || t === '_top' || t === '_parent' || (getWindowName() !== '' && t === getWindowName())) {
       if (p[1] === 'javascript:') { L.postTask(() => L.runJavascriptURL(p[0])); return g; }
       N.navigate(p[0], false);
       return g;

@@ -178,3 +178,6 @@ Patches so far:
     is also dropped from its element's layout and paint children (not rebuilt for inline
     elements), and damage traversals skip ids of dropped nodes; the dangling id panicked
     and left welt.de blank.
+58. `blitz-dom/src/stylo.rs`: `frameborder` on `<iframe>`/`<frame>` that isn't a non-zero
+    integer ("0", "no") maps to zero border widths, as in Chrome (ad iframes showed 2px
+    inset borders).

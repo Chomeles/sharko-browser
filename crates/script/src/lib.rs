@@ -161,6 +161,11 @@ pub trait ScriptHost {
     fn referrer(&self) -> String {
         String::new()
     }
+    /// The initial `window.name`: an iframe document's is its `<iframe name>` (default:
+    /// empty).
+    fn window_name(&self) -> String {
+        String::new()
+    }
     /// `navigator.clipboard.writeText(text)` (default: ignored).
     fn clipboard_write(&self, text: &str) {
         let _ = text;

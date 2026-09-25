@@ -240,6 +240,7 @@ natives_table! {
     "historyIndex" => misc::n_history_index,
     "historyLength" => misc::n_history_length,
     "referrer" => misc::n_referrer,
+    "initialWindowName" => misc::n_initial_window_name,
     "doctype" => misc::n_doctype,
     "openWindow" => misc::n_open_window,
     "clipboardWrite" => misc::n_clipboard_write,

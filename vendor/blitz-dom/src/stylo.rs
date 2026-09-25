@@ -1155,6 +1155,20 @@ impl<'a> TElement for BlitzNode<'a> {
                 }
             }
 
+            // PATCH: `frameborder` on iframes/frames: a value that isn't a non-zero
+            // integer ("0", "no") removes the default border (as in Chrome).
+            if (*tag == local_name!("iframe") || *tag == local_name!("frame"))
+                && &**name == "frameborder"
+                && style::servo::attr::parse_integer(value.chars()).map_or(true, |n| n == 0)
+            {
+                use style::values::specified::BorderSideWidth;
+                let width = BorderSideWidth::from_px(0.0);
+                push_style(PropertyDeclaration::BorderTopWidth(width.clone()));
+                push_style(PropertyDeclaration::BorderRightWidth(width.clone()));
+                push_style(PropertyDeclaration::BorderBottomWidth(width.clone()));
+                push_style(PropertyDeclaration::BorderLeftWidth(width));
+            }
+
             // `body` carries four legacy margin attributes, as pixel lengths:
             // marginwidth and marginheight set both sides of an axis, and
             // leftmargin and topmargin set one side each.

@@ -822,6 +822,7 @@ impl Renderer {
             history: Cell::new((0, 1)),
             frame: None,
             origin: origin_of(url),
+            window_name: String::new(),
             messages: messages.clone(),
             frame_lists: Rc::new(RefCell::new(HashMap::new())),
         });
@@ -1110,6 +1111,13 @@ impl Renderer {
                 continue;
             }
             let url = sub.url().to_string();
+            let (node, parent) = key.split_last().expect("frame paths are not empty");
+            let window_name = subdoc_ref(&page.doc, parent)
+                .and_then(|d| d.get_node(NodeId::from_u64(*node)))
+                .and_then(|n| n.attr(blitz_dom::local_name!("name")))
+                .unwrap_or("")
+                .to_string();
+            let Some(sub) = subdoc_mut(&mut page.doc, &key) else { continue };
             let host = Rc::new(RendererHost {
                 shared: self.shared.clone(),
                 net: self.net.clone(),
@@ -1122,6 +1130,7 @@ impl Renderer {
                 history: Cell::new((0, 1)),
                 frame: Some(key.clone()),
                 origin: origin_of(&url),
+                window_name,
                 messages: page.messages.clone(),
                 frame_lists: page.host.frame_lists.clone(),
             });
