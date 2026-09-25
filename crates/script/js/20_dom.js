@@ -518,6 +518,142 @@
   }
   L.titleChanged = titleChanged;
 
+  // ---------------------------------------------------------------------------------------
+  // Live ranges (https://dom.spec.whatwg.org/#concept-live-range): every Range (and so the
+  // selection's range) follows the DOM's insert / remove / replace-data / split / normalize
+  // steps. The registry holds WeakRefs so ranges a page drops are collected as usual.
+  // ---------------------------------------------------------------------------------------
+  //
+  // Each Range owns a state `{sc, so, ec, eo}`; `rangeIndex` maps a container node id to
+  // the states anchored in it, so a mutation only visits the ranges it can affect (a page
+  // with thousands of ranges and a busy DOM stays fast). A FinalizationRegistry drops the
+  // state of a collected Range.
+  const rangeIndex = new Map(); // node id -> Set<state>
+  const liveRanges = { get size() { return rangeIndex.size; } };
+  function indexAdd(id, s) {
+    let set = rangeIndex.get(id);
+    if (set === undefined) { set = new Set(); rangeIndex.set(id, set); }
+    set.add(s);
+  }
+  function indexRemove(id, s) {
+    const set = rangeIndex.get(id);
+    if (set === undefined) return;
+    set.delete(s);
+    if (set.size === 0) rangeIndex.delete(id);
+  }
+  const rangeReaper = new FinalizationRegistry((s) => { indexRemove(s.sc, s); if (s.ec !== s.sc) indexRemove(s.ec, s); });
+  function newRangeState(range, sc, so, ec, eo) {
+    const s = { sc, so, ec, eo };
+    indexAdd(sc, s);
+    if (ec !== sc) indexAdd(ec, s);
+    rangeReaper.register(range, s);
+    return s;
+  }
+  function setRangeState(s, sc, so, ec, eo) {
+    const oSc = s.sc, oEc = s.ec;
+    if (sc !== oSc || ec !== oEc) {
+      if (oSc !== sc && oSc !== ec) indexRemove(oSc, s);
+      if (oEc !== oSc && oEc !== sc && oEc !== ec) indexRemove(oEc, s);
+      if (sc !== oSc && sc !== oEc) indexAdd(sc, s);
+      if (ec !== sc && ec !== oSc && ec !== oEc) indexAdd(ec, s);
+      s.sc = sc; s.ec = ec;
+    }
+    s.so = so; s.eo = eo;
+  }
+  // The states with a boundary in the subtree of `nid` (grouped by container).
+  function statesInside(nid, skip) {
+    let out = null;
+    for (const [cid, set] of rangeIndex) {
+      if (cid === skip || !N.contains(nid, cid)) continue;
+      if (out === null) out = new Set();
+      for (const s of set) out.add(s);
+    }
+    return out;
+  }
+  // Insert steps: `count` nodes were inserted into `pid` at `index`.
+  function rangesOnInsert(pid, index, count) {
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === pid && s.so > index) s.so += count;
+      if (s.ec === pid && s.eo > index) s.eo += count;
+    }
+  }
+  // Remove steps (run before the removal): `nid` is the child of `pid` at `index`.
+  function rangesOnRemove(pid, nid, index) {
+    const inside = statesInside(nid, pid);
+    if (inside !== null) {
+      for (const s of inside) {
+        const a = N.contains(nid, s.sc), b = N.contains(nid, s.ec);
+        setRangeState(s, a ? pid : s.sc, a ? index : s.so, b ? pid : s.ec, b ? index : s.eo);
+      }
+    }
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === pid && s.so > index) s.so -= 1;
+      if (s.ec === pid && s.eo > index) s.eo -= 1;
+    }
+  }
+  // Replace all (innerHTML, textContent, replaceChildren): the sequential remove steps for
+  // `oldKids` then the insert at 0 leave every range that was in `pid` at (pid, 0).
+  function rangesOnReplaceAll(pid, oldKids) {
+    const touched = new Set();
+    const own = rangeIndex.get(pid);
+    if (own !== undefined) for (const s of own) touched.add(s);
+    for (const k of oldKids) {
+      const inside = statesInside(k, pid);
+      if (inside !== null) for (const s of inside) touched.add(s);
+    }
+    const inOld = (id) => id === pid || oldKids.some((k) => N.contains(k, id));
+    for (const s of touched) {
+      const a = inOld(s.sc), b = inOld(s.ec);
+      setRangeState(s, a ? pid : s.sc, a ? 0 : s.so, b ? pid : s.ec, b ? 0 : s.eo);
+    }
+  }
+  // Replace data steps: in `id`, `count` code units at `offset` were replaced by `added`.
+  function rangesOnReplaceData(id, offset, count, added) {
+    const set = rangeIndex.get(id);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === id) { if (s.so > offset && s.so <= offset + count) s.so = offset; else if (s.so > offset + count) s.so += added - count; }
+      if (s.ec === id) { if (s.eo > offset && s.eo <= offset + count) s.eo = offset; else if (s.eo > offset + count) s.eo += added - count; }
+    }
+  }
+  // splitText steps after the new node was inserted at `index + 1` in `pid`.
+  function rangesOnSplit(id, newId, offset, pid, index) {
+    const own = rangeIndex.get(id);
+    if (own !== undefined) {
+      for (const s of [...own]) {
+        const a = s.sc === id && s.so > offset, b = s.ec === id && s.eo > offset;
+        if (a || b) setRangeState(s, a ? newId : s.sc, a ? s.so - offset : s.so, b ? newId : s.ec, b ? s.eo - offset : s.eo);
+      }
+    }
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of set) {
+      if (s.sc === pid && s.so === index + 1) s.so += 1;
+      if (s.ec === pid && s.eo === index + 1) s.eo += 1;
+    }
+  }
+  // normalize(): the text node `from` (child `index` of `pid`) is about to be merged into
+  // `into`, whose data is `length` code units long so far.
+  function rangesOnMerge(into, from, pid, index, length) {
+    const own = rangeIndex.get(from);
+    if (own !== undefined) {
+      for (const s of [...own]) {
+        const a = s.sc === from, b = s.ec === from;
+        setRangeState(s, a ? into : s.sc, a ? s.so + length : s.so, b ? into : s.ec, b ? s.eo + length : s.eo);
+      }
+    }
+    const set = rangeIndex.get(pid);
+    if (set === undefined) return;
+    for (const s of [...set]) {
+      const a = s.sc === pid && s.so === index, b = s.ec === pid && s.eo === index;
+      if (a || b) setRangeState(s, a ? into : s.sc, a ? length : s.so, b ? into : s.ec, b ? length : s.eo);
+    }
+  }
+
   L.optionsInserted = null; // installed by 30_html.js (select selectedness on option insertion)
   function afterInsertion(pid, parentW, insertedIds) {
     if (L.pendingScripts.size !== 0 && L.checkPendingScripts !== null) L.checkPendingScripts();
@@ -541,22 +677,25 @@
   function insertCore(pid, parentW, nodeW, nid, refId) {
     const nt = typeOf(nodeW);
     const isFrag = nt === 11;
-    const mo = moRegCount !== 0, ce = ceActive();
+    const mo = moRegCount !== 0, ce = ceActive(), lr = liveRanges.size !== 0;
     let added = null, oldParent = 0, oldPrev = 0, oldNext = 0, ceMoved = null;
     if (isFrag) {
       added = N.childIds(nid);
       if (added.length === 0) return;
       if (mo) queueMutation('childList', nid, null, null, null, added, 0, 0);
+      if (lr) for (const c of added) rangesOnRemove(nid, c, 0);
     } else {
       oldParent = N.parent(nid);
       if (oldParent !== 0 && (mo || ce)) {
         if (mo) { oldPrev = N.prevSibling(nid); oldNext = N.nextSibling(nid); }
         if (ce && N.isConnected(nid)) ceMoved = collectCE(nid, true);
       }
+      if (lr && oldParent !== 0) rangesOnRemove(oldParent, nid, indexOfNode(nid));
     }
     nativeCall(() => N.insertBefore(pid, nid, refId));
     childListChanged(pid, isFrag ? nid : oldParent);
     const insertedIds = isFrag ? added : [nid];
+    if (lr) rangesOnInsert(pid, indexOfNode(insertedIds[0]), insertedIds.length);
     if (mo) {
       if (oldParent !== 0) queueMutation('childList', oldParent, null, null, null, [nid], oldPrev, oldNext);
       const first = insertedIds[0], last = insertedIds[insertedIds.length - 1];
@@ -572,6 +711,7 @@
     let prev = 0, next = 0, ceList = null;
     if (mo) { prev = N.prevSibling(nid); next = N.nextSibling(nid); }
     if (ceActive() && N.isConnected(nid)) ceList = collectCE(nid, true);
+    if (liveRanges.size !== 0) rangesOnRemove(pid, nid, indexOfNode(nid));
     nativeCall(() => N.removeChild(pid, nid));
     childListChanged(pid, 0);
     if (mo) queueMutation('childList', pid, null, null, null, [nid], prev, next);
@@ -588,10 +728,12 @@
     const mo = moRegCount !== 0;
     const ce = ceActive();
     let removed = null, ceList = null;
-    if (mo) removed = N.childIds(pid);
+    const lr = liveRanges.size !== 0;
+    if (mo || lr) removed = N.childIds(pid);
     const connected = ce ? N.isConnected(pid) : false;
     if (ce && connected) ceList = collectCE(pid, false);
     nativeCall(mutate);
+    if (lr) rangesOnReplaceAll(pid, removed);
     if (moves === true) treeChanged();
     childListChanged(pid, 0);
     const added = mo || ce ? N.childIds(pid) : null;
@@ -813,9 +955,15 @@
   };
 
   // Character data mutation core
-  function setDataCore(w, id, data) {
-    const mo = moRegCount !== 0;
-    const old = mo ? N.getText(id) : null;
+  // Set the data of a CharacterData node. `offset`/`count`/`added` describe the replaced
+  // segment for live ranges (default: the whole data).
+  function setDataCore(w, id, data, offset, count, added) {
+    const mo = moRegCount !== 0, lr = liveRanges.size !== 0;
+    const old = mo || (lr && offset === undefined) ? N.getText(id) : null;
+    if (lr) {
+      if (offset === undefined) rangesOnReplaceData(id, 0, old.length, data.length);
+      else rangesOnReplaceData(id, offset, count, added);
+    }
     N.setText(id, data);
     if (mo) queueMutation('characterData', id, null, old, null, null, 0, 0);
     if (titleIds.size !== 0 && titleIds.has(N.parent(id))) titleChanged();
@@ -872,17 +1020,21 @@
       case 7: return piTarget.get(w) || '';
       case 8: return '#comment';
       case 9: return '#document';
-      case 10: return 'html';
+      case 10: { const info = doctypeInfo.get(w); return info !== undefined ? info.name : 'html'; }
       case 11: return '#document-fragment';
       default: return '';
     }
   }
   const upperCache = new Map();
-  // The HTML-uppercased qualified name (prefix included): "DIV", "X:B", but "svg".
-  function tagNameOf(w) {
+  // The qualified name (prefix included): "div", "x:b".
+  function qualifiedNameOf(w) {
     const ln = lnOf(w);
     const p = elementPrefix.get(w);
-    const q = p ? p + ':' + ln : ln;
+    return p ? p + ':' + ln : ln;
+  }
+  // The HTML-uppercased qualified name (prefix included): "DIV", "X:B", but "svg".
+  function tagNameOf(w) {
+    const q = qualifiedNameOf(w);
     if (nsOf(w) !== HTML) return q;
     let u = upperCache.get(q);
     if (u === undefined) {
@@ -1063,14 +1215,18 @@
           c = next;
           continue;
         }
+        // Spec order: append the following text nodes' data first (a replace-data step
+        // that moves no range), then move the ranges from each merged node, then remove it.
         let s = next, merged = data;
-        while (s !== 0 && N.nodeType(s) === 3) {
-          const ns = N.nextSibling(s);
-          merged += N.getText(s);
-          removeCore(id, undefined, s);
-          s = ns;
+        const toMerge = [];
+        while (s !== 0 && N.nodeType(s) === 3) { toMerge.push(s); merged += N.getText(s); s = N.nextSibling(s); }
+        if (merged !== data) setDataCore(wrap(c), c, merged, data.length, 0, merged.length - data.length);
+        let length = data.length;
+        for (const m of toMerge) {
+          if (liveRanges.size !== 0) rangesOnMerge(c, m, id, indexOfNode(m), length);
+          length += N.getText(m).length;
+          removeCore(id, undefined, m);
         }
-        if (merged !== data) setDataCore(wrap(c), c, merged);
         c = s;
         continue;
       }
@@ -1124,7 +1280,7 @@
     if (sw !== undefined && typeOf(sw) === 1 && (nsOf(sw) === NONE || nsOf(sw) === OTHER) && !cache.has(dst)) {
       const cw = L.wrapElementAs(dst, Object.getPrototypeOf(sw), lnOf(sw), nsOf(sw));
       if (elementNsOther.has(sw)) elementNsOther.set(cw, elementNsOther.get(sw));
-      if (elementPrefix.has(sw)) elementPrefix.set(cw, elementPrefix.get(sw));
+      if (elementPrefix.has(sw)) { elementPrefix.set(cw, elementPrefix.get(sw)); prefixedElements++; }
     }
     if (!deep || foreignWrappers === 0) return;
     const a = N.childIds(src), b = N.childIds(dst);
@@ -1312,7 +1468,20 @@
     return toks.map((t) => '.' + L.cssEscape(t)).join('');
   }
   function getElementsByTagNameImpl(scopeId, qn) {
-    return queryCollection(scopeId, tagSelector(`${qn}`), false);
+    qn = `${qn}`;
+    // The selector engine matches the local name (HTML elements case-insensitively, others
+    // exactly), which is the spec's rule for qualified names without a prefix. Prefixed
+    // elements (createElementNS(ns, 'a:b')) only exist when a page made some.
+    if (qn !== '*' && (prefixedElements !== 0 || qn.includes(':'))) {
+      const lower = L.asciiLower(qn);
+      const compute = () => N.querySelectorAll(scopeId, '*').filter((id) => {
+        const w = wrap(id);
+        const q = qualifiedNameOf(w);
+        return nsOf(w) === HTML ? q === lower : q === qn;
+      });
+      return L.makeHTMLCollection({ kind: 3, compute }, false);
+    }
+    return queryCollection(scopeId, tagSelector(qn), false);
   }
   function getElementsByClassNameImpl(scopeId, names) {
     const sel = classSelector(names);
@@ -1745,8 +1914,22 @@
     }
     return null;
   }
+  // DOM "validate and extract" (https://dom.spec.whatwg.org/#validate-and-extract): the
+  // part before the first ':' must be a valid namespace prefix, the rest a valid element
+  // local name (the XML Name production is no longer required).
+  function validNamespacePrefix(s) { return s.length !== 0 && !/[\t\n\f\r \0/>]/.test(s); }
+  function validLocalName(s) {
+    if (s.length === 0) return false;
+    const c = s.codePointAt(0);
+    if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) return !/[\t\n\f\r \0/>]/.test(s);
+    if (c !== 0x3a && c !== 0x5f && c < 0x80) return false;
+    return /^.[-.0-9_:A-Za-z\u{80}-\u{10FFFF}]*$/su.test(s);
+  }
   function validateQName(qn, method) {
-    if (!/^[^\t\n\f\r \0/>=:]+(:[^\t\n\f\r \0/>=:]+)?$/.test(qn)) {
+    const i = qn.indexOf(':');
+    const prefix = i === -1 ? null : qn.slice(0, i);
+    const local = i === -1 ? qn : qn.slice(i + 1);
+    if ((prefix !== null && !validNamespacePrefix(prefix)) || !validLocalName(local)) {
       throw invalidChar(`Failed to execute '${method}': '${qn}' is not a valid qualified name.`);
     }
   }
@@ -2105,6 +2288,7 @@
   L.defineEventHandlers(Element.prototype, ['onfullscreenchange', 'onfullscreenerror', 'onbeforecopy', 'onbeforecut', 'onbeforepaste', 'onsearch']);
   const elementNsOther = new WeakMap();
   const elementPrefix = new WeakMap();
+  let prefixedElements = 0; // how many elements were ever given a prefix (see getElementsByTagName)
   L.elementNsOther = elementNsOther;
   L.elementPrefix = elementPrefix;
   const SHADOW_HOSTS = new Set(['article', 'aside', 'blockquote', 'body', 'div', 'footer', 'h1', 'h2', 'h3', 'h4',
@@ -2245,27 +2429,31 @@
       checkOffset(d.length, o, 'substringData');
       return d.substr(o, count >>> 0);
     },
-    appendData(data) { const id = idOf(this); setDataCore(this, id, N.getText(id) + `${data}`); },
+    appendData(data) { const id = idOf(this); const d = N.getText(id); const s = `${data}`; setDataCore(this, id, d + s, d.length, 0, s.length); },
     insertData(offset, data) {
       const id = idOf(this);
       const d = N.getText(id);
       const o = offset >>> 0;
       checkOffset(d.length, o, 'insertData');
-      setDataCore(this, id, d.slice(0, o) + `${data}` + d.slice(o));
+      const s = `${data}`;
+      setDataCore(this, id, d.slice(0, o) + s + d.slice(o), o, 0, s.length);
     },
     deleteData(offset, count) {
       const id = idOf(this);
       const d = N.getText(id);
       const o = offset >>> 0;
       checkOffset(d.length, o, 'deleteData');
-      setDataCore(this, id, d.slice(0, o) + d.slice(o + (count >>> 0)));
+      const n = Math.min(count >>> 0, d.length - o);
+      setDataCore(this, id, d.slice(0, o) + d.slice(o + n), o, n, 0);
     },
     replaceData(offset, count, data) {
       const id = idOf(this);
       const d = N.getText(id);
       const o = offset >>> 0;
       checkOffset(d.length, o, 'replaceData');
-      setDataCore(this, id, d.slice(0, o) + `${data}` + d.slice(o + (count >>> 0)));
+      const n = Math.min(count >>> 0, d.length - o);
+      const s = `${data}`;
+      setDataCore(this, id, d.slice(0, o) + s + d.slice(o + n), o, n, s.length);
     },
   });
   L.mixin(Text.prototype, {
@@ -2276,8 +2464,12 @@
       if (o > d.length) throw new DOMException(`Failed to execute 'splitText' on 'Text': The offset ${o} is larger than the Text node's length.`, 'IndexSizeError');
       const newNode = makeWrapper(N.createText(d.slice(o)), 3, Text.prototype);
       const p = N.parent(id);
-      if (p !== 0) insertCore(p, undefined, newNode, idOf(newNode), N.nextSibling(id));
-      setDataCore(this, id, d.slice(0, o));
+      if (p !== 0) {
+        const index = indexOfNode(id);
+        insertCore(p, undefined, newNode, idOf(newNode), N.nextSibling(id));
+        if (liveRanges.size !== 0) rangesOnSplit(id, idOf(newNode), o, p, index);
+      }
+      setDataCore(this, id, d.slice(0, o), o, d.length - o, 0);
       return newNode;
     },
     get wholeText() {
@@ -2557,7 +2749,7 @@
         w = L.wrapElementAs(id, Element.prototype, local, code);
         if (code === OTHER) elementNsOther.set(w, nsv);
       }
-      if (prefix !== null) elementPrefix.set(w, prefix);
+      if (prefix !== null) { elementPrefix.set(w, prefix); prefixedElements++; }
       return w;
     },
     createDocumentFragment() { return makeWrapper(N.createFragment(), 11, DocumentFragment.prototype); },
@@ -3949,23 +4141,24 @@
     get collapsed() { return this.#sc === this.#ec && this.#so === this.#eo; }
   }
   class Range extends AbstractRange {
-    #sc; #so = 0; #ec; #eo = 0;
+    #s; // live-range state {sc, so, ec, eo}, indexed by container (see rangeIndex)
     constructor() {
       super(INTERNAL);
-      this.#sc = mainDocId; this.#ec = mainDocId;
+      this.#s = newRangeState(this, mainDocId, 0, mainDocId, 0);
     }
     static {
-      L.rangeGet = (r) => [r.#sc, r.#so, r.#ec, r.#eo];
-      L.rangeSet = (r, sc, so, ec, eo) => { r.#sc = sc; r.#so = so; r.#ec = ec; r.#eo = eo; };
+      L.rangeGet = (r) => { const s = r.#s; return [s.sc, s.so, s.ec, s.eo]; };
+      L.rangeSet = (r, sc, so, ec, eo) => { setRangeState(r.#s, sc, so, ec, eo); };
     }
-    get startContainer() { return wrap(this.#sc); }
-    get startOffset() { return this.#so; }
-    get endContainer() { return wrap(this.#ec); }
-    get endOffset() { return this.#eo; }
-    get collapsed() { return this.#sc === this.#ec && this.#so === this.#eo; }
+    get startContainer() { return wrap(this.#s.sc); }
+    get startOffset() { return this.#s.so; }
+    get endContainer() { return wrap(this.#s.ec); }
+    get endOffset() { return this.#s.eo; }
+    get collapsed() { const s = this.#s; return s.sc === s.ec && s.so === s.eo; }
     get commonAncestorContainer() {
-      let a = this.#sc;
-      while (a !== 0 && !N.contains(a, this.#ec)) a = N.parent(a);
+      const s = this.#s;
+      let a = s.sc;
+      while (a !== 0 && !N.contains(a, s.ec)) a = N.parent(a);
       return wrap(a);
     }
     #setBoundary(node, offset, start, method) {
@@ -3973,13 +4166,12 @@
       if (typeOf(node) === 10) throw new DOMException(`Failed to execute '${method}' on 'Range': The node provided is of type 'DocumentType'.`, 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException(`Failed to execute '${method}' on 'Range': The offset ${off} is larger than the node's length (${nodeLength(id)}).`, 'IndexSizeError');
+      const s = this.#s;
       if (start) {
-        this.#sc = id; this.#so = off;
-        if (rootOf(id) !== rootOf(this.#ec) || bpCompare(id, off, this.#ec, this.#eo) > 0) { this.#ec = id; this.#eo = off; }
-      } else {
-        this.#ec = id; this.#eo = off;
-        if (rootOf(id) !== rootOf(this.#sc) || bpCompare(id, off, this.#sc, this.#so) < 0) { this.#sc = id; this.#so = off; }
-      }
+        if (rootOf(id) !== rootOf(s.ec) || bpCompare(id, off, s.ec, s.eo) > 0) setRangeState(s, id, off, id, off);
+        else setRangeState(s, id, off, s.ec, s.eo);
+      } else if (rootOf(id) !== rootOf(s.sc) || bpCompare(id, off, s.sc, s.so) < 0) setRangeState(s, id, off, id, off);
+      else setRangeState(s, s.sc, s.so, id, off);
     }
     setStart(node, offset) { this.#setBoundary(node, offset, true, 'setStart'); }
     setEnd(node, offset) { this.#setBoundary(node, offset, false, 'setEnd'); }
@@ -3994,61 +4186,68 @@
     setEndBefore(node) { const [p, i] = this.#parentOf(node, 'setEndBefore'); this.#setBoundary(wrap(p), i, false, 'setEndBefore'); }
     setEndAfter(node) { const [p, i] = this.#parentOf(node, 'setEndAfter'); this.#setBoundary(wrap(p), i + 1, false, 'setEndAfter'); }
     collapse(toStart = false) {
-      if (toStart) { this.#ec = this.#sc; this.#eo = this.#so; } else { this.#sc = this.#ec; this.#so = this.#eo; }
+      const s = this.#s;
+      if (toStart) setRangeState(s, s.sc, s.so, s.sc, s.so); else setRangeState(s, s.ec, s.eo, s.ec, s.eo);
     }
     selectNode(node) {
       const [p, i] = this.#parentOf(node, 'selectNode');
-      this.#sc = p; this.#so = i; this.#ec = p; this.#eo = i + 1;
+      setRangeState(this.#s, p, i, p, i + 1);
     }
     selectNodeContents(node) {
       const id = L.nodeArg(node, 'selectNodeContents', 1);
       if (typeOf(node) === 10) throw new DOMException("Failed to execute 'selectNodeContents' on 'Range': The node provided is of type 'DocumentType'.", 'InvalidNodeTypeError');
-      this.#sc = id; this.#so = 0; this.#ec = id; this.#eo = nodeLength(id);
+      setRangeState(this.#s, id, 0, id, nodeLength(id));
     }
     compareBoundaryPoints(how, sourceRange) {
-      const h = Number(how);
+      // WebIDL `unsigned short`: ToNumber, truncate, modulo 2^16 (NaN/±Infinity → 0).
+      let h = Number(how);
+      h = Number.isFinite(h) ? Math.trunc(h) % 65536 : 0;
+      if (h < 0) h += 65536;
+      if (!(sourceRange instanceof Range)) throw new TypeError("Failed to execute 'compareBoundaryPoints' on 'Range': parameter 2 is not of type 'Range'.");
       if (h !== 0 && h !== 1 && h !== 2 && h !== 3) throw new DOMException("Failed to execute 'compareBoundaryPoints' on 'Range': The comparison method provided must be one of 'START_TO_START', 'START_TO_END', 'END_TO_END', or 'END_TO_START'.", 'NotSupportedError');
       const [ssc, sso, sec, seo] = L.rangeGet(sourceRange);
-      if (rootOf(this.#sc) !== rootOf(ssc)) throw new DOMException("Failed to execute 'compareBoundaryPoints' on 'Range': The source range is in a different document than this range.", 'WrongDocumentError');
+      if (rootOf(this.#s.sc) !== rootOf(ssc)) throw new DOMException("Failed to execute 'compareBoundaryPoints' on 'Range': The source range is in a different document than this range.", 'WrongDocumentError');
       switch (h) {
-        case 0: return bpCompare(this.#sc, this.#so, ssc, sso);
-        case 1: return bpCompare(this.#ec, this.#eo, ssc, sso);
-        case 2: return bpCompare(this.#ec, this.#eo, sec, seo);
-        default: return bpCompare(this.#sc, this.#so, sec, seo);
+        case 0: return bpCompare(this.#s.sc, this.#s.so, ssc, sso);
+        case 1: return bpCompare(this.#s.ec, this.#s.eo, ssc, sso);
+        case 2: return bpCompare(this.#s.ec, this.#s.eo, sec, seo);
+        default: return bpCompare(this.#s.sc, this.#s.so, sec, seo);
       }
     }
     comparePoint(node, offset) {
       const id = L.nodeArg(node, 'comparePoint', 1);
-      if (rootOf(id) !== rootOf(this.#sc)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.", 'WrongDocumentError');
+      if (rootOf(id) !== rootOf(this.#s.sc)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided and the Range are not in the same tree.", 'WrongDocumentError');
+      if (N.nodeType(id) === 10) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException("Failed to execute 'comparePoint' on 'Range': The offset is larger than the node's length.", 'IndexSizeError');
-      if (bpCompare(id, off, this.#sc, this.#so) < 0) return -1;
-      if (bpCompare(id, off, this.#ec, this.#eo) > 0) return 1;
+      if (bpCompare(id, off, this.#s.sc, this.#s.so) < 0) return -1;
+      if (bpCompare(id, off, this.#s.ec, this.#s.eo) > 0) return 1;
       return 0;
     }
     isPointInRange(node, offset) {
       const id = L.nodeArg(node, 'isPointInRange', 1);
-      if (rootOf(id) !== rootOf(this.#sc)) return false;
+      if (rootOf(id) !== rootOf(this.#s.sc)) return false;
+      if (N.nodeType(id) === 10) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The node provided is a doctype.", 'InvalidNodeTypeError');
       const off = offset >>> 0;
       if (off > nodeLength(id)) throw new DOMException("Failed to execute 'isPointInRange' on 'Range': The offset is larger than the node's length.", 'IndexSizeError');
-      return bpCompare(id, off, this.#sc, this.#so) >= 0 && bpCompare(id, off, this.#ec, this.#eo) <= 0;
+      return bpCompare(id, off, this.#s.sc, this.#s.so) >= 0 && bpCompare(id, off, this.#s.ec, this.#s.eo) <= 0;
     }
     intersectsNode(node) {
       const id = L.nodeArg(node, 'intersectsNode', 1);
-      if (rootOf(id) !== rootOf(this.#sc)) return false;
+      if (rootOf(id) !== rootOf(this.#s.sc)) return false;
       const p = N.parent(id);
       if (p === 0) return true;
       const i = indexOfNode(id);
-      return bpCompare(p, i, this.#ec, this.#eo) < 0 && bpCompare(p, i + 1, this.#sc, this.#so) > 0;
+      return bpCompare(p, i, this.#s.ec, this.#s.eo) < 0 && bpCompare(p, i + 1, this.#s.sc, this.#s.so) > 0;
     }
     cloneRange() {
       const r = new Range();
-      L.rangeSet(r, this.#sc, this.#so, this.#ec, this.#eo);
+      L.rangeSet(r, this.#s.sc, this.#s.so, this.#s.ec, this.#s.eo);
       return r;
     }
     detach() { }
     toString() {
-      const sc = this.#sc, so = this.#so, ec = this.#ec, eo = this.#eo;
+      const sc = this.#s.sc, so = this.#s.so, ec = this.#s.ec, eo = this.#s.eo;
       if (sc === ec && N.nodeType(sc) === 3) return N.getText(sc).slice(so, eo);
       let s = '';
       if (N.nodeType(sc) === 3) s += N.getText(sc).slice(so);
@@ -4092,7 +4291,7 @@
     }
     getClientRects() { return new DOMRectList(INTERNAL, rangeRects(this).map((r) => new DOMRect(r[0], r[1], r[2], r[3]))); }
     createContextualFragment(fragment) {
-      let ctx = this.#sc;
+      let ctx = this.#s.sc;
       if (N.nodeType(ctx) !== 1) ctx = N.parent(ctx);
       const ctxW = ctx === 0 || N.nodeType(ctx) !== 1 ? null : wrap(ctx);
       const frag = parseFragment(ctxW, `${fragment}`);
@@ -4148,7 +4347,7 @@
       const data = N.getText(sc);
       N.setText(clone, data.slice(so, eo));
       N.appendChild(frag, clone);
-      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so) + data.slice(eo));
+      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so) + data.slice(eo), so, eo - so, 0);
       return frag;
     }
     let ca = sc;
@@ -4170,7 +4369,7 @@
       const data = N.getText(sc);
       N.setText(clone, data.slice(so));
       N.appendChild(frag, clone);
-      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so));
+      if (extract) setDataCore(wrap(sc), sc, data.slice(0, so), so, data.length - so, 0);
     } else if (firstPC !== 0) {
       const clone = N.cloneNode(firstPC, false);
       N.appendChild(frag, clone);
@@ -4192,7 +4391,7 @@
       const data = N.getText(ec);
       N.setText(clone, data.slice(0, eo));
       N.appendChild(frag, clone);
-      if (extract) setDataCore(wrap(ec), ec, data.slice(eo));
+      if (extract) setDataCore(wrap(ec), ec, data.slice(eo), 0, eo, 0);
     } else if (lastPC !== 0) {
       const clone = N.cloneNode(lastPC, false);
       N.appendChild(frag, clone);
@@ -4210,7 +4409,7 @@
     if (sc === ec && so === eo) return;
     if (sc === ec && isCharData(sc)) {
       const d = N.getText(sc);
-      setDataCore(wrap(sc), sc, d.slice(0, so) + d.slice(eo));
+      setDataCore(wrap(sc), sc, d.slice(0, so) + d.slice(eo), so, eo - so, 0);
       return;
     }
     const toRemove = [];
@@ -4229,9 +4428,9 @@
       while (N.parent(ref) !== 0 && !N.contains(N.parent(ref), ec)) ref = N.parent(ref);
       newNode = N.parent(ref); newOffset = indexOfNode(ref) + 1;
     }
-    if (isCharData(sc)) { const d = N.getText(sc); setDataCore(wrap(sc), sc, d.slice(0, so)); }
+    if (isCharData(sc)) { const d = N.getText(sc); setDataCore(wrap(sc), sc, d.slice(0, so), so, d.length - so, 0); }
     for (const c of toRemove) { const p = N.parent(c); if (p !== 0) removeCore(p, undefined, c); }
-    if (isCharData(ec) && ec !== sc) { const d = N.getText(ec); setDataCore(wrap(ec), ec, d.slice(eo)); }
+    if (isCharData(ec) && ec !== sc) { const d = N.getText(ec); setDataCore(wrap(ec), ec, d.slice(eo), 0, eo, 0); }
     L.rangeSet(r, newNode, newOffset, newNode, newOffset);
   }
   function rangeInsert(r, node) {
@@ -4791,7 +4990,7 @@
           w = L.wrapElementAs(id, code === HTML ? L.elementProtoFor(local, HTML) : Element.prototype, local, code === HTML ? HTML : code);
           if (code === OTHER) elementNsOther.set(w, nsURI);
         }
-        if (prefix !== null) elementPrefix.set(w, prefix);
+        if (prefix !== null) { elementPrefix.set(w, prefix); prefixedElements++; }
         for (const [an, av] of attrs) N.setAttr(id, an, av);
         N.appendChild(parent.id, id);
         if (stack.length === 1) sawRoot = true;
@@ -4976,7 +5175,8 @@
     constructor(token, doc) { if (token !== INTERNAL) throw L.illegal(); this.#doc = doc; }
     createDocumentType(qualifiedName, publicId, systemId) {
       const qn = `${qualifiedName}`;
-      validateQName(qn, 'createDocumentType');
+      // A valid doctype name: no ASCII whitespace, NUL or '>' (the empty name is valid).
+      if (/[\t\n\f\r \0>]/.test(qn)) throw invalidChar(`Failed to execute 'createDocumentType' on 'DOMImplementation': The qualified name provided ('${qn}') contains an invalid character.`);
       return makeDoctype(qn, `${publicId}`, `${systemId}`);
     }
     createDocument(namespace, qualifiedName, doctype = null) {

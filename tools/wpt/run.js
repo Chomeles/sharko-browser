@@ -76,12 +76,14 @@ if (!fs.existsSync(path.join(wptDir, 'resources', 'testharness.js'))) {
   process.exit(2);
 }
 
-// Install the vendor hook. WPT ships a stub; we always overwrite it so a fresh
+// Install the vendor hooks. WPT ships stubs; we always overwrite them so a fresh
 // checkout works too.
-const hook = path.join(__dirname, 'testharnessreport.js');
-const hookTarget = path.join(wptDir, 'resources', 'testharnessreport.js');
-if (fs.readFileSync(hook, 'utf8') !== fs.readFileSync(hookTarget, 'utf8')) {
-  fs.copyFileSync(hook, hookTarget);
+for (const name of ['testharnessreport.js', 'testdriver-vendor.js']) {
+  const hook = path.join(__dirname, name);
+  const hookTarget = path.join(wptDir, 'resources', name);
+  if (fs.readFileSync(hook, 'utf8') !== fs.readFileSync(hookTarget, 'utf8')) {
+    fs.copyFileSync(hook, hookTarget);
+  }
 }
 
 // ---- enumeration --------------------------------------------------------------
@@ -360,6 +362,8 @@ async function runAll() {
       done++;
       if (!verbose && process.stderr.isTTY) {
         process.stderr.write(`\r${done}/${tests.length} ${tests[i].id.slice(0, 70).padEnd(70)}`);
+      } else if (!verbose && done % 50 === 0) {
+        process.stderr.write(`${done}/${tests.length} after ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
       }
       if (verbose) printResult(results[i]);
     }

@@ -2,7 +2,7 @@
 //! evaluate JavaScript and report timings. Used for automated testing.
 
 use crate::{Browser, BrowserEvent, BrowserOptions, TabId};
-use common::protocol::{FromRenderer, LoadEvent, ToRenderer, ViewportInfo};
+use common::protocol::{FromRenderer, InputEvent, LoadEvent, Modifiers, ToRenderer, ViewportInfo};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -67,12 +67,83 @@ impl Default for HeadlessOptions {
 
 struct Driver {
     browser: Browser,
-    #[allow(dead_code)]
     tab: TabId,
     print_console: bool,
     /// Batch mode collects the console per URL instead of printing it.
     collect_console: bool,
     console: Vec<(String, String)>,
+    /// State of the page-driven input (`__sharko_testdriver` requests, see
+    /// tools/wpt/testdriver-vendor.js): pointer position, held buttons and modifiers.
+    td_seq: u64,
+    pointer: (f32, f32),
+    buttons: u8,
+    mods: Modifiers,
+}
+
+const TESTDRIVER_PREFIX: &str = "__sharko_testdriver ";
+
+/// DOM `key`/`code` (and produced text) for a character of a WebDriver key string
+/// (https://w3c.github.io/webdriver/#keyboard-actions: U+E000.. are special keys).
+fn webdriver_key(c: char) -> (String, String, Option<String>) {
+    let special = match c {
+        '\u{E003}' => Some(("Backspace", "Backspace")),
+        '\u{E004}' => Some(("Tab", "Tab")),
+        '\u{E005}' => Some(("Clear", "")),
+        '\u{E006}' => Some(("Enter", "Enter")),
+        '\u{E007}' => Some(("Enter", "NumpadEnter")),
+        '\u{E008}' => Some(("Shift", "ShiftLeft")),
+        '\u{E009}' => Some(("Control", "ControlLeft")),
+        '\u{E00A}' => Some(("Alt", "AltLeft")),
+        '\u{E00B}' => Some(("Pause", "Pause")),
+        '\u{E00C}' => Some(("Escape", "Escape")),
+        '\u{E00D}' => Some((" ", "Space")),
+        '\u{E00E}' => Some(("PageUp", "PageUp")),
+        '\u{E00F}' => Some(("PageDown", "PageDown")),
+        '\u{E010}' => Some(("End", "End")),
+        '\u{E011}' => Some(("Home", "Home")),
+        '\u{E012}' => Some(("ArrowLeft", "ArrowLeft")),
+        '\u{E013}' => Some(("ArrowUp", "ArrowUp")),
+        '\u{E014}' => Some(("ArrowRight", "ArrowRight")),
+        '\u{E015}' => Some(("ArrowDown", "ArrowDown")),
+        '\u{E016}' => Some(("Insert", "Insert")),
+        '\u{E017}' => Some(("Delete", "Delete")),
+        '\u{E03D}' => Some(("Meta", "MetaLeft")),
+        '\u{E050}' => Some(("Shift", "ShiftRight")),
+        '\u{E051}' => Some(("Control", "ControlRight")),
+        '\u{E052}' => Some(("Alt", "AltRight")),
+        '\u{E053}' => Some(("Meta", "MetaRight")),
+        _ => None,
+    };
+    if let Some((key, code)) = special {
+        let text = if key == " " || key == "Enter" { Some(key.to_string()) } else { None };
+        return (key.to_string(), code.to_string(), text);
+    }
+    if ('\u{E031}'..='\u{E03C}').contains(&c) {
+        let n = c as u32 - 0xE031 + 1;
+        return (format!("F{n}"), format!("F{n}"), None);
+    }
+    let code = if c.is_ascii_alphabetic() {
+        format!("Key{}", c.to_ascii_uppercase())
+    } else if c.is_ascii_digit() {
+        format!("Digit{c}")
+    } else if c == ' ' {
+        "Space".to_string()
+    } else {
+        String::new()
+    };
+    (c.to_string(), code, Some(c.to_string()))
+}
+
+/// The `buttons` bit of a DOM/WebDriver button number.
+fn button_bit(button: u8) -> u8 {
+    match button {
+        0 => 1,
+        1 => 4,
+        2 => 2,
+        3 => 8,
+        4 => 16,
+        _ => 0,
+    }
 }
 
 /// JSON string literal (for the batch-mode result lines; no serde dependency here).
@@ -111,6 +182,11 @@ impl Driver {
                 Ok(ev) => {
                     if let Some(ev) = self.browser.process_event(ev) {
                         if let BrowserEvent::Tab(_, FromRenderer::Console { level, message }) = &ev {
+                            if level == "log" && message.starts_with(TESTDRIVER_PREFIX) {
+                                let payload = message[TESTDRIVER_PREFIX.len()..].to_string();
+                                self.testdriver(&payload);
+                                continue;
+                            }
                             if self.collect_console {
                                 if self.console.len() < 200 {
                                     self.console.push((level.clone(), message.clone()));
@@ -131,6 +207,112 @@ impl Driver {
                 Err(_) => return None,
             }
         }
+    }
+
+    fn input(&mut self, ev: InputEvent) {
+        self.browser.send(self.tab, ToRenderer::Input(ev));
+    }
+
+    fn key(&mut self, c: char, down: bool) {
+        let (key, code, text) = webdriver_key(c);
+        match key.as_str() {
+            "Shift" => self.mods.shift = down,
+            "Control" => self.mods.ctrl = down,
+            "Alt" => self.mods.alt = down,
+            "Meta" => self.mods.meta = down,
+            _ => {}
+        }
+        let mods = self.mods;
+        if down {
+            self.input(InputEvent::KeyDown { key, code, text, repeat: false, location: 0, mods });
+        } else {
+            self.input(InputEvent::KeyUp { key, code, location: 0, mods });
+        }
+    }
+
+    /// A `test_driver` request from the page (tools/wpt/testdriver-vendor.js): perform
+    /// the input natively, then resolve the page's promise.
+    fn testdriver(&mut self, payload: &str) {
+        let v: serde_json::Value = match serde_json::from_str(payload) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let id = v["id"].as_i64().unwrap_or(0);
+        let cmd = v["cmd"].as_str().unwrap_or("").to_string();
+        let args = v["args"].clone();
+        let mut err: Option<String> = None;
+        let f = |v: &serde_json::Value| v.as_f64().unwrap_or(0.0) as f32;
+        match cmd.as_str() {
+            "click" => {
+                let (x, y) = (f(&args["x"]), f(&args["y"]));
+                let mods = self.mods;
+                self.input(InputEvent::MouseMove { x, y, buttons: 0, mods });
+                self.input(InputEvent::MouseDown { x, y, button: 0, buttons: 1, mods });
+                self.input(InputEvent::MouseUp { x, y, button: 0, buttons: 0, mods });
+                self.pointer = (x, y);
+            }
+            "keys" => {
+                for c in args["keys"].as_str().unwrap_or("").chars() {
+                    self.key(c, true);
+                    self.key(c, false);
+                }
+            }
+            "actions" => {
+                for step in args.as_array().cloned().unwrap_or_default() {
+                    let mods = self.mods;
+                    match step["t"].as_str().unwrap_or("") {
+                        "move" => {
+                            let (x, y) = (f(&step["x"]), f(&step["y"]));
+                            self.pointer = (x, y);
+                            let buttons = self.buttons;
+                            self.input(InputEvent::MouseMove { x, y, buttons, mods });
+                        }
+                        "down" => {
+                            let button = step["button"].as_u64().unwrap_or(0) as u8;
+                            self.buttons |= button_bit(button);
+                            let (x, y) = self.pointer;
+                            let buttons = self.buttons;
+                            self.input(InputEvent::MouseDown { x, y, button, buttons, mods });
+                        }
+                        "up" => {
+                            let button = step["button"].as_u64().unwrap_or(0) as u8;
+                            self.buttons &= !button_bit(button);
+                            let (x, y) = self.pointer;
+                            let buttons = self.buttons;
+                            self.input(InputEvent::MouseUp { x, y, button, buttons, mods });
+                        }
+                        "keydown" | "keyup" => {
+                            let down = step["t"] == "keydown";
+                            for c in step["key"].as_str().unwrap_or("").chars() {
+                                self.key(c, down);
+                            }
+                        }
+                        "wheel" => {
+                            let (x, y) = (f(&step["x"]), f(&step["y"]));
+                            let dx = step["dx"].as_f64().unwrap_or(0.0);
+                            let dy = step["dy"].as_f64().unwrap_or(0.0);
+                            self.input(InputEvent::Wheel { x, y, dx, dy, mods });
+                        }
+                        "pause" => {
+                            let ms = step["ms"].as_u64().unwrap_or(0).min(10_000);
+                            self.pump_until(Duration::from_millis(ms), |_| false);
+                        }
+                        other => err = Some(format!("unknown action {other}")),
+                    }
+                }
+            }
+            other => err = Some(format!("{other} is not implemented by Sharko's testdriver")),
+        }
+        let source = match err {
+            None => format!("__sharko_testdriver_done({id}, null)"),
+            Some(e) => format!(
+                "__sharko_testdriver_done({id}, {})",
+                serde_json::to_string(&e).unwrap_or_default()
+            ),
+        };
+        let id = 7000 + self.td_seq;
+        self.td_seq += 1;
+        self.browser.send(self.tab, ToRenderer::Eval { id, source });
     }
 }
 
@@ -164,6 +346,10 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
         print_console: opts.print_console,
         collect_console: opts.batch,
         console: Vec::new(),
+        td_seq: 0,
+        pointer: (0.0, 0.0),
+        buttons: 0,
+        mods: Modifiers::default(),
     };
 
     if opts.batch {

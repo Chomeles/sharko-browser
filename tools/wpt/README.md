@@ -67,3 +67,9 @@ How it works: `testharnessreport.js` (this directory) is copied over the WPT stu
 the same name; when a test file completes it stores the results on
 `window.__wpt_done`, which the runner polls with `--wait-for=window.__wpt_done` and
 reads with `--eval`.
+
+`testdriver-vendor.js` (also copied into the checkout) backs `test_driver.click()`,
+`send_keys()` and `Actions` sequences: the page prints a `__sharko_testdriver {...}`
+console line, the headless driver performs the input natively (mouse, keys, wheel,
+pauses; real hit-testing and focus) and resolves the request through
+`__sharko_testdriver_done()`. This works in any headless run, not only under WPT.
