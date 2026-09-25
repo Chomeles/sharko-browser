@@ -64,6 +64,7 @@ class MockNative {
     this.cloneInRealm = vm.runInContext(CLONE_SRC, this.ctx);
     this.templateContents = new Map();
     this.shadowHosts = new Set(); // ids passed to N.setShadowHost(id, true)
+    this.adoptedSheets = new Map(); // host id (0 = document) -> [[css, baseURL], ...] from N.setAdoptedSheets
     this.definedIds = new Set(); // ids passed to N.setDefined(id)
     this.docId = this.createNode({ type: 9 });
     this.verbose = !!process.env.VERBOSE;
@@ -505,6 +506,7 @@ class MockNative {
       },
       templateContent: (id) => (M.isTemplate(M.n(id)) ? M.templateContentOf(id) : 0),
       setShadowHost: (id, on) => { M.n(id); if (on) M.shadowHosts.add(id); else M.shadowHosts.delete(id); },
+      setAdoptedSheets: (hostId, sources, bases) => { if (hostId !== 0) M.n(hostId); M.adoptedSheets.set(hostId, sources.map((s, i) => [s, bases[i]])); },
       setDefined: (id) => { M.n(id); M.definedIds.add(id); },
       appendChild: (p, c) => nat.insertBefore(p, c, 0),
       insertBefore: (p, c, ref) => {

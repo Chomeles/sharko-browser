@@ -312,6 +312,9 @@ pub struct BaseDocument {
     pub(crate) nodes_to_id: HashMap<String, SmallVec<[NodeId; 1]>>,
     /// Map of `<style>` and `<link>` node IDs to their associated stylesheet
     pub(crate) nodes_to_stylesheet: BTreeMap<NodeId, DocumentStyleSheet>,
+    /// PATCH: `adoptedStyleSheets` of the document (`None`) and of emulated shadow roots
+    /// (their host), in the cascade after every `<style>`/`<link>` sheet.
+    pub(crate) adopted_stylesheets: Vec<(Option<NodeId>, Vec<DocumentStyleSheet>)>,
     /// PATCH: the source text of each `<link rel=stylesheet>`'s sheet (CSSOM `cssRules`).
     pub(crate) linked_sheet_sources: HashMap<NodeId, std::sync::Arc<str>>,
     /// Stylesheets added by the useragent
@@ -519,6 +522,7 @@ impl BaseDocument {
             url: base_url,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
+            adopted_stylesheets: Vec::new(),
             linked_sheet_sources: HashMap::new(),
             font_ctx,
             #[cfg(feature = "parallel-construct")]
@@ -1521,6 +1525,8 @@ impl BaseDocument {
             .next()
             .map(|(_, sheet)| sheet);
 
+        // PATCH: adopted stylesheets stay behind every node's sheet.
+        let insertion_point = insertion_point.or_else(|| self.first_adopted_stylesheet());
         if let Some(insertion_point) = insertion_point {
             self.stylist.insert_stylesheet_before(
                 stylesheet,
@@ -1530,6 +1536,63 @@ impl BaseDocument {
         } else {
             self.stylist
                 .append_stylesheet(stylesheet, &self.guard.read())
+        }
+    }
+
+    fn first_adopted_stylesheet(&self) -> Option<&DocumentStyleSheet> {
+        self.adopted_stylesheets
+            .iter()
+            .flat_map(|(_, sheets)| sheets.iter())
+            .next()
+    }
+
+    /// PATCH: replace the `adoptedStyleSheets` of the document (`host` = `None`) or of the
+    /// emulated shadow tree of `host` with the given sheet sources and base URLs (in
+    /// cascade order; a shadow root's sheets are scoped to its host like its `<style>`
+    /// elements). Adopted sheets come after all `<style>`/`<link>` sheets, the document's
+    /// before the shadow roots'.
+    pub fn set_adopted_stylesheets(
+        &mut self,
+        host: Option<NodeId>,
+        sources: &[(String, Option<String>)],
+    ) {
+        for (_, sheets) in &self.adopted_stylesheets {
+            for sheet in sheets {
+                self.stylist.remove_stylesheet(sheet.clone(), &self.guard.read());
+            }
+        }
+        self.adopted_stylesheets.retain(|(h, _)| *h != host);
+        if !sources.is_empty() {
+            let sheets = sources
+                .iter()
+                .map(|(css, base)| {
+                    let url_data = base
+                        .as_deref()
+                        .and_then(|b| url::Url::parse(b).ok())
+                        .map(|u| UrlExtraData(ServoArc::new(u)))
+                        .unwrap_or_else(|| self.url.url_extra_data());
+                    let css = match host {
+                        Some(host) => crate::shadow_css::scope_shadow_css(css, &host.to_string()),
+                        None => css.clone(),
+                    };
+                    self.make_stylesheet_at(css, Origin::Author, MediaList::empty(), url_data)
+                })
+                .collect();
+            let at = if host.is_none() {
+                0
+            } else {
+                self.adopted_stylesheets.len()
+            };
+            self.adopted_stylesheets.insert(at, (host, sheets));
+        }
+        for (_, sheets) in &self.adopted_stylesheets {
+            for sheet in sheets {
+                self.stylist.append_stylesheet(sheet.clone(), &self.guard.read());
+            }
+        }
+        self.stylist.force_stylesheet_origins_dirty(OriginSet::all());
+        if let Some(root) = self.try_root_element().map(|n| n.id) {
+            self.nodes[root].set_restyle_hint(crate::RestyleHint::restyle_subtree());
         }
     }
 

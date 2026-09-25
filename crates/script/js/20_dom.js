@@ -2537,6 +2537,9 @@
     get fullscreenElement() { return null; },
     get pointerLockElement() { return null; },
     get pictureInPictureElement() { return null; },
+    get adoptedStyleSheets() { return L.adoptedStyleSheetsOf(this); },
+    set adoptedStyleSheets(v) { L.setAdoptedStyleSheets(this, v); },
+    get styleSheets() { return srInfo(this).sheets || (srInfo(this).sheets = new StyleSheetList(INTERNAL, this)); },
     getSelection() { return L.getSelection ? L.getSelection() : null; },
     elementFromPoint(x, y) { return document.elementFromPoint(x, y); },
     elementsFromPoint(x, y) { return document.elementsFromPoint(x, y); },
@@ -2956,6 +2959,8 @@
     queryCommandSupported() { return false; },
     queryCommandValue() { return ''; },
     get styleSheets() { return docCollection(this, 'sheets', () => new StyleSheetList(INTERNAL, this)); },
+    get adoptedStyleSheets() { return L.adoptedStyleSheetsOf(this); },
+    set adoptedStyleSheets(v) { L.setAdoptedStyleSheets(this, v); },
     get fonts() { return this === document ? L.fonts : null; },
     getSelection() { return this === document && L.getSelection ? L.getSelection() : null; },
     elementFromPoint(x, y) {
@@ -3005,10 +3010,16 @@
   const dirtySheets = new Set();
   let sheetFlushQueued = false;
   L.flushSheets = function () {
-    if (dirtySheets.size === 0) return;
-    const list = Array.from(dirtySheets);
-    dirtySheets.clear();
-    for (const s of list) flushSheet(s);
+    if (dirtySheets.size !== 0) {
+      const list = Array.from(dirtySheets);
+      dirtySheets.clear();
+      for (const s of list) flushSheet(s);
+    }
+    if (adoptedDirty.size !== 0) {
+      const roots = Array.from(adoptedDirty);
+      adoptedDirty.clear();
+      for (const root of roots) flushAdopted(root);
+    }
   };
   function markSheetDirty(sheet) {
     dirtySheets.add(sheet);
@@ -3572,6 +3583,7 @@
       const b = !!v;
       if (d.disabled === b) return;
       d.disabled = b;
+      if (d.adopters) for (const root of d.adopters) adoptedChanged(root);
       if (d.owner && lnOf(d.owner) === 'style') {
         // approximate: disabling a <style> sheet empties its rendered text
         if (b) { d.savedText = N.textContent(idOf(d.owner)); N.setTextContent(idOf(d.owner), ''); d.text = ''; }
@@ -3584,7 +3596,12 @@
     constructor(options) {
       super(INTERNAL);
       const o = options || {};
-      sheetData.set(this, { owner: null, rules: [], text: '', rewrite: false, pending: '', disabled: !!o.disabled, href: null, constructed: true, media: o.media ? `${o.media}` : '' });
+      let baseURL = null;
+      if (o.baseURL !== undefined) {
+        baseURL = L.resolveURL(`${o.baseURL}`);
+        if (baseURL === null || baseURL === '') throw new DOMException("Failed to construct 'CSSStyleSheet': Invalid base URL.", 'NotAllowedError');
+      }
+      sheetData.set(this, { owner: null, rules: [], text: '', rewrite: false, pending: '', disabled: !!o.disabled, href: null, constructed: true, media: o.media ? `${o.media}` : '', adopters: new Set(), baseURL });
     }
     get ownerRule() { return null; }
     get cssRules() {
@@ -3604,6 +3621,7 @@
       const text = `${rule}`;
       const items = splitRules(text);
       if (items.length !== 1) throw new DOMException(`Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '${text}'.`, 'SyntaxError');
+      if (d.constructed && /^@import\b/i.test(items[0].prelude)) throw new DOMException("Failed to execute 'insertRule' on 'CSSStyleSheet': Can't insert @import rules into a constructed stylesheet.", 'SyntaxError');
       const r = makeRule(items[0], this, null);
       d.rules.splice(idx, 0, r);
       if (idx === d.rules.length - 1 && !d.rewrite) d.pending += (d.pending ? '\n' : '') + ruleText(r);
@@ -3668,7 +3686,14 @@
   }
   function flushSheet(s) {
     const d = sheetData.get(s);
-    if (d === undefined || d.owner === null || d.linked) { if (d) { d.pending = ''; d.rewrite = false; } return; }
+    if (d === undefined || d.owner === null || d.linked) {
+      if (d) {
+        d.pending = ''; d.rewrite = false;
+        // A constructed sheet applies through the roots that adopted it.
+        if (d.adopters) for (const root of d.adopters) adoptedDirty.add(root);
+      }
+      return;
+    }
     const id = idOf(d.owner);
     if (d.rewrite) {
       const text = d.rules.map(ruleText).join('\n');
@@ -3694,6 +3719,108 @@
       ownerSheets.set(el, s);
     }
     return s;
+  };
+
+  // --- adoptedStyleSheets: an ObservableArray<CSSStyleSheet> per document / shadow root ---
+  // Mutations (index and length writes, the attribute setter) are validated like the
+  // WebIDL set/delete algorithms and re-apply the root's adopted sheets natively (their
+  // rule text, after every <style>/<link> sheet; scoped to the host for a shadow root).
+  const adoptedArrays = new WeakMap(); // document or shadow root -> proxy
+  const adoptedTargets = new WeakMap(); // proxy -> backing array
+  const adoptedDirty = new Set();
+  const isIndexKey = (key) => typeof key === 'string' && /^(?:0|[1-9]\d*)$/.test(key) && Number(key) < 4294967295;
+  function checkAdoptable(v) {
+    if (!(v instanceof CSSStyleSheet)) throw new TypeError("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': Failed to convert value to 'CSSStyleSheet'.");
+    if (!sheetDataOf(v).constructed) throw new DOMException("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': Can't adopt non-constructed stylesheets.", 'NotAllowedError');
+  }
+  function adoptedChanged(root) {
+    adoptedDirty.add(root);
+    if (!sheetFlushQueued) {
+      sheetFlushQueued = true;
+      L.microtask(() => { sheetFlushQueued = false; L.flushSheets(); });
+    }
+  }
+  function adoptedHostId(root) {
+    if (root === document) return 0;
+    if (isShadowRoot(root)) return idOf(shadowInfo.get(root).host);
+    return -1; // other documents render nothing
+  }
+  function flushAdopted(root) {
+    const hostId = adoptedHostId(root);
+    if (hostId < 0) return;
+    const sheets = Array.from(adoptedTargets.get(adoptedArrays.get(root)), (s) => {
+      const d = sheetDataOf(s);
+      d.adopters.add(root);
+      if (d.disabled) return null;
+      const text = d.rules.map(ruleText).join('\n');
+      return [d.media ? `@media ${d.media} {\n${text}\n}` : text, d.baseURL];
+    }).filter((x) => x !== null);
+    N.setAdoptedSheets(hostId, sheets.map((x) => x[0]), sheets.map((x) => x[1]));
+  }
+  L.adoptedStyleSheetsOf = function (root) {
+    let p = adoptedArrays.get(root);
+    if (p !== undefined) return p;
+    const t = [];
+    const setIndexed = (key, value) => {
+      const i = Number(key);
+      if (i > t.length) throw new RangeError("Failed to set an indexed property on 'ObservableArray': The index is out of range.");
+      checkAdoptable(value);
+      // Own data property, not [[Set]]: an accessor on Array.prototype must never see
+      // the backing array.
+      Object.defineProperty(t, i, { value, writable: true, enumerable: true, configurable: true });
+      adoptedChanged(root);
+      return true;
+    };
+    const setLength = (value) => {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 0 || n > 4294967295) throw new RangeError('Invalid array length');
+      if (n > t.length) throw new RangeError("Failed to set the 'length' property on 'ObservableArray': The provided value is larger than the current length.");
+      if (n !== t.length) { t.length = n; adoptedChanged(root); }
+      return true;
+    };
+    p = new Proxy(t, {
+      set(target, key, value) {
+        if (isIndexKey(key)) return setIndexed(key, value);
+        if (key === 'length') return setLength(value);
+        return Reflect.set(target, key, value);
+      },
+      defineProperty(target, key, desc) {
+        if (isIndexKey(key) || key === 'length') {
+          if (!('value' in desc) || desc.get !== undefined || desc.set !== undefined) return false;
+          return key === 'length' ? setLength(desc.value) : setIndexed(key, desc.value);
+        }
+        return Reflect.defineProperty(target, key, desc);
+      },
+      deleteProperty(target, key) {
+        if (isIndexKey(key)) {
+          if (Number(key) !== t.length - 1) return false;
+          t.length -= 1;
+          adoptedChanged(root);
+          return true;
+        }
+        return Reflect.deleteProperty(target, key);
+      },
+    });
+    adoptedArrays.set(root, p);
+    adoptedTargets.set(p, t);
+    return p;
+  };
+  L.setAdoptedStyleSheets = function (root, value) {
+    if (value === null || value === undefined || typeof value[Symbol.iterator] !== 'function') {
+      throw new TypeError("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': The provided value cannot be converted to a sequence.");
+    }
+    // (Array.from, not push: setters installed on Array.prototype must not observe the list.)
+    const items = Array.from(value, (v) => {
+      if (!(v instanceof CSSStyleSheet)) throw new TypeError("Failed to set the 'adoptedStyleSheets' property on 'DocumentOrShadowRoot': Failed to convert value to 'CSSStyleSheet'.");
+      return v;
+    });
+    const t = adoptedTargets.get(L.adoptedStyleSheetsOf(root));
+    t.length = 0;
+    adoptedChanged(root);
+    for (const v of items) {
+      checkAdoptable(v);
+      Object.defineProperty(t, t.length, { value: v, writable: true, enumerable: true, configurable: true });
+    }
   };
   class StyleSheetList {
     #doc;

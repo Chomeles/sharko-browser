@@ -129,6 +129,7 @@ natives_table! {
     "cloneNode" => tree::n_clone_node,
     "templateContent" => tree::n_template_content,
     "setShadowHost" => tree::n_set_shadow_host,
+    "setAdoptedSheets" => tree::n_set_adopted_sheets,
     "setDefined" => tree::n_set_defined,
     "releaseNode" => tree::n_release_node,
     // Mutation

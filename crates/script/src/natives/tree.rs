@@ -262,6 +262,33 @@ pub(crate) fn n_set_shadow_host(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.setAdoptedSheets(hostId, sources, baseURLs)`: the `adoptedStyleSheets` of
+/// the document (`hostId` 0) or of the shadow root hosted by `hostId`, as CSS source texts
+/// in cascade order (constructed sheets have no owner node, so their text is passed here)
+/// with the base URL of each (`null`: the document's).
+pub(crate) fn n_set_adopted_sheets(cx: &mut Cx) -> NResult {
+    let mut sources = Vec::new();
+    if let Ok(arr) = v8::Local::<v8::Array>::try_from(cx.arg(1)) {
+        let bases = v8::Local::<v8::Array>::try_from(cx.arg(2)).ok();
+        for i in 0..arr.length() {
+            let Some(v) = arr.get_index(cx.scope, i) else { return Err(JsErr::Thrown) };
+            let base = bases
+                .and_then(|b| b.get_index(cx.scope, i))
+                .filter(|b| b.is_string())
+                .map(|b| b.to_rust_string_lossy(cx.scope));
+            sources.push((v.to_rust_string_lossy(cx.scope), base));
+        }
+    }
+    let doc = cx.st.doc()?;
+    let host = cx.opt_node(doc, 0)?;
+    if host.is_none_or(|h| doc.get_node(h).is_some_and(|n| n.is_element())) {
+        doc.set_adopted_stylesheets(host, &sources);
+        cx.st.invalidate_layout();
+    }
+    cx.ret_undefined();
+    Ok(())
+}
+
 /// Addition: `N.setDefined(id)`: the custom element `id` was upgraded (or created from
 /// its definition), so CSS `:defined` matches it.
 pub(crate) fn n_set_defined(cx: &mut Cx) -> NResult {

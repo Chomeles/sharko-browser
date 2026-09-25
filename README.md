@@ -189,8 +189,9 @@ and reports differences (for layout development).
   (no parallelism yet, no module workers or SharedWorker)
 - iframes (also nested ones) run JavaScript in their own runtime and talk to each other
   with `postMessage` (enough for consent dialogs); a page can't reach into same-origin
-  iframes' documents yet; Shadow DOM is emulated (styles are scoped,
-  declarative shadow roots work, but the shadow tree is part of the normal DOM);
+  iframes' documents yet; Shadow DOM is emulated (styles are scoped, `adoptedStyleSheets`
+  and declarative shadow roots work, but the shadow tree is part of the normal DOM and
+  document styles reach into it);
   `position: sticky` only vertically
 - Web Crypto covers SHA, HMAC, AES (GCM/CBC/CTR/KW), PBKDF2 and HKDF; no ECDSA, ECDH,
   RSA or Ed25519 yet
