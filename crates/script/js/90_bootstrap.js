@@ -443,11 +443,16 @@
       if (asyncMayRun(w.rec)) { asyncWaiting.splice(i, 1); L.postTask(w.run); } else i++;
     }
   }
+  // Parser-blocking scripts written (document.write) during the current parser step,
+  // already queued ahead of the rest: later writes queue behind them (two written
+  // `<script src>`s ran in reverse order when the second one arrived first).
+  let writtenQueued = 0;
   function pumpParser() {
     if (parserQueue.length === 0) { finishParsing(); return; }
     const rec = parserQueue[0];
     if (rec.state === 'pending') return;
     parserQueue.shift();
+    writtenQueued = 0;
     if (asyncWaiting.length) releaseAsync();
     L.internalTimeout(pumpParser, 0); // next parser step runs in its own task
     if (rec.state === 'error') { fireScriptEvent(rec.el, 'error'); return; }
@@ -686,7 +691,10 @@
       const kind = scheduleParserRecord(rec);
       if (kind === 'blocking') { queued.push(rec); blocked = true; }
     }
-    if (queued.length) parserQueue = queued.concat(parserQueue);
+    if (queued.length) {
+      parserQueue.splice(Math.min(writtenQueued, parserQueue.length), 0, ...queued);
+      writtenQueued += queued.length;
+    }
   }
   function writeAtInsertionPoint(ws, html) {
     // pure closing tags close previously written open elements
