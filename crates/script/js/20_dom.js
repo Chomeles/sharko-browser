@@ -70,6 +70,9 @@
     constructor() { throw L.illegal(); }
   }
   class Document extends Node {
+    // HTML "parse HTML from a string" without sanitization (scripts are not run), like
+    // DOMParser's text/html path.
+    static parseHTMLUnsafe(html) { return L.createDetachedDocument('html', `${html}`); }
     constructor() { return L.createDetachedDocument('xml', null, new.target.prototype); }
   }
   class HTMLDocument extends Document {

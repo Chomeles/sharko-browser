@@ -20,9 +20,10 @@ git sparse-checkout set --no-cone /wpt /wpt.py /docs/commands.json resources com
   web-animations FileAPI webstorage IndexedDB console webmessaging eventsource compat cors \
   hr-time performance-timeline resource-timing user-timing
 
-# 2. Host names (web-platform.test and friends) and the test CA.
+# 2. Host names (web-platform.test and friends). The test CA needs no system install:
+#    run.js passes it to the browser as SHARKO_EXTRA_CA (a PEM bundle trusted in
+#    addition to the OS store; also handy for corporate proxies).
 ./wpt make-hosts-file | sudo tee -a /etc/hosts
-sudo cp tools/certs/cacert.pem /usr/local/share/ca-certificates/wpt-ca.crt && sudo update-ca-certificates
 
 # 3. The test server (keep it running; it needs Python 3).
 ./wpt serve --no-h2

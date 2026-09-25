@@ -179,6 +179,20 @@ if (!tests.length) {
 const noProxy = [process.env.NO_PROXY || process.env.no_proxy, 'web-platform.test', '.web-platform.test']
   .filter(Boolean)
   .join(',');
+// The test server's CA (for the .https. tests), trusted in addition to the OS store.
+const wptCa = path.join(wptDir, 'tools', 'certs', 'cacert.pem');
+const browserEnv = {
+  ...process.env,
+  NO_PROXY: noProxy,
+  no_proxy: noProxy,
+  SHARKO_EXTRA_CA: [process.env.SHARKO_EXTRA_CA, fs.existsSync(wptCa) ? wptCa : null].filter(Boolean).join(path.delimiter),
+};
+
+/** SIGKILL a browser and its process group (renderer and network processes). */
+function killGroup(child) {
+  try { process.kill(-child.pid, 'SIGKILL'); } catch (_) {}
+  try { child.kill('SIGKILL'); } catch (_) {}
+}
 
 function runOne(test, n) {
   return new Promise((resolve) => {
@@ -195,15 +209,17 @@ function runOne(test, n) {
       test.url,
     ];
     const t0 = Date.now();
+    // Own process group, so a timeout kill also takes the renderer/network children.
     const child = spawn(browser, argv, {
-      env: { ...process.env, NO_PROXY: noProxy, no_proxy: noProxy },
+      env: browserEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d));
     child.stderr.on('data', (d) => (stderr += d));
-    const killer = setTimeout(() => child.kill('SIGKILL'), timeout + 10000);
+    const killer = setTimeout(() => killGroup(child), timeout + 10000);
     child.on('close', (code, signal) => {
       clearTimeout(killer);
       fs.rmSync(profile, { recursive: true, force: true });
@@ -253,7 +269,7 @@ class BatchBrowser {
     this.child = spawn(
       browser,
       ['--headless', '--batch', `--profile=${this.profile}`, '--settle=0', '--wait-for=window.__wpt_done', '--eval=JSON.stringify(window.__wpt_done)', 'about:blank'],
-      { env: { ...process.env, NO_PROXY: noProxy, no_proxy: noProxy }, stdio: ['pipe', 'pipe', 'pipe'] },
+      { env: browserEnv, stdio: ['pipe', 'pipe', 'pipe'], detached: true },
     );
     this.stderr = '';
     this.buf = '';
@@ -288,9 +304,7 @@ class BatchBrowser {
   /** Resolves with the JSON line, or null on crash/timeout (the browser is then dead). */
   run(test, timeout) {
     return new Promise((resolve) => {
-      const killer = setTimeout(() => {
-        this.child.kill('SIGKILL');
-      }, timeout + 10000);
+      const killer = setTimeout(() => killGroup(this.child), timeout + 10000);
       this.pending = { resolve: (line) => { clearTimeout(killer); resolve(line); } };
       this.stderr = '';
       this.child.stdin.write(`${test.url}\t${timeout}\n`);
@@ -298,7 +312,7 @@ class BatchBrowser {
   }
   close() {
     try { this.child.stdin.end(); } catch (_) {}
-    setTimeout(() => { try { this.child.kill('SIGKILL'); } catch (_) {} }, 3000).unref();
+    setTimeout(() => killGroup(this.child), 3000).unref();
   }
 }
 

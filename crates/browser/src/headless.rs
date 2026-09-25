@@ -294,8 +294,10 @@ impl Driver {
                             self.input(InputEvent::Wheel { x, y, dx, dy, mods });
                         }
                         "pause" => {
+                            // Sleep rather than pump: a nested pump would consume events
+                            // (load, eval results) the outer wait is looking for.
                             let ms = step["ms"].as_u64().unwrap_or(0).min(10_000);
-                            self.pump_until(Duration::from_millis(ms), |_| false);
+                            std::thread::sleep(Duration::from_millis(ms));
                         }
                         other => err = Some(format!("unknown action {other}")),
                     }
@@ -697,6 +699,13 @@ fn run_batch(d: &mut Driver, tab: TabId, opts: &HeadlessOptions) -> i32 {
         match batch_one(d, tab, opts, &url, timeout) {
             Some(fields) => {
                 let _ = writeln!(stdout, "{{\"url\":{},{}}}", json_str(&url), fields);
+                // Popups the page opened (window.open) are separate tabs with their own
+                // renderer process; drop them before the next URL.
+                for id in d.browser.tab_ids().to_vec() {
+                    if id != tab {
+                        d.browser.close_tab(id);
+                    }
+                }
             }
             None => {
                 let _ = writeln!(stdout, "{{\"url\":{},\"crash\":true}}", json_str(&url));

@@ -157,6 +157,7 @@ async fn read_body(
 ) -> Result<Bytes, NetError> {
     let mut chunks = Vec::new();
     let mut total = 0usize;
+    let close_delimited = resp.content_length().is_none();
     let expected = resp.content_length().unwrap_or(0);
     let mut last_report: Option<std::time::Instant> = None;
     loop {
@@ -167,6 +168,10 @@ async fn read_body(
                     idle.as_secs()
                 )));
             }
+            // A body delimited by the connection closing, on a TLS connection the peer
+            // shut down without `close_notify` (Python's ssl servers, some CDNs): the
+            // data received so far is the whole body, like other browsers treat it.
+            Ok(Err(e)) if close_delimited && is_unexpected_eof(&e) => break,
             Ok(Err(e)) => return Err(NetError::from_reqwest(&e)),
             Ok(Ok(Some(chunk))) => {
                 total += chunk.len();
@@ -185,6 +190,24 @@ async fn read_body(
         }
     }
     Ok(concat_chunks(chunks, total))
+}
+
+/// Whether a body read failed only because the connection ended without a proper TLS
+/// close (an `UnexpectedEof` / missing `close_notify` somewhere in the error chain).
+fn is_unexpected_eof(err: &reqwest::Error) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(io) = e.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::UnexpectedEof
+        {
+            return true;
+        }
+        if e.to_string().contains("close_notify") {
+            return true;
+        }
+        cur = e.source();
+    }
+    false
 }
 
 /// The request body as a stream of chunks that reports how much of it the connection
