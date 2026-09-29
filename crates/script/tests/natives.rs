@@ -1176,6 +1176,33 @@ fn modules_static_dynamic_and_meta() {
 }
 
 #[test]
+fn module_import_from_module_top_level() {
+    // import() called while a module evaluates re-enters the loader; it must not
+    // evaluate a module that is still evaluating (a V8 fatal error).
+    let mut e = env();
+    e.host.serve(
+        "https://example.com/js/a.js",
+        "text/javascript",
+        "export const x = 1; import('./b.js').then(m => globalThis.bLoaded = m.y);",
+    );
+    e.host.serve(
+        "https://example.com/js/b.js",
+        "text/javascript",
+        "export const y = 2;",
+    );
+    e.host.serve(
+        "https://example.com/js/self.js",
+        "text/javascript",
+        "export const z = 42; import(import.meta.url).then(m => globalThis.selfZ = m.z);",
+    );
+    e.eval("globalThis.r = []; import('/js/a.js').then(m => r.push(m.x)); import('/js/a.js').then(m => r.push(m.x)); import('/js/self.js').then(m => r.push(m.z)); 1");
+    e.serve_fetches();
+    assert_eq!(e.eval("JSON.stringify(r)"), "\"[1,1,42]\"");
+    assert_eq!(e.eval("bLoaded"), "2");
+    assert_eq!(e.eval("selfZ"), "42");
+}
+
+#[test]
 fn structured_clone() {
     let mut e = env();
     let r = e.eval(
