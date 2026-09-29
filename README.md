@@ -6,7 +6,7 @@
   <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/Chomeles/sharko-browser?include_prereleases&label=release&color=0b6fa8&style=for-the-badge" alt="Release"></a>
   <a href="../../actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Chomeles/sharko-browser/ci.yml?branch=master&label=CI&style=for-the-badge" alt="CI"></a>
   <img src="https://img.shields.io/badge/language-Rust-dea584?style=for-the-badge&logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-063e6b?style=for-the-badge" alt="Platforms">
+  <img src="https://img.shields.io/badge/platform-Windows-063e6b?style=for-the-badge" alt="Platforms">
   <img src="https://img.shields.io/badge/license-source--available-2ea44f?style=for-the-badge" alt="License">
 </p>
 

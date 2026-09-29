@@ -16,7 +16,7 @@
 
 1. Bump `version` in the root `Cargo.toml` (`[workspace.package]`), commit.
 2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-3. The `Release` workflow builds Windows/Linux/macOS packages, writes `manifest.json` with
+3. The `Release` workflow builds the Windows package (Linux/macOS are not published), writes `manifest.json` with
    SHA-256 checksums, signs it and publishes everything as a GitHub release.
 
 ## How clients update
