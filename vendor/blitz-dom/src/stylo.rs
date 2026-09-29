@@ -488,7 +488,8 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Fullscreen => false,
             NonTSPseudoClass::Hover => self.element_state().contains(ElementState::HOVER),
             NonTSPseudoClass::Indeterminate => false,
-            NonTSPseudoClass::Lang(_) => false,
+            // PATCH: `:lang()` (Selectors 4 §8.1), see `match_element_lang`.
+            NonTSPseudoClass::Lang(ref lang) => self.match_element_lang(None, lang),
             NonTSPseudoClass::CustomState(_) => false,
             NonTSPseudoClass::Link => self.element_state().contains(ElementState::UNVISITED),
             // PATCH: a text control with a non-empty placeholder and an empty value.
@@ -886,15 +887,34 @@ impl<'a> TElement for BlitzNode<'a> {
     }
 
     fn lang_attr(&self) -> Option<style::selector_parser::AttrValue> {
-        None
+        self.attr(local_name!("lang")).map(AtomString::from)
     }
 
     fn match_element_lang(
         &self,
-        _override_lang: Option<Option<style::selector_parser::AttrValue>>,
-        _value: &style::selector_parser::Lang,
+        override_lang: Option<Option<style::selector_parser::AttrValue>>,
+        value: &style::selector_parser::Lang,
     ) -> bool {
-        false
+        // PATCH: the language is that of the closest `lang` attribute on the element or an
+        // ancestor (`override_lang` stands in for it when matching against a snapshot);
+        // none means the empty language, which matches no non-empty range. The range is
+        // matched by RFC 4647 extended filtering.
+        let lang = match override_lang {
+            Some(lang) => lang.map(|l| l.to_string()),
+            None => {
+                let mut node = Some(*self);
+                let mut found = None;
+                while let Some(el) = node {
+                    if let Some(l) = el.attr(local_name!("lang")) {
+                        found = Some(l.to_string());
+                        break;
+                    }
+                    node = selectors::Element::parent_element(&el);
+                }
+                found
+            }
+        };
+        style::servo::selector_parser::extended_filtering(&lang.unwrap_or_default(), value)
     }
 
     fn is_html_document_body_element(&self) -> bool {

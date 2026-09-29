@@ -309,3 +309,7 @@ Patches so far:
     was invalid). Fixed values of a desktop browser without user preferences (as Chromium
     reports): no reduced motion, scripting enabled, forced colors none, no contrast
     preference, update fast, sRGB, browser display mode; boolean forms follow the spec.
+83. `blitz-dom/src/stylo.rs`: `:lang()` (Selectors 4 §8.1) was hard-coded false. The element's
+    language is the closest `lang` attribute up the tree (none: the empty language), matched
+    with RFC 4647 extended filtering (Stylo's `extended_filtering`); `lang_attr` reports the
+    attribute so attribute changes restyle.
