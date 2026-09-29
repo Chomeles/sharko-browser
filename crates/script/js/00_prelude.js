@@ -323,6 +323,29 @@
     }
     rec.n = n;
   }
+  // The index properties of a list are own enumerable properties of the object in browsers
+  // (WebIDL indexed properties: Object.keys/values/entries, hasOwnProperty, for-in and spread
+  // of a NodeList/HTMLCollection all see them; jQuery UI-era code does `Object.values(nodeList)`).
+  // The prototype getters above answer reads; this mirrors the indices as own accessors of the
+  // instance, re-synchronised whenever the length is read. Capped so that a huge
+  // `querySelectorAll('*')` result costs no more than a bounded amount.
+  const OWN_INDEX_CAP = 1000;
+  const ownCount = new WeakMap();
+  L.syncOwnIndices = function (obj, proto, n) {
+    const rec = indexed.get(proto);
+    if (rec === undefined) return;
+    if (n > OWN_INDEX_CAP) n = OWN_INDEX_CAP;
+    const have = ownCount.get(obj) || 0;
+    if (have === n) return;
+    if (rec.getters === undefined) rec.getters = [];
+    for (let i = have; i < n; i++) {
+      let g = rec.getters[i];
+      if (g === undefined) g = rec.getters[i] = function () { return rec.itemFn(this, i); };
+      Object.defineProperty(obj, i, { get: g, enumerable: true, configurable: true });
+    }
+    for (let i = n; i < have; i++) delete obj[i];
+    ownCount.set(obj, n);
+  };
   L.ensureIndexed = function (proto, n) {
     const rec = indexed.get(proto);
     if (rec !== undefined && n > rec.n) growIndexed(proto, rec, Math.max(n, rec.n * 2));

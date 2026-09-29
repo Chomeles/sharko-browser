@@ -1473,6 +1473,7 @@
       if (token !== INTERNAL) throw L.illegal();
       this.#kind = kind;
       this.#src = src;
+      L.syncOwnIndices(this, NodeList.prototype, L.nlIds(this).length);
     }
     static {
       L.nlIds = (o) => {
@@ -1501,6 +1502,7 @@
     get length() {
       const n = L.nlIds(this).length;
       if (n > 64) L.ensureIndexed(NodeList.prototype, n);
+      L.syncOwnIndices(this, NodeList.prototype, n);
       return n;
     }
     item(i) {
@@ -1539,6 +1541,7 @@
     get length() {
       const n = hcIds(hcData(this)).length;
       if (n > 64) L.ensureIndexed(HTMLCollection.prototype, n);
+      L.syncOwnIndices(this, HTMLCollection.prototype, n);
       return n;
     }
     item(i) {
@@ -1606,6 +1609,7 @@
     d.epoch = -1;
     if (d.ids === undefined) d.ids = null;
     HC.set(o, d);
+    L.syncOwnIndices(o, HTMLCollection.prototype, hcIds(d).length);
     if (!named) return o;
     const p = new Proxy(o, namedCollectionHandler);
     HC.set(p, d);
