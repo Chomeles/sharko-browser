@@ -27,6 +27,17 @@ pub(crate) fn format_number(v: f64) -> String {
 // Scripts & modules
 // ---------------------------------------------------------------------------------
 
+/// `N.cleanupAfterScript()`: HTML "clean up after running script" for a classic script
+/// the JS layer just ran through `N.evalScript`: a microtask checkpoint when no other
+/// script is on the stack (only this native, depth 1, is), so promise reactions run while
+/// `document.currentScript` still points at the script.
+pub(crate) fn n_cleanup_after_script(cx: &mut Cx) -> NResult {
+    if cx.st.native_depth.get() == 1 && !cx.scope.is_execution_terminating() {
+        crate::runtime::end_of_task(cx.scope, cx.st);
+    }
+    Ok(())
+}
+
 /// `N.evalScript(source, url, isInline)`: classic script in the global scope.
 /// Exceptions are reported (console + error event) and re-thrown.
 pub(crate) fn n_eval_script(cx: &mut Cx) -> NResult {

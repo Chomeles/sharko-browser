@@ -146,6 +146,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 ## Scripts & modules
 | function | returns |
 |---|---|
+| `N.cleanupAfterScript()` | after a classic script: microtask checkpoint if no other script is on the JS stack (before `document.currentScript` is restored) |
 | `N.evalScript(source, url, isInline)` | runs a classic script in the global scope, returns completion value. **Exceptions are reported by Rust to the console (with stack) and re-thrown** |
 | `N.runModule(url, sourceOrNull)` | loads a module graph (fetching `url` if `sourceOrNull` is null; for inline modules `url` is the document URL + a unique fragment), instantiates and evaluates it. Returns a `Promise` resolving when evaluation completes (rejecting on error) |
 | `N.compileFunction(bodySource, argNames[], url)` | returns a Function (used for inline event handler attributes like `onclick="..."`) |

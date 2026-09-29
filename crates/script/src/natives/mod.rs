@@ -213,6 +213,7 @@ natives_table! {
     "resetForm" => forms_natives::n_reset_form,
     // Scripts & modules
     "evalScript" => misc::n_eval_script,
+    "cleanupAfterScript" => misc::n_cleanup_after_script,
     "runModule" => misc::n_run_module,
     "compileFunction" => misc::n_compile_function,
     // Networking

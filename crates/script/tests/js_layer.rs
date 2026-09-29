@@ -253,6 +253,25 @@ window.addEventListener('load', () => log.push('load:' + document.readyState));<
     );
 }
 
+/// Microtasks queued by a classic script run before `document.currentScript` is reset
+/// (HTML "clean up after running script"); Next.js reads it from an `await` continuation.
+#[test]
+fn js_layer_current_script_in_microtasks() {
+    let page = r#"<!DOCTYPE html><html><body>
+<script id="s1">window.seen = [];
+Promise.resolve().then(() => seen.push('then:' + (document.currentScript && document.currentScript.id)));
+(async () => { await null; seen.push('await:' + (document.currentScript && document.currentScript.id)); })();
+seen.push('sync:' + document.currentScript.id);</script>
+<script>setTimeout(() => seen.push('timer:' + document.currentScript), 0);</script>
+</body></html>"#;
+    let mut e = js_env(page);
+    let doc = &mut e.doc;
+    e.rt.document_parsed(doc);
+    run_timers_for(&mut e, Duration::from_millis(50));
+    assert!(e.host.errors().is_empty(), "{:#?}", e.host.errors());
+    assert_eq!(e.eval("seen"), r#"["sync:s1","then:s1","await:s1","timer:null"]"#);
+}
+
 /// A broader tour of Web APIs implemented by the JS layer over the natives.
 #[test]
 fn js_layer_web_apis() {

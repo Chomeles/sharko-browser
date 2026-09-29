@@ -258,6 +258,10 @@
     shadowOfHost.set(host, sr);
     // Stylesheets inside the host are scoped to it from now on (native style scoping).
     if (typeof N.setShadowHost === 'function') N.setShadowHost(idOf(host), true);
+    // The shadow root shares the host's node id, so its children ARE the host's until the
+    // light children are moved away: a new shadow root must be empty right away (Lit reads
+    // `shadowRoot.firstChild` as its render anchor before the first insertion).
+    shadowPrepare(sr);
     return sr;
   }
   // Remove the shadow content of `sr` (slotted light nodes go back to the light fragment).
@@ -293,14 +297,14 @@
       const ln = lnOf(host);
       if (nsOf(host) !== HTML || !(L.isValidCEName(ln) || SHADOW_HOSTS.has(ln)) || shadowOfHost.has(host)) continue;
       const content = L.templateInfo !== null ? L.templateInfo(wrap(tid)) : tid;
+      // Out of the host first, or attaching would sweep the template into the light DOM.
+      N.removeChild(pid, tid);
       const sr = attachShadowImpl(host, mode, {
         declarative: true,
         delegatesFocus: N.getAttr(tid, 'shadowrootdelegatesfocus') !== null,
         clonable: N.getAttr(tid, 'shadowrootclonable') !== null,
         serializable: N.getAttr(tid, 'shadowrootserializable') !== null,
       });
-      N.removeChild(pid, tid);
-      shadowPrepare(sr);
       for (const c of N.childIds(content)) N.appendChild(pid, c);
       shadowDistribute(sr);
       treeChanged();

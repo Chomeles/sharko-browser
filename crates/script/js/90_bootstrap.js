@@ -424,6 +424,9 @@
     } catch (e) {
       L.reportScriptError(e);
     } finally {
+      // "Clean up after running script": the microtask checkpoint still sees this script
+      // as document.currentScript (promise reactions, await, MutationObserver).
+      if (typeof N.cleanupAfterScript === 'function') N.cleanupAfterScript();
       L.currentScript = prevScript;
       if (mode === 'parser') { inParserScript = prevParser; lastParserAnchor = writeState.anchor; writeState = prevWrite; }
       if (ignoresWrites) inNonBlockingScript--;

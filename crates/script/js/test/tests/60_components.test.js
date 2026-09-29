@@ -262,3 +262,15 @@ test('custom elements report :defined to the native side on upgrade and construc
   assert.ok(e.mock.definedIds.has(e.id('#a2')));
   assert.strictEqual(e.mock.definedIds.size, 3); // a1, a2 and the constructed one (not the template's)
 });
+
+test('a new shadow root is empty even when the host has light children (Lit render anchor)', async () => {
+  const e = await createEnv();
+  e.run(`
+    document.body.insertAdjacentHTML('beforeend', '<x-lit id="lit"> <span>light</span></x-lit>');
+    var host = document.getElementById('lit');
+    var sr = host.attachShadow({ mode: 'open' });
+    var anchor = sr.firstChild;
+    sr.insertBefore(document.createComment('m'), anchor);
+  `);
+  assert.strictEqual(e.run("sr.childNodes.length + ':' + (anchor === null) + ':' + sr.innerHTML"), '1:true:<!--m-->');
+});
