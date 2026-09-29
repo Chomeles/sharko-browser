@@ -275,7 +275,7 @@ impl BaseDocument {
             .insert(key.clone(), SpriteState::Loading(vec![svg_id]));
         self.net_provider.fetch(
             self.id(),
-            self.build_request(url),
+            self.build_request(url, "image"),
             ResourceHandler::boxed(
                 self.tx.clone(),
                 self.id(),

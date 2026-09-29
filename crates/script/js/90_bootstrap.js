@@ -414,7 +414,7 @@
     const co = N.getAttr(rec.id, 'crossorigin');
     // no-cors classic scripts and crossorigin=use-credentials send credentials; anonymous CORS is same-origin only
     const credentials = co === null || co.toLowerCase() === 'use-credentials' ? 'include' : 'same-origin';
-    L.startNativeFetch('GET', rec.url, [], null, co !== null ? 'cors' : 'no-cors', (status, statusText, finalUrl, flat, body, error) => {
+    L.startNativeFetch('GET', rec.url, [], null, co !== null || rec.type === 'module' ? 'cors' : 'no-cors', (status, statusText, finalUrl, flat, body, error) => {
       if ((error !== null && error !== undefined) || !(status >= 200 && status < 300)) {
         rec.state = 'error';
       } else {
@@ -422,7 +422,7 @@
         rec.state = 'ready';
       }
       done(rec);
-    }, credentials);
+    }, credentials, undefined, undefined, undefined, undefined, 'script');
   }
   function makeRecord(id, parser) {
     const type = scriptType(id);

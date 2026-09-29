@@ -296,3 +296,11 @@ Patches so far:
     has no height, so the placeholder and the caret were centered as a zero-height line, half
     a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
     `line-height` as tall as the box the placeholder was pushed out of it).
+81. `blitz-dom/src/net.rs` (`stamped_request`, `StylesheetLoader::referrer`, `fetch_font_face`),
+    `document.rs`, `iframe.rs`, `image_source.rs`, `svg_sprite.rs`, `mutator.rs`,
+    `layout/damage.rs`: every parser-initiated request (stylesheet, `@import`, image, CSS
+    `url()`, `@font-face`, `<iframe>`, preload) carries `Referer` (the document, or the
+    stylesheet for `@import`/fonts) and a `Sec-Fetch-Dest` marker with its Fetch destination,
+    which the network provider turns into the destination and strips. Without them the
+    requests had no `Referer`/`Sec-Fetch-Site`, fonts no `Origin`, and an iframe went out as a
+    generic request instead of `Sec-Fetch-Dest: iframe`.

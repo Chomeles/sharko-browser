@@ -29,6 +29,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Destination {
     Document,
+    /// Navigation of a nested browsing context (`<iframe>`, `<frame>`): like `Document`,
+    /// but `Sec-Fetch-Dest: iframe` and never user-activated.
+    Iframe,
     Script,
     Style,
     Image,

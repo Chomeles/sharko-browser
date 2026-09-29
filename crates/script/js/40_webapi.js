@@ -2399,7 +2399,7 @@
   const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
   // `initiator` ('fetch', 'xmlhttprequest'): record a PerformanceResourceTiming entry. The
   // first downloaded bytes (a progress report) stand in for responseStart.
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator) {
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator, dest) {
     const reqId = nextReqId++;
     if (initiator !== undefined) {
       const timing = { start: N.now(), firstByte: 0 };
@@ -2416,7 +2416,7 @@
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
-      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function');
+      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function', dest || '');
     } catch (e) {
       pendingFetches.delete(reqId);
       fetchProgress.delete(reqId);
@@ -2650,7 +2650,7 @@
         } else flat.push(n, v);
       }
       if (!hasCT && ctype !== null) flat.push('Content-Type', ctype);
-      const mode = originOf(s.url) === L.docOrigin() ? 'same-origin' : 'cors';
+      const mode = 'cors'; // XHR is always a cors-mode request (Sec-Fetch-Mode: cors, even same-origin)
       if (!s.async) { this.#sendSync(flat, bytes, mode); return; }
       s.send = true;
       s.error = false;

@@ -670,8 +670,8 @@ impl BaseDocument {
 
     /// Wrapper around [`crate::net::stamped_request`]. Use the free function
     /// when `&self` would conflict with a held `&mut` borrow on a field.
-    pub(crate) fn build_request(&self, url: url::Url) -> Request {
-        crate::net::stamped_request(url, self.abort_signal.as_ref())
+    pub(crate) fn build_request(&self, url: url::Url, dest: &'static str) -> Request {
+        crate::net::stamped_request(url, self.abort_signal.as_ref(), Some(&self.url), dest)
     }
 
     pub fn favicon_url(&self) -> Option<String> {
@@ -1212,7 +1212,7 @@ impl BaseDocument {
                         let resolved_href = self.resolve_url(href);
                         self.net_provider.fetch(
                             self.id(),
-                            self.build_request(resolved_href.clone()),
+                            self.build_request(resolved_href.clone(), "style"),
                             ResourceHandler::boxed(
                                 self.tx.clone(),
                                 self.id,
@@ -1502,7 +1502,7 @@ impl BaseDocument {
     ) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
             css.as_ref(),
-            url_data,
+            url_data.clone(),
             origin,
             ServoArc::new(self.guard.wrap(media)),
             self.guard.clone(),
@@ -1512,6 +1512,7 @@ impl BaseDocument {
                 net_provider: self.net_provider.clone(),
                 shell_provider: self.shell_provider.clone(),
                 abort_signal: self.abort_signal.clone(),
+                referrer: Some(url_data.0.as_ref().clone()),
             }),
             None,
             QuirksMode::NoQuirks,
