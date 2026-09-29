@@ -59,6 +59,9 @@ pub enum Resource {
     Image(ImageType, u32, u32, Arc<Vec<u8>>),
     #[cfg(feature = "svg")]
     Svg(ImageType, crate::node::SvgImageData),
+    /// PATCH: the external SVG document of a `<use href="sprite.svg#id">` in an inline `<svg>`.
+    #[cfg(feature = "svg")]
+    SvgSprite(Arc<crate::svg_sprite::SvgSprite>),
     /// PATCH: the stylesheet and its source text (re-parsed when scoped to a shadow tree).
     Css(DocumentStyleSheet, Arc<str>),
     Font(Bytes, FontFaceOverrides),
@@ -552,6 +555,24 @@ impl NetHandler for ResourceHandler<DocumentSrcHandler> {
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let html = String::from_utf8_lossy(&bytes).into_owned();
         self.respond(resolved_url, Ok(Resource::DocumentSrc(html)));
+    }
+}
+
+/// PATCH: parses the external document of an inline `<svg>`'s `<use href="sprite.svg#id">`.
+#[cfg(feature = "svg")]
+pub(crate) struct SvgSpriteHandler {
+    /// The requested URL (without fragment), which keys `BaseDocument::svg_sprites`; the
+    /// response carries the final URL after redirects.
+    pub(crate) url: String,
+}
+
+#[cfg(feature = "svg")]
+impl NetHandler for ResourceHandler<SvgSpriteHandler> {
+    fn bytes(self: Box<Self>, _resolved_url: String, bytes: Bytes) {
+        let url = self.data.url.clone();
+        let result = crate::svg_sprite::SvgSprite::parse(&bytes, &url)
+            .map(|sprite| Resource::SvgSprite(Arc::new(sprite)));
+        self.respond(url, result)
     }
 }
 

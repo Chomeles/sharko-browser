@@ -371,6 +371,10 @@ pub struct BaseDocument {
     /// requests for the same URL are queued here instead of starting new fetches.
     /// Value is a list of (node_id, image_type) pairs waiting for the image.
     pub(crate) pending_images: HashMap<String, Vec<(NodeId, ImageType)>>,
+    /// PATCH: the external SVG documents that inline `<svg>` elements reference with
+    /// `<use href="sprite.svg#id">`, keyed by URL without the fragment.
+    #[cfg(feature = "svg")]
+    pub(crate) svg_sprites: HashMap<String, crate::svg_sprite::SpriteState>,
     /// PATCH: elements whose resource finished loading since the last
     /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
     /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
@@ -569,6 +573,8 @@ impl BaseDocument {
             deferred_construction_nodes: Vec::new(),
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
+            #[cfg(feature = "svg")]
+            svg_sprites: HashMap::new(),
             element_load_events: Vec::new(),
             animation_events: Vec::new(),
             parser_done: false,
@@ -1708,6 +1714,10 @@ impl BaseDocument {
                 {
                     self.push_element_load_event(node_id, false);
                 }
+                #[cfg(feature = "svg")]
+                if let Some(url) = res.resolved_url.as_ref() {
+                    self.fail_svg_sprite(url);
+                }
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
                     #[cfg(feature = "tracing")]
@@ -1776,6 +1786,13 @@ impl BaseDocument {
                 };
 
                 self.apply_loaded_image(url, image);
+            }
+            #[cfg(feature = "svg")]
+            Resource::SvgSprite(sprite) => {
+                let Some(url) = res.resolved_url.as_ref() else {
+                    return;
+                };
+                self.apply_loaded_svg_sprite(url, sprite);
             }
             Resource::DocumentSrc(html) => {
                 let Some(node_id) = res.node_id else {

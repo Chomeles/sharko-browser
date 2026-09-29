@@ -57,6 +57,9 @@ mod query_selector;
 mod resolve;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
+/// External SVG documents (icon sprites) that inline `<svg>` elements `<use>`.
+#[cfg(feature = "svg")]
+mod svg_sprite;
 pub mod shadow_css;
 mod font_defaults;
 pub use font_defaults::apply_web_font_defaults;

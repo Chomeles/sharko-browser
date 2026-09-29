@@ -279,3 +279,15 @@ Patches so far:
     `position: fixed` with the viewport as its containing block (the target or a scroller
     around it) and does not scroll the viewport for it; the focused dialog of a consent
     banner, still below the fold, used to scroll wetter.com to its bottom.
+79. `blitz-dom/src/svg_sprite.rs` (new), `layout/construct.rs`, `net.rs`, `document.rs`: inline
+    `<svg>` `<use href="sprite.svg#icon">` (and `xlink:href`, also as script sets it: one
+    local name `xlink:href`) with an external document (SVG 2 §5.6.2; the icons of
+    mydealz.de, zdf.de and otto.de). The document is fetched once per URL,
+    same-origin only (Blink's `same-origin` request mode, Gecko's
+    `SEC_REQUIRE_SAME_ORIGIN_INHERITS_SEC_CONTEXT`),
+    indexed by `id` off the main thread, and the referenced elements (with what they refer to
+    and the sprite's `<style>`) are copied under prefixed ids into the `<defs>` of every
+    `<svg>` that uses them; the waiting `<svg>` elements are rebuilt when it arrives. The
+    markup handed to usvg also declares `xmlns:xlink` when it carries `xlink:` attributes:
+    HTML parsing leaves the prefix unbound, usvg's XML parser rejected the whole `<svg>`, so
+    `<use xlink:href="#icon">` drew nothing even for sprites inside the page.
