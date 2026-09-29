@@ -836,6 +836,16 @@ impl BaseDocument {
     }
 
     pub fn set_sub_document(&mut self, node_id: NodeId, sub_document: Box<dyn Document>) {
+        // PATCH: a replaced sub-document is kept alive like a removed one (see
+        // `remove_sub_document`): the realm running in it holds a raw pointer to it for
+        // the rest of the current script entry (`iframe.srcdoc = ...` right after taking
+        // `contentWindow`).
+        let el = self.nodes[node_id].element_data_mut().unwrap();
+        if let SpecialElementData::SubDocument(old) =
+            std::mem::replace(&mut el.special_data, SpecialElementData::None)
+        {
+            self.detached_sub_documents.push(old);
+        }
         self.nodes[node_id]
             .element_data_mut()
             .unwrap()

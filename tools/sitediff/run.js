@@ -376,8 +376,8 @@ function compare(c, s) {
   else if (s.status === 'failed') add('load-failed', 100, s.error || 'navigation failed');
   else if (s.status === 'timeout') add('load-timeout', 15, 'load event did not fire in time');
 
-  const cp = c.probe;
-  const sp = s.probe;
+  let cp = c.probe;
+  let sp = s.probe;
   if (!sp) {
     if (!d.issues.length || s.status === 'timeout') add('probe-missing', 60, s.probeError || 'no probe result from Sharko');
     d.score = Math.min(100, d.issues.reduce((a, i) => a + i.weight, 0));

@@ -258,3 +258,7 @@ Patches so far:
     duration of a script entry; a frame removed during that entry (a script removing an
     `<iframe>` and then using its document's objects, or an iframe removing itself) must
     not free the document under a realm that is still running.
+76. `blitz-dom/src/document.rs`: `set_sub_document` moves the sub-document it replaces
+    to the same detached list (freed by `drop_detached_sub_documents()`). A script that
+    took `iframe.contentWindow` and then set `srcdoc` in the same entry keeps using the
+    old realm, whose raw document pointer would otherwise dangle.

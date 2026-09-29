@@ -586,6 +586,23 @@ fn js_layer_web_crypto() {
     );
 }
 
+/// A frame's document replaced (`srcdoc`) within the script entry that took its window:
+/// the old realm still runs against the old document, which must stay alive until the
+/// entry ends (a use-after-free crashed the renderer on bot-detection scripts).
+#[test]
+fn js_layer_frame_replaced_in_same_entry() {
+    let mut page = js_env(r#"<!DOCTYPE html><html><body></body></html>"#);
+    assert_eq!(
+        page.eval(
+            "const j = document.createElement('iframe'); document.body.append(j); \
+             const wj = j.contentWindow; j.srcdoc = '<p>x</p>'; \
+             [typeof wj.foo, 'chrome' in wj, wj.document.querySelector('p') === null, j.contentDocument.querySelector('p') !== null]"
+        ),
+        r#"["undefined",false,true,true]"#
+    );
+    drop(page);
+}
+
 /// Same-origin iframes share the page's isolate with a V8 context (realm) each:
 /// `contentWindow`/`contentDocument` are the frame's real globals (created on demand),
 /// `parent`/`top`/`frameElement` cross realms, functions of one realm run against the
