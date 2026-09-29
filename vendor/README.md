@@ -8,6 +8,7 @@ a `// PATCH:` comment so it can be upstreamed or re-applied on upgrades.
 * `anyrender_vello` 0.14.0 — Vello GPU backend (DioxusLabs/anyrender).
 * `parley` 0.11.1 — text layout (linebender/parley).
 * `taffy` 0.14.0 — box layout: block/flex/grid (DioxusLabs/taffy).
+* `stylo` 0.21.0 — style engine (servo/stylo); only the container-query enablement, see patch 80.
 * `stylo_taffy` 0.3.0-beta.2 — Stylo→Taffy style conversion (DioxusLabs/blitz), unmodified
   except for its dependency on Stylo 0.21.
 
@@ -304,3 +305,11 @@ Patches so far:
     which the network provider turns into the destination and strips. Without them the
     requests had no `Referer`/`Sec-Fetch-Site`, fonts no `Origin`, and an iframe went out as a
     generic request instead of `Sec-Fetch-Dest: iframe`.
+80. Container queries (`container-type`, `container`, `@container`, `cq*` units): `vendor/stylo`
+    (new, Stylo 0.21.0 from crates.io, patched via `[patch.crates-io]`) parses `@container`,
+    the `container` shorthand and the `cqw`…`cqmax` units for the servo engine too (they were
+    `gecko`-only), behind `layout.container-queries.enabled`; `blitz-dom/src/container_query.rs`
+    (new), `stylo.rs`, `resolve.rs`, `document.rs`, `node/node.rs`: `query_container_size`
+    answers with the container's last laid-out content-box size and records it on the node;
+    `resolve` loops style → layout (at most 4 extra passes, for nested containers) and restyles
+    the descendants of every container whose size changed since style queried it.

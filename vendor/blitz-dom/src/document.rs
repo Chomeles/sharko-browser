@@ -480,6 +480,8 @@ impl BaseDocument {
         // PATCH: `:has()` and `:nth-child(An+B of S)` (see has_invalidation.rs).
         style_config::set_pref!("layout.css.has-selector.enabled", true);
         style_config::set_pref!("layout.css.nth-child-of.enabled", true);
+        // PATCH 80: container queries (`container-type`, `@container`, `cq*` units).
+        style_config::set_pref!("layout.container-queries.enabled", true);
         style_config::set_pref!("layout.threads", -1);
 
         let viewport = config.viewport.unwrap_or_default();

@@ -1280,10 +1280,10 @@ impl<'a> TElement for BlitzNode<'a> {
 
     fn query_container_size(
         &self,
-        _display: &style::values::specified::Display,
+        display: &style::values::specified::Display,
     ) -> euclid::default::Size2D<Option<app_units::Au>> {
-        // FIXME: Implement container queries. For now this effectively disables them without panicking.
-        Default::default()
+        // PATCH 80 (container queries): see container_query.rs.
+        crate::container_query::query_size(self, display)
     }
 
     fn each_custom_state<F>(&self, _callback: F)

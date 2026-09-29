@@ -75,6 +75,9 @@ impl BaseDocument {
         let root_node_id = self.root_element().id;
         debug_timer!(timer, feature = "log-phase-times");
 
+        // PATCH 80 (container queries): style depends on container sizes, which come from layout;
+        // restyle and re-layout until the sizes seen by style match the laid-out ones.
+        for pass in 0..=crate::container_query::MAX_PASSES {
         // we need to resolve stylist first since it will need to drive our layout bits
         self.resolve_stylist(current_time_for_animations);
         timer.record_time("style");
@@ -110,6 +113,12 @@ impl BaseDocument {
         // Next we resolve layout with the data resolved by stlist
         self.resolve_layout();
         timer.record_time("layout");
+        if pass == crate::container_query::MAX_PASSES
+            || !self.invalidate_container_queries(0)
+        {
+            break;
+        }
+        }
 
         // Resolve transforms
         self.resolve_transforms(root_node_id);
