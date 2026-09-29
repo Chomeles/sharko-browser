@@ -157,7 +157,10 @@
   };
   L.isDocument = function (w) { return docState.has(w); };
 
-  // Document URL (cached; refreshed by the bootstrap on navigation-related hooks)
+  // Document URL (cached; refreshed by the bootstrap on navigation-related hooks). This is the
+  // URL the host reports: for an about:blank / srcdoc frame it is the parent's (the origin, the
+  // secure-context state, cookies and referrer of such a frame are inherited from there). What
+  // the page sees as the document's URL is L.exposedURL().
   let docURL = null;
   L.documentURL = function () {
     if (docURL === null) docURL = N.location();
@@ -165,12 +168,69 @@
   };
   L.invalidateDocumentURL = function () { docURL = null; baseCache.epoch = -1; };
 
+  // What kind of document a frame shows: 'blank' (no src, or src="about:blank" / a javascript: URL:
+  // the initial about:blank document), 'srcdoc', or 'url' (the page itself and frames with a
+  // document of their own). The host gives both kinds the parent's URL, so they are recognized by
+  // that URL and the <iframe>'s attributes in the parent; a frame that was navigated without
+  // touching `src` (link or form with `target`) has a URL of its own. Pinned when the document is
+  // parsed (before any script runs), so a later `src` change cannot turn it into a URL document.
+  let frameKind = null;
+  let frameFirstURL = '';
+  const noHash = (u) => { const i = u.indexOf('#'); return i < 0 ? u : u.slice(0, i); };
+  L.frameKind = function () {
+    if (frameKind !== null) return frameKind;
+    frameKind = 'url';
+    frameFirstURL = L.documentURL();
+    if (typeof N.frameElement === 'function') {
+      try {
+        const fe = N.frameElement();
+        if (fe !== null && fe !== undefined) {
+          const parentURL = `${fe.ownerDocument.URL}`;
+          const inherited = parentURL.startsWith('about:') || noHash(parentURL) === noHash(frameFirstURL);
+          if (inherited) {
+            if (fe.hasAttribute('srcdoc')) frameKind = 'srcdoc';
+            else {
+              const src = `${fe.getAttribute('src') || ''}`.trim();
+              if (src === '' || /^about:blank$/i.test(src) || /^javascript:/i.test(src)) frameKind = 'blank';
+            }
+          }
+        }
+      } catch (_) { /* not reachable: keep the host's URL */ }
+    }
+    return frameKind;
+  };
+  // document.open() (or a write() after parsing) gives an about:blank document the URL of the
+  // document that called it, and ends the "initial empty document" state.
+  L.docOpened = false;
+  // Whether this is still the initial, empty about:blank document of a frame.
+  L.isInitialBlank = function () { return !L.docOpened && L.frameKind() === 'blank'; };
+  // The URL of the document as scripts see it (document.URL, location.href).
+  L.exposedURL = function () {
+    const real = L.documentURL();
+    const kind = L.frameKind();
+    if (kind === 'url' || L.docOpened) return real;
+    // A fragment navigation of the frame still works on the host's URL: carry its fragment over.
+    const i = real === frameFirstURL ? -1 : real.indexOf('#');
+    return (kind === 'srcdoc' ? 'about:srcdoc' : 'about:blank') + (i < 0 ? '' : real.slice(i));
+  };
+  // The URL relative references resolve against when the document has no <base>: the document's
+  // URL, or for about:blank/srcdoc documents the base URL of the parent (their "fallback base URL").
+  function fallbackBase() {
+    const real = L.documentURL();
+    if (L.frameKind() === 'url' || L.docOpened) return real;
+    try {
+      const b = N.frameElement().ownerDocument.baseURI;
+      if (typeof b === 'string' && b !== '') return b;
+    } catch (_) { /* parent not reachable */ }
+    return real;
+  }
+
   // Base URL: first <base href> in the document, resolved against the document URL.
   const baseCache = { epoch: -1, url: '' };
   L.baseURL = function () {
     const ep = state.tree * 65536 + state.attr;
     if (baseCache.epoch === ep) return baseCache.url;
-    const du = L.documentURL();
+    const du = fallbackBase();
     let url = du;
     const b = N.querySelector(mainDocId, 'base[href]');
     if (b !== 0) {
@@ -2822,11 +2882,12 @@
       let m = docCollections.get(this);
       return docCollection(this, 'impl', () => new DOMImplementation(INTERNAL, this));
     },
-    get URL() { const i = docInfo(this); return i.main ? L.documentURL() : i.url || 'about:blank'; },
-    get documentURI() { const i = docInfo(this); return i.main ? L.documentURL() : i.url || 'about:blank'; },
+    get URL() { const i = docInfo(this); return i.main ? L.exposedURL() : i.url || 'about:blank'; },
+    get documentURI() { const i = docInfo(this); return i.main ? L.exposedURL() : i.url || 'about:blank'; },
     get compatMode() {
       for (let c = N.firstChild(idOf(this)); c !== 0; c = N.nextSibling(c)) if (N.nodeType(c) === 10) return 'CSS1Compat';
-      return docInfo(this).main && !L.quirksMode ? 'CSS1Compat' : 'BackCompat';
+      // the initial about:blank document has no doctype: quirks mode
+      return docInfo(this).main && !L.quirksMode && !L.isInitialBlank() ? 'CSS1Compat' : 'BackCompat';
     },
     get characterSet() { return 'UTF-8'; },
     get charset() { return 'UTF-8'; },
@@ -3070,7 +3131,8 @@
       const p = (n) => String(n).padStart(2, '0');
       return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     },
-    get readyState() { return this === document ? L.readyState : 'complete'; },
+    // The initial about:blank document of a frame is complete as soon as it exists.
+    get readyState() { return this === document ? (L.isInitialBlank() ? 'complete' : L.readyState) : 'complete'; },
     get currentScript() { return this === document ? L.currentScript : null; },
     get location() { return this === document ? L.location : null; },
     set location(v) { if (this === document) L.location.href = v; },
@@ -3823,7 +3885,7 @@
     if (!d.linked || d.href === null) return;
     const p = N.urlParse(d.href, null);
     const origin = p === null ? null : p[10];
-    if (origin !== null && origin !== 'null' && origin === L.location.origin) return;
+    if (origin !== null && origin !== 'null' && origin === L.docOrigin()) return;
     throw new DOMException(`Failed to ${what === 'cssRules' ? "read the 'cssRules' property from" : `execute '${what}' on`} 'CSSStyleSheet': Cannot access rules`, 'SecurityError');
   }
   function flushSheet(s) {

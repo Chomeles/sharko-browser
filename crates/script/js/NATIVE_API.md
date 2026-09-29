@@ -134,7 +134,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.styleLength(id)` / `N.styleItem(id, i)` | number / property name |
 | `N.computedStyle(id, cssPropName, pseudoOrEmpty)` | resolved value string (forces style) |
 | `N.cssSupports(prop, value)` | bool |
-| `N.matchMedia(query)` | bool – evaluates a media query against the current viewport |
+| `N.matchMedia(query)` | bool – evaluates a media query list against the current viewport. Features the engine does not know make a query false. The layer decides the fixed answers of a screen browser for the features it lists (`color-gamut: srgb`, `display-mode: browser`, `prefers-reduced-motion: no-preference`, `scripting: enabled`, `update: fast`, `color`, ..., see "Chrome consistency" in the README) by replacing those conditions with `(width >= 0px)` / `(width < 0px)` before it asks, and only for features that the native answers `false` for both values (so an engine that learns a feature, e.g. `prefers-reduced-motion`, is asked directly). Range syntax on `width` must be supported |
 
 ## Forms / focus / interaction
 | function | returns |
@@ -204,7 +204,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.frameNavigate(path, url, replace)` | Optional. Navigate the frame at `path` (`[]`: the page) to the absolute `url`, replacing its history entry if `replace`: `top.location = url`, `parent.location.replace(url)` where that window is not scriptable from here. `javascript:` URLs are never passed. Without it those calls do nothing |
 | `N.realmGlobal(path)` | The real `window` (global object) of the frame at `path` if it is same-origin and part of this page (its realm is created on demand, running that document's scripts), else `null` |
 | `N.frameGlobal(id)`, `N.parentGlobal()`, `N.topGlobal()` | `realmGlobal` for this document's `<iframe id>`, the parent frame and the page |
-| `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null` |
+| `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null`. The layer also uses it (with `N.location()`, which the host sets to the parent's URL for the initial `about:blank` document and for `srcdoc` documents) to tell those two from documents with a URL of their own, see "about:blank and srcdoc frames" in the README |
 | `N.foreignNodeType(o)` | `o`'s nodeType if it is a node wrapper of another realm of this page, else `0` (this realm's wrappers, non-nodes) |
 | `N.windowPostMessage(message, targetOrigin, transfer)` | `window.postMessage` itself (installed as the method, so V8 knows the calling realm): runs hook `windowPostMessage` of this realm with the caller's window as `source` |
 | `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
