@@ -8,6 +8,9 @@ a `// PATCH:` comment so it can be upstreamed or re-applied on upgrades.
 * `anyrender_vello` 0.14.0 — Vello GPU backend (DioxusLabs/anyrender).
 * `parley` 0.11.1 — text layout (linebender/parley).
 * `taffy` 0.14.0 — box layout: block/flex/grid (DioxusLabs/taffy).
+* `stylo` 0.21.0, `stylo_atoms` 0.21.0 — Servo's style system, vendored unmodified at first, to
+  patch its servo-engine build (media features, `content-visibility`); see the numbered
+  patches below.
 * `stylo_taffy` 0.3.0-beta.2 — Stylo→Taffy style conversion (DioxusLabs/blitz), unmodified
   except for its dependency on Stylo 0.21.
 
