@@ -462,8 +462,13 @@ function compare(c, s) {
     if (cp.stylesheets.rules > 100 && sp.stylesheets.rules < cp.stylesheets.rules * 0.3) add('stylesheets-missing', 25, `${sp.stylesheets.rules} CSS rules readable vs ${cp.stylesheets.rules}`);
   }
 
-  // Elements: match by key.
+  // Elements: match by key. SVG content is left out (references recorded by an older
+  // probe still contain it; the probe now skips it).
   if (cp.elements && sp.elements) {
+    const SVG_CHILD = /^(path|g|rect|circle|ellipse|line|polyline|polygon|use|defs|symbol|clippath|mask|lineargradient|radialgradient|stop|text|tspan|image|filter|fe\w+|desc|pattern|marker|switch|foreignobject)$/;
+    const notSvg = (e) => !SVG_CHILD.test(e.t) && !/\/(path|g|rect|circle|use|svg):\d+\//.test(e.k + '/');
+    cp = { ...cp, elements: cp.elements.filter(notSvg) };
+    sp = { ...sp, elements: sp.elements.filter(notSvg) };
     const smap = new Map(sp.elements.map((e) => [e.k, e]));
     const cmap = new Map(cp.elements.map((e) => [e.k, e]));
     let matched = 0;

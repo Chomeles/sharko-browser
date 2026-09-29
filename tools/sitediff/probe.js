@@ -119,9 +119,12 @@ function probe() {
     const all = document.body.querySelectorAll('*');
     const els = [];
     const maxY = 3000;
+    const SVG_NS = 'http://www.w3.org/2000/svg';
     for (let i = 0; i < all.length && i < 6000 && els.length < 800; i++) {
       const el = all[i];
       if (SKIP[el.tagName]) continue;
+      // The <svg> root is a box like any other; its content is compared as pixels only.
+      if (el.namespaceURI === SVG_NS && el.tagName.toLowerCase() !== 'svg') continue;
       const r = el.getBoundingClientRect();
       if (r.width * r.height < 400 || r.bottom <= 0 || r.top >= maxY) continue;
       const cs = getComputedStyle(el);

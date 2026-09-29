@@ -58,9 +58,13 @@ every subtest against `tools/wpt/expected.json`, so a change shows up as new pas
 a failing run. `node tools/fuzz/run.js` hammers the DOM with seeded random mutations (and
 native clicks) and reports renderer panics with a reproducible seed.
 `node tools/api-inventory/compare.js` diffs the Web API surface against Chromium, which
-turns "site X breaks" into a list of missing interfaces and members. `tools/check.sh` runs
-the fast suites (JS-layer tests, fuzzer, a quick WPT subset; `--rust` adds `cargo test`)
-before a push.
+turns "site X breaks" into a list of missing interfaces and members.
+`node tools/sitediff/run.js` loads some 200 everyday sites (plus random domains from the
+Tranco list) in Sharko and in Chromium, runs the same probe in both and ranks the
+differences — missing text, shifted layout, swapped colours, broken images, Sharko-only
+errors, crashes — by the number of sites they hit, so fixes go to the engine, not to
+single sites ([details](tools/sitediff/README.md)). `tools/check.sh` runs the fast suites
+(JS-layer tests, fuzzer, a quick WPT subset; `--rust` adds `cargo test`) before a push.
 
 Every change is also checked by loading the same real sites in Sharko and in Chromium 141
 (headless, 1280×800, cold cache) and comparing screenshots, page height, element count
