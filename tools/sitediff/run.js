@@ -13,6 +13,8 @@
 //   --random=N         add N random domains from the Tranco top --top (default 5000) list
 //                      (downloaded to --out on first use); --seed=S makes the draw repeatable
 //   --filter=REGEX     only sites whose URL matches
+//   --shard=I/N        only every N-th site, starting at the I-th (1-based): run N shards in
+//                      parallel (CI) and combine them with tools/sitediff/merge.js
 //   --out=DIR          results (default tools/sitediff/out; git-ignored)
 //   --jobs=N           sites in parallel (default 3)
 //   --settle=MS        wait after `load` before probing (default 3000)
@@ -114,6 +116,11 @@ function resolveSites() {
   }
   sites = [...new Set(sites)];
   if (filter) sites = sites.filter((u) => filter.test(u));
+  const shard = /^(\d+)\/(\d+)$/.exec(opt('shard', ''));
+  if (shard) {
+    const [i, n] = [parseInt(shard[1], 10), parseInt(shard[2], 10)];
+    sites = sites.filter((_, k) => k % n === i - 1);
+  }
   return sites;
 }
 

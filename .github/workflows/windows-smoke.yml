@@ -1,8 +1,9 @@
 name: Windows smoke
 
 # Builds the Windows package, runs it headless against real sites next to Chromium
-# (tools/sitediff) and uploads the results and the package as artifacts. Not a release:
-# nothing is signed or published and installed browsers never see it.
+# (tools/sitediff, sharded over parallel runners) and uploads the results and the package
+# as artifacts. Not a release: nothing is signed or published and installed browsers never
+# see it.
 #
 # Runs when a push changes tools/ci/windows-smoke.trigger (bump the number in it), or
 # manually. The repository is public, so the minutes are free.
@@ -23,9 +24,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  smoke:
+  build:
     runs-on: windows-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -54,7 +55,6 @@ jobs:
           Expand-Archive -Path $zip.FullName -DestinationPath smoke -Force
           $exe = Get-ChildItem smoke -Recurse -Filter browser.exe | Select-Object -First 1
           "SHARKO_BIN=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "browser: $($exe.FullName)"
       - name: Smoke
         run: |
           "$SHARKO_BIN" --version
@@ -68,6 +68,34 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           node run.js
+
+  sweep:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: dist
+      - name: Unpack
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist -Filter *.zip | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath smoke -Force
+          $exe = Get-ChildItem smoke -Recurse -Filter browser.exe | Select-Object -First 1
+          "SHARKO_BIN=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Install Playwright (Chromium reference)
         run: |
           npm install --no-save --no-audit --no-fund playwright
@@ -79,17 +107,38 @@ jobs:
           curl.exe -sSL -o tranco.zip https://tranco-list.eu/top-1m.csv.zip
           Expand-Archive -Path tranco.zip -DestinationPath tranco -Force
           Move-Item tranco/top-1m.csv tools/sitediff/out/tranco-top-1m.csv -Force
-      - name: Compare with Chromium (sitediff)
-        run: node tools/sitediff/run.js --jobs=2 --settle=3000 --random=${{ github.event.inputs.random || '20' }} --seed=7
-      - name: Report
-        if: always()
-        run: |
-          if [ -f tools/sitediff/out/report.md ]; then head -c 60000 tools/sitediff/out/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Compare with Chromium (sitediff, shard ${{ matrix.shard }}/6)
+        run: node tools/sitediff/run.js --jobs=2 --settle=3000 --random=${{ github.event.inputs.random || '20' }} --seed=7 --shard=${{ matrix.shard }}/6
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sitediff-windows
+          name: sitediff-windows-${{ matrix.shard }}
           path: |
             tools/sitediff/out
             !tools/sitediff/out/tranco-top-1m.csv
           retention-days: 7
+
+  report:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sitediff-windows-*
+          path: shards
+      - name: Merge and gate
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          node tools/sitediff/merge.js merged-summary.json shards/*/summary.json | tee -a "$GITHUB_STEP_SUMMARY"
+          node tools/sitediff/gate.js merged-summary.json | tee -a "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sitediff-windows-merged
+          path: merged-summary.json
+          retention-days: 14
