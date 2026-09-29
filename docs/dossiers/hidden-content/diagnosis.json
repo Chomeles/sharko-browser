@@ -1,0 +1,113 @@
+{
+ "cluster": "hidden-content",
+ "rootCauses": [
+  {
+   "id": "shadow-dom-innertext",
+   "title": "Emulated shadow DOM: shadow content is in the host's light tree, so innerText includes it (and empty-shadow hosts still render light children); Chromium's innerText does not cross shadow boundaries",
+   "kind": "chromium-quirk",
+   "area": "crates/script/js/30_html.js (innerTextCollect), crates/script/js/20_dom.js (shadowPrepare/attachShadowImpl); probe: tools/sitediff/probe.js",
+   "mechanism": "Shadow roots are emulated by rendering shadow content as children of the host (20_dom.js:200-310, README 'Shadow DOM is an approximation'). innerTextCollect (30_html.js:281) walks N.firstChild, so it descends into that content. Chromium's innerText does not include a shadow tree's text even though it renders, and a host with an empty shadow root does not render its light children. The word diff is therefore a probe artifact for shadow-heavy sites (arbeitsagentur, finn.no). One small real rendering bug: light children of a host with an empty attachShadow() still render in Sharko (repro W_EMPTY_SHADOW_LIGHT).",
+   "evidence": [
+    "repro_shadow_innertext.html: Chromium innerText=false but rendered for W_DSD_SHADOW_NAV, W_IMPERATIVE_SHADOW; Sharko innerText=true",
+    "W_LIGHT_CHILD_OF_EMPTY_SHADOW_HOST: Chromium no-box, Sharko rendered",
+    "arbeitsagentur live probe: cookie modal text is inShadow=true in Chromium (7 hosts), inShadow=false in Sharko (16 hosts). finn.no: 'For bedrifter', 'Varslinger', 'Logg inn' inShadow in Chromium (38 hosts vs Sharko's 47). Screenshots show the same visible content in both."
+   ],
+   "repro": {"path": "/tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/hidden-content/repro_shadow_innertext.html", "expected": "innerText excludes shadow-tree text; empty-shadow host hides light children", "actual": "Sharko includes shadow text and shows light children"},
+   "sites": ["arbeitsagentur.de", "finn.no", "soundcloud.com (probable: Chromium reports 1 shadow host, banner text missing from its innerText)", "vercel.com (1 shadow host, minor)", "bing.com (2 hosts, minor)"],
+   "estimatedImpact": "medium: every component-library site; mostly changes measurement, not pixels",
+   "fixSketch": "Mark shadow-emulation content natively (flag on nodes moved under a shadow host) and have innerTextGet/innerTextCollect skip it, or change the probe to compare a flat text. Separately, do not render light children of a host whose shadow root has no slot.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.75
+  },
+  {
+   "id": "content-visibility-unsupported",
+   "title": "content-visibility (auto/hidden) is not supported: Stylo servo build gates the property to gecko, so skipped subtrees are laid out and included in innerText",
+   "kind": "sharko-bug",
+   "area": "vendor/blitz-dom (style/layout), Stylo property gating (stylo 0.21 properties/longhands.toml:699 engine = \"gecko\"), crates/script/js/30_html.js innerText",
+   "mechanism": "In stylo-0.21 longhands.toml, [content-visibility] has engine = \"gecko\", so the servo-engine build never parses it; CSS.supports('content-visibility: auto') is false. Blitz has no handling (no grep hits). Chromium skips contents of off-screen content-visibility:auto and of content-visibility:hidden, and innerText excludes them. Sharko lays them out and returns their text.",
+   "evidence": [
+    "repro_content_visibility.html: Chromium innerText false for offscreen auto, hidden and inline-style auto; Sharko true; CSS.supports false; scrollHeight 3308 vs 3219",
+    "welt.de and t-online.de CSS use content-visibility (29 and 22 occurrences); probe shows section.c-stage.is-content-visibility-auto with computed auto in Chromium; Sharko text is 2x longer (welt 3585 vs 1436 words, t-online 2404 vs 828)",
+    "vercel.com: Mintlify block div has content-visibility:auto in Chromium"
+   ],
+   "repro": {"path": "/tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/hidden-content/repro_content_visibility.html", "expected": "offscreen auto and hidden subtrees excluded from innerText", "actual": "all text present"},
+   "sites": ["welt.de", "t-online.de", "vercel.com"],
+   "estimatedImpact": "high: content-visibility:auto is common on news and long pages, and adds layout and paint cost for offscreen content",
+   "fixSketch": "Enable/patch the property in the Stylo servo build (drop the engine gate), then in layout treat hidden as skipping the contents (like display:none for descendants, keeping the box with contain-intrinsic-size) and auto as skipping when far offscreen. Minimum: make hidden behave so innerText and layout skip; make auto relevance-based via viewport distance.",
+   "effort": "M",
+   "risk": "medium",
+   "confidence": 0.8
+  },
+  {
+   "id": "innertext-atomic-inline-breaks",
+   "title": "innerText drops required line breaks of blocks inside inline-block/inline-flex, gluing words together ('shipwreckAEW', 'DeutschlandBundestagspraesidentin')",
+   "kind": "sharko-bug",
+   "area": "crates/script/js/30_html.js:326-333 (atomic branch) and innerTextConcat:370-414",
+   "mechanism": "For ATOMIC_INLINE boxes the code collects children into a separate list and concatenates it with innerTextConcat, which discards leading and trailing required breaks ('if (out !== \"\") pendingBreak'; dropTail), then pushes the result as one atomic chunk. Chromium keeps the block boundaries as newlines. The result is concatenated tokens that count as extra (and missing) words in the diff, and wrong innerText.",
+   "evidence": [
+    "repro_innertext_inline_block.html: tiles Chromium 'Storm uncovers shipwreck\\nAEW star...' vs Sharko 'Storm uncovers shipwreckAEW star...'; kicker 'Deutschland\\nBundestagspraesidentin' vs glued; generic 'before \\nA1\\nA2\\nB1\\n after' vs 'before A1\\nA2B1 after'",
+    "Sweep texts: bing 'shipwreckAEW star Satterley diesMakes...' (Sharko) vs spaced (Chromium); welt 'Deutschlandbundestagspraesidentin'; spotify 'RegistrierenAnmelden'; extra samples in bing/welt are these glued tokens"
+   ],
+   "repro": {"path": "/tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/hidden-content/repro_innertext_inline_block.html", "expected": "newline between blocks inside inline-block", "actual": "no separator"},
+   "sites": ["bing.com", "welt.de", "open.spotify.com", "mydealz.de (probable)"],
+   "estimatedImpact": "high: any page reading innerText on menus/cards built from inline-block/inline-flex; affects scraping, tests and a11y-like consumers, not pixels",
+   "fixSketch": "Do not strip inner breaks: push the inner items into the parent list, wrapped by the block-required numbers that inner blocks already emit (only whitespace-collapsing needs the atomic boundary). Emit the inner text as chunks, not one string.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.9
+  },
+  {
+   "id": "container-queries-unsupported",
+   "title": "@container / container-type not supported: query_container_size is a stub, so rules inside @container always fail to match or hide content wrongly",
+   "kind": "sharko-bug",
+   "area": "vendor/blitz-dom/src/stylo.rs:1281 (query_container_size returns default), pref layout.container-queries.enabled not set in vendor/blitz-dom/src/document.rs:468-475",
+   "mechanism": "stylo container-type/container-name are gated by servo_pref layout.container-queries.enabled, which document.rs does not enable; CSS.supports('(container-type: inline-size)') is false, and query_container_size is 'FIXME'. So @container rules never apply. Spotify's '@container (width<360px){.rxYH..{display:none}}' hides the Ctrl+Shift+L hint in Chromium; Sharko shows it.",
+   "evidence": [
+    "matrix.html W_CONTAINER: Chromium hidden, Sharko rendered",
+    "spotify.css: '.HYAdp74..{container-type:inline-size}@container (width<360px){.rxYHNa7..{display:none}}'; live probe: kbd 'Ctrl' rect 0x0 in Chromium (ancestor span display none), 38x24 in Sharko",
+    "vercel.com: header uses 'div.@container' and Tailwind '@lg:' variants; 'For coding agents' p is display:none in Chromium but visible in Sharko (probable same cause, not isolated)"
+   ],
+   "repro": {"path": "/tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/hidden-content/matrix.html", "expected": ".cq-x hidden when container is wider than 1px", "actual": "shown"},
+   "sites": ["open.spotify.com (Ctrl Shift L)", "vercel.com (probable)"],
+   "estimatedImpact": "high on modern sites (Tailwind v4 @container, design systems), small on words but big on layout",
+   "fixSketch": "Set the pref, implement query_container_size by finding the container ancestor and returning its laid-out content size, and re-run style after layout of container ancestors (needs a layout->style feedback pass).",
+   "effort": "L",
+   "risk": "high",
+   "confidence": 0.7
+  },
+  {
+   "id": "missing-media-and-pseudo-features",
+   "title": "Stylo servo build lacks media features (scripting, display-mode, prefers-reduced-motion, prefers-contrast, forced-colors, update, color-gamut) and :dir(); :lang() never matches",
+   "kind": "sharko-bug",
+   "area": "stylo servo/media_features.rs (15 features), vendor/blitz-dom/src/stylo.rs:491 (Lang => false), crates/script/js/40_webapi.js matchMedia",
+   "mechanism": "Queries using unknown features are invalid, so their rules and matchMedia results are false. Chromium: (scripting: enabled)=true, (prefers-reduced-motion: no-preference)=true etc. Sharko returns false for all of these and CSS.supports selector(:dir(ltr)) is false. :lang(x) is hard-coded false, so rules like :lang(en){display:none} do not fire.",
+   "evidence": [
+    "matrix.html __mm: 7 features true in Chromium, false in Sharko; matrix cases W_MQ_SCRIPTING/MOTION/FORCED/CONTRAST/UPDATE/GAMUT/DISPMODE hidden in Chromium, shown in Sharko; W_LANG, W_DIR likewise"
+   ],
+   "repro": {"path": "/tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/hidden-content/matrix.html", "expected": "listed rules apply", "actual": "not applied"},
+   "sites": [],
+   "estimatedImpact": "low-medium: no site in this cluster confirmed; matchMedia answers matter to scripts",
+   "fixSketch": "Patch the servo MEDIA_FEATURES table (add features with fixed values, or use the gecko table) and implement :lang (inherit lang attr with prefix match) and :dir.",
+   "effort": "M",
+   "risk": "low",
+   "confidence": 0.6
+  },
+  {
+   "id": "env-noise",
+   "title": "Environment/bot-wall/A-B differences: Chromium got an error or empty page, or Sharko got an error page",
+   "kind": "environment",
+   "area": "n/a",
+   "mechanism": "duckduckgo.com and telegram.org: Chromium's body is only 'upstream request failed' (proxy/upstream error), so 100% extra. yasyadong02.tv: Chromium 0 words (different-url, navigation failure). bankofamerica.com: in my re-run Sharko itself landed on 'Bank of America Error Page' (43 words), opposite direction; sweep result not reproducible. mydealz.de and pons.com: live re-probes give near-equal word counts (2581 vs 2598; 883 vs 881), sweep extras not reproduced, no icon-font ligature text found in either text.",
+   "evidence": ["sweep diff.json onlyChromiumSample 'pre \"upstream request failed\"'", "sites/bankofamerica.com.sharko.out words=43", "sites/mydealz.de.*.out, sites/pons.com.*.out"],
+   "repro": {"path": "n/a", "expected": "n/a", "actual": "n/a"},
+   "sites": ["duckduckgo.com", "telegram.org", "yasyadong02.tv", "bankofamerica.com", "mydealz.de", "pons.com"],
+   "estimatedImpact": "n/a",
+   "fixSketch": "Re-run the sweep for these sites; treat as unscored.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.6
+  }
+ ],
+ "notes": "Unexplained: google.com/google.com.py (Sharko renders g-bottom-sheet Chrome promo, Chromium does not even have the element; likely UA/feature-detect by script, not a CSS rule; raw HTML fetch has no promo). bsky.app: Sharko scrollHeight 800 vs 16021 in Chromium, 51 vs 30 feed items, 'indexedDB is not defined' error: scroll container/virtualised list sizing differs, not hidden-content; needs separate look. soundcloud.com: extra promo banner ('Soundtrack your semester') probably inside a shadow root; also svg icons sized 150x150 vs 24x24 and carousel widths differ (layout, other cluster). pons.com consent grid width 242 vs 992 (grid transition-[grid-template-rows]) is a layout bug. vercel.com also fails 'document.currentScript' invariant in a promise (Next getAssetPrefix): currentScript null in async/module chunk context, a script-side issue. Popover: showPopover() does not display [popover] elements in Sharko (:popover-open false at stylo.rs:524), opposite direction (under-render). Ideas rejected: hidden attribute, noscript, template, closed dialog/details, :not/:has/:where/@layer/@supports/nesting/attribute selectors, data-state and script-set display all match Chromium in matrix.html; sr-only and aria-hidden behave the same in both. Artifacts in /tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/hidden-content/."
+}

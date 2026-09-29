@@ -280,6 +280,8 @@
   // Collect the items of `id`'s children. `visible`: the parent's box is rendered (its
   // visibility is visible); `mode`: 'html' | 'svg' | 'select' | 'optgroup'.
   function innerTextCollect(id, items, visible, mode) {
+    // `content-visibility: hidden` skips the contents; the box itself stays.
+    if (N.computedStyle(id, 'content-visibility', '') === 'hidden') return;
     const ws = N.computedStyle(id, 'white-space', '');
     const tt = N.computedStyle(id, 'text-transform', '');
     // Whitespace-only text directly in a table, row group or row gets no box.
@@ -2746,7 +2748,9 @@
     if (nativeTemplates) {
       const id = idOf(el);
       if (N.firstChild(id) !== 0) L.treeChanged(); // the parsed children are about to move
-      return N.templateContent(id);
+      const f = N.templateContent(id);
+      L.templateRoots.add(f);
+      return f;
     }
     let f = templateContent.get(el);
     if (f === undefined) {
@@ -2755,6 +2759,7 @@
       let c, moved = false;
       while ((c = N.firstChild(id)) !== 0) { N.appendChild(f, c); moved = true; }
       templateContent.set(el, f);
+      L.templateRoots.add(f);
       templatesExtracted++;
       if (moved) L.treeChanged();
     }
@@ -2773,6 +2778,7 @@
     if (typeOf(src) === 1 && lnOf(src) === 'template' && nsOf(src) === HTML && templateContent.has(src) && deep) {
       const cf = N.cloneNode(templateContent.get(src), true);
       templateContent.set(clone, cf);
+      L.templateRoots.add(cf);
       templatesExtracted++;
     }
     if (deep && templatesExtracted > 0) {
@@ -2783,7 +2789,9 @@
           const sw = L.cache.get(a[i]);
           if (sw !== undefined && templateContent.has(sw)) {
             const cw = wrap(b[i]);
-            templateContent.set(cw, N.cloneNode(templateContent.get(sw), true));
+            const cf = N.cloneNode(templateContent.get(sw), true);
+            templateContent.set(cw, cf);
+            L.templateRoots.add(cf);
             templatesExtracted++;
           }
         }

@@ -261,10 +261,31 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
     let redirect = cx.opt_string(8)?.unwrap_or_default();
     // Addition: report upload/download progress (XHR with progress listeners).
     let progress = cx.len() > 9 && cx.arg(9).is_true();
-    let destination = match mode.as_str() {
-        "navigate" => Destination::Document,
+    // Optional 11th argument: the Fetch destination of the request (`"script"` for
+    // `<script src>` and module loads); plain fetch()/XHR leave it out.
+    let dest = cx.opt_string(10)?.unwrap_or_default();
+    let destination = match (mode.as_str(), dest.as_str()) {
+        ("navigate", _) => Destination::Document,
+        (_, "script") => Destination::Script,
+        (_, "style") => Destination::Style,
+        (_, "image") => Destination::Image,
+        (_, "font") => Destination::Font,
+        (_, "video" | "audio") => Destination::Media,
+        (_, "iframe" | "frame") => Destination::Iframe,
         _ => Destination::Fetch,
     };
+    let mut headers = headers;
+    // The request mode has no field of its own on the wire: the network stack takes it from
+    // `Sec-Fetch-Mode` (a forbidden header name, so page headers can't spoof it) and
+    // otherwise derives it from the destination (`cors` for fetch/XHR and fonts).
+    let derived = match destination {
+        Destination::Document | Destination::Iframe => "navigate",
+        Destination::Fetch | Destination::Font => "cors",
+        _ => "no-cors",
+    };
+    if matches!(mode.as_str(), "cors" | "no-cors" | "same-origin") && mode != derived {
+        headers.push(("sec-fetch-mode".to_owned(), mode.clone()));
+    }
     let cache_mode = match cache.as_str() {
         "no-store" => CacheMode::NoStore,
         "reload" => CacheMode::Reload,
@@ -537,6 +558,17 @@ pub(crate) fn n_time_origin(cx: &mut Cx) -> NResult {
 pub(crate) fn n_location(cx: &mut Cx) -> NResult {
     let u = cx.st.url_string();
     cx.ret_str(&u);
+    Ok(())
+}
+
+/// `N.baseURL()`: the document base URL (blitz-dom's, so the engine and scripts share one).
+pub(crate) fn n_base_url(cx: &mut Cx) -> NResult {
+    let doc_url = cx.st.url.borrow().clone();
+    let base = match cx.st.doc() {
+        Ok(doc) => dom::base_url(doc, &doc_url).to_string(),
+        Err(_) => doc_url.to_string(),
+    };
+    cx.ret_str(&base);
     Ok(())
 }
 

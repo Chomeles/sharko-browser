@@ -598,7 +598,7 @@ fn js_layer_frame_replaced_in_same_entry() {
              const wj = j.contentWindow; j.srcdoc = '<p>x</p>'; \
              [typeof wj.foo, 'chrome' in wj, wj.document.querySelector('p') === null, j.contentDocument.querySelector('p') !== null]"
         ),
-        r#"["undefined",false,true,true]"#
+        r#"["undefined",true,true,true]"#
     );
     drop(page);
 }
@@ -624,7 +624,7 @@ fn js_layer_frame_realms() {
               String(w), w.Array !== Array, w.document.body.ownerDocument === w.document, \
               window.length, frames[0] === w, w.location.href, f.contentWindow === w]"
         ),
-        r#"[true,true,"child",true,true,true,true,"[object Window]",true,true,1,true,"https://example.com/dir/page.html",true]"#
+        r#"[true,true,"child",true,true,true,true,"[object Window]",true,true,1,true,"about:srcdoc",true]"#
     );
     assert!(page.rt.has_frame(&[iframe], None));
     assert_eq!(page.rt.frames(), vec![vec![iframe]]);

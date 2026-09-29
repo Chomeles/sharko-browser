@@ -1,0 +1,220 @@
+GET / HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   upgrade-insecure-requests: 1
+   sec-fetch-dest: document
+   sec-fetch-mode: navigate
+   sec-fetch-site: none
+   sec-fetch-user: ?1
+   host: localhost:8787
+
+GET /style.css HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: text/css,*/*;q=0.1
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   sec-fetch-dest: style
+   sec-fetch-mode: no-cors
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /frame.html HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   sec-fetch-dest: empty
+   sec-fetch-mode: no-cors
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /img.png HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   sec-fetch-dest: image
+   sec-fetch-mode: no-cors
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /script.js HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /css-font.woff2 HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   sec-fetch-dest: font
+   sec-fetch-mode: cors
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /frame-fetch HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/frame.html
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /css-img.png HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   sec-fetch-dest: image
+   sec-fetch-mode: no-cors
+   cookie: sid=abc; pref=de
+   host: localhost:8787
+
+GET /fetch-omit HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   host: localhost:8787
+
+GET /fetch-same HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   host: localhost:8787
+
+GET /fetch-include HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   host: localhost:8787
+
+POST /fetch-post HTTP/1.1
+   content-type: text/plain
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   origin: http://localhost:8787
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   content-length: 3
+   host: localhost:8787
+
+POST /fetch-json HTTP/1.1
+   content-type: application/json
+   x-custom: y
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   origin: http://localhost:8787
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   content-length: 2
+   host: localhost:8787
+
+GET /fetch-cross HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: cross-site
+   host: 127.0.0.1:8787
+
+GET /fetch-cross-cred HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: cross-site
+   host: 127.0.0.1:8787
+
+GET /xhr HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   host: localhost:8787
+
+GET /xhr-cross HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: cross-site
+   host: 127.0.0.1:8787
+
+GET /redirect-me HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   host: localhost:8787
+
+GET /redirected HTTP/1.1
+   user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   accept: */*
+   accept-language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7
+   accept-encoding: gzip, deflate, br, zstd
+   referer: http://localhost:8787/
+   sec-fetch-dest: empty
+   sec-fetch-mode: cors
+   sec-fetch-site: same-origin
+   cookie: sid=abc; pref=de; jsc=1
+   host: localhost:8787

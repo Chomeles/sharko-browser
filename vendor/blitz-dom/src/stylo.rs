@@ -19,6 +19,7 @@ use selectors::{
     sink::Push,
 };
 use style::CaseSensitivityExt;
+use style::selector_parser::HorizontalDirection;
 use style::animation::AnimationSetKey;
 use style::animation::{AnimationState, KeyframesIterationState};
 use style::applicable_declarations::ApplicableDeclarationBlock;
@@ -367,6 +368,73 @@ impl<'a> TNode for BlitzNode<'a> {
     }
 }
 
+/// The directionality of an element (HTML §3.2.6.1): its `dir` attribute when `ltr`/`rtl`,
+/// the first strong character of its text when `auto` (and for a `<bdi>` without a valid
+/// `dir`), else that of its parent; `ltr` at the root.
+fn directionality(el: BlitzNode<'_>) -> HorizontalDirection {
+    let mut node = Some(el);
+    while let Some(n) = node {
+        let is_bdi = n.data.is_element_with_tag_name(&local_name!("bdi"));
+        match n.attr(local_name!("dir")).map(str::to_ascii_lowercase).as_deref() {
+            Some("ltr") => return HorizontalDirection::Ltr,
+            Some("rtl") => return HorizontalDirection::Rtl,
+            Some("auto") => return auto_directionality(n).unwrap_or(HorizontalDirection::Ltr),
+            _ if is_bdi => return auto_directionality(n).unwrap_or(HorizontalDirection::Ltr),
+            _ => {}
+        }
+        node = selectors::Element::parent_element(&n);
+    }
+    HorizontalDirection::Ltr
+}
+
+/// The direction of the first strong character in the text of `el`'s subtree, skipping
+/// `script`/`style`/`textarea`/`bdi` and elements with their own `dir` (HTML §3.2.6.1,
+/// "auto" directionality).
+fn auto_directionality(el: BlitzNode<'_>) -> Option<HorizontalDirection> {
+    for child in el.dom_children() {
+        match &child.data {
+            NodeData::Text(t) => {
+                if let Some(d) = t.content.chars().find_map(strong_direction) {
+                    return Some(d);
+                }
+            }
+            NodeData::Element(data) => {
+                let name = &data.name.local;
+                if [
+                    local_name!("script"),
+                    local_name!("style"),
+                    local_name!("textarea"),
+                    local_name!("bdi"),
+                ]
+                .contains(name)
+                    || child.attr(local_name!("dir")).is_some_and(|d| {
+                        ["ltr", "rtl", "auto"].iter().any(|v| d.eq_ignore_ascii_case(v))
+                    })
+                {
+                    continue;
+                }
+                if let Some(d) = auto_directionality(child) {
+                    return Some(d);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Bidi class L / R / AL of a character, by block (a compact approximation of the Unicode
+/// bidi classes: Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan and their presentation
+/// forms are RTL; other letters are LTR).
+fn strong_direction(c: char) -> Option<HorizontalDirection> {
+    match c as u32 {
+        0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF => {
+            c.is_alphabetic().then_some(HorizontalDirection::Rtl)
+        }
+        _ => c.is_alphabetic().then_some(HorizontalDirection::Ltr),
+    }
+}
+
 impl selectors::Element for BlitzNode<'_> {
     type Impl = SelectorImpl;
 
@@ -488,7 +556,8 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Fullscreen => false,
             NonTSPseudoClass::Hover => self.element_state().contains(ElementState::HOVER),
             NonTSPseudoClass::Indeterminate => false,
-            NonTSPseudoClass::Lang(_) => false,
+            // PATCH: `:lang()` (Selectors 4 §8.1), see `match_element_lang`.
+            NonTSPseudoClass::Lang(ref lang) => self.match_element_lang(None, lang),
             NonTSPseudoClass::CustomState(_) => false,
             NonTSPseudoClass::Link => self.element_state().contains(ElementState::UNVISITED),
             // PATCH: a text control with a non-empty placeholder and an empty value.
@@ -518,6 +587,11 @@ impl selectors::Element for BlitzNode<'_> {
 
             NonTSPseudoClass::InRange => false,
             NonTSPseudoClass::Modal => false,
+            // PATCH: `:dir()` (Selectors 4 §8.2), see `directionality`.
+            NonTSPseudoClass::Dir(ref dir) => match dir.as_horizontal_direction() {
+                Some(want) => directionality(*self) == want,
+                None => false,
+            },
             NonTSPseudoClass::Open => false,
             NonTSPseudoClass::Optional => false,
             NonTSPseudoClass::OutOfRange => false,
@@ -886,15 +960,34 @@ impl<'a> TElement for BlitzNode<'a> {
     }
 
     fn lang_attr(&self) -> Option<style::selector_parser::AttrValue> {
-        None
+        self.attr(local_name!("lang")).map(AtomString::from)
     }
 
     fn match_element_lang(
         &self,
-        _override_lang: Option<Option<style::selector_parser::AttrValue>>,
-        _value: &style::selector_parser::Lang,
+        override_lang: Option<Option<style::selector_parser::AttrValue>>,
+        value: &style::selector_parser::Lang,
     ) -> bool {
-        false
+        // PATCH: the language is that of the closest `lang` attribute on the element or an
+        // ancestor (`override_lang` stands in for it when matching against a snapshot);
+        // none means the empty language, which matches no non-empty range. The range is
+        // matched by RFC 4647 extended filtering.
+        let lang = match override_lang {
+            Some(lang) => lang.map(|l| l.to_string()),
+            None => {
+                let mut node = Some(*self);
+                let mut found = None;
+                while let Some(el) = node {
+                    if let Some(l) = el.attr(local_name!("lang")) {
+                        found = Some(l.to_string());
+                        break;
+                    }
+                    node = selectors::Element::parent_element(&el);
+                }
+                found
+            }
+        };
+        style::servo::selector_parser::extended_filtering(&lang.unwrap_or_default(), value)
     }
 
     fn is_html_document_body_element(&self) -> bool {
@@ -1280,10 +1373,10 @@ impl<'a> TElement for BlitzNode<'a> {
 
     fn query_container_size(
         &self,
-        _display: &style::values::specified::Display,
+        display: &style::values::specified::Display,
     ) -> euclid::default::Size2D<Option<app_units::Au>> {
-        // FIXME: Implement container queries. For now this effectively disables them without panicking.
-        Default::default()
+        // PATCH 80 (container queries): see container_query.rs.
+        crate::container_query::query_size(self, display)
     }
 
     fn each_custom_state<F>(&self, _callback: F)

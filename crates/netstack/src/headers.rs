@@ -4,9 +4,7 @@
 //! unsafe methods, `Sec-Fetch-*`, `Upgrade-Insecure-Requests`).
 
 use common::protocol::Destination;
-use http::header::{
-    ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, ORIGIN, RANGE, REFERER, USER_AGENT,
-};
+use http::header::{COOKIE, RANGE, REFERER};
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use url::Url;
 
@@ -118,7 +116,8 @@ fn same_site(a: &Url, b: &Url) -> bool {
 
 fn accept_for(destination: Destination, config: &NetConfig) -> HeaderValue {
     let value = match destination {
-        Destination::Document => config.document_accept.as_str(),
+        Destination::Document | Destination::Iframe => config.document_accept.as_str(),
+        // AVIF is deliberately not advertised for images (see `NetConfig::image_accept`).
         Destination::Image => config.image_accept.as_str(),
         Destination::Style => "text/css,*/*;q=0.1",
         Destination::Script
@@ -130,17 +129,55 @@ fn accept_for(destination: Destination, config: &NetConfig) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or_else(|_| HeaderValue::from_static("*/*"))
 }
 
-fn set_if_absent(map: &mut HeaderMap, name: HeaderName, value: HeaderValue) {
-    if !map.contains_key(&name) {
-        map.insert(name, value);
-    }
-}
-
 fn is_safe_method(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE)
 }
 
-/// Adds the default request headers for one request (hop).
+/// Chromium's `Priority` header (RFC 9218) per resource type: Blink's load priority
+/// (`ResourceFetcher::ComputeLoadPriority`: style VeryHigh, script/font/fetch High,
+/// image/media Low, once visible Medium) mapped to a urgency by `net::RequestPriority`
+/// (HIGHEST 0, MEDIUM 1, LOW 2), with `i` for everything that is not render-blocking.
+fn priority_for(destination: Destination) -> &'static str {
+    match destination {
+        Destination::Document | Destination::Iframe => "u=0, i",
+        Destination::Style => "u=0",
+        Destination::Script => "u=1",
+        Destination::Font | Destination::Fetch | Destination::Other => "u=1, i",
+        Destination::Image | Destination::Media => "u=2, i",
+    }
+}
+
+fn sec_fetch_dest(destination: Destination) -> &'static str {
+    match destination {
+        Destination::Document => "document",
+        Destination::Iframe => "iframe",
+        Destination::Script => "script",
+        Destination::Style => "style",
+        Destination::Image => "image",
+        Destination::Font => "font",
+        Destination::Media => "video",
+        Destination::Fetch | Destination::Other => "empty",
+    }
+}
+
+/// Removes and returns the client-supplied value of `name` (keeping the order of the rest).
+fn take(client: &mut Vec<(HeaderName, HeaderValue)>, name: &str) -> Option<HeaderValue> {
+    let i = client.iter().position(|(n, _)| n.as_str() == name)?;
+    Some(client.remove(i).1)
+}
+
+/// Sets the default request headers of one request (hop) in Chrome's wire order, so that
+/// the order (a fingerprint the same as the values) matches Chromium 140 on Windows:
+///
+/// `sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, [upgrade-insecure-requests,]
+/// user-agent, <client headers>, accept, [origin,] sec-fetch-site, sec-fetch-mode,
+/// [sec-fetch-user,] sec-fetch-dest, [referer,] accept-encoding, accept-language,
+/// [cookie,] [priority]`
+///
+/// Client-supplied `User-Agent`, `Accept`, `Accept-Language`, `Origin` and `Sec-Fetch-*`
+/// values win (the caller knows the real initiator; `Sec-Fetch-Mode` also carries the
+/// request mode of script loads and `no-cors` fetches); they move to the slot of the
+/// default. `Cookie` is added by [`insert_cookie`], which keeps it before `priority`.
 pub(crate) fn apply_defaults(
     map: &mut HeaderMap,
     url: &Url,
@@ -149,88 +186,144 @@ pub(crate) fn apply_defaults(
     referrer: Option<&Url>,
     config: &NetConfig,
 ) {
-    if let Ok(ua) = HeaderValue::from_str(&config.user_agent) {
-        set_if_absent(map, USER_AGENT, ua);
+    let mut client: Vec<(HeaderName, HeaderValue)> =
+        map.iter().map(|(n, v)| (n.clone(), v.clone())).collect();
+    let has_range = map.contains_key(RANGE);
+    let secure = is_potentially_trustworthy(url);
+    let mut out = HeaderMap::with_capacity(client.len() + 16);
+    fn put(out: &mut HeaderMap, name: &'static str, value: HeaderValue) {
+        out.append(HeaderName::from_static(name), value);
     }
-    set_if_absent(map, ACCEPT, accept_for(destination, config));
-    if let Ok(lang) = HeaderValue::from_str(&config.accept_language) {
-        set_if_absent(map, ACCEPT_LANGUAGE, lang);
-    }
-    // Byte ranges of a content-coded representation can't be decoded piecewise.
-    let encoding = if map.contains_key(RANGE) {
-        HeaderValue::from_static("identity")
-    } else {
-        HeaderValue::from_static(SUPPORTED_ENCODINGS)
-    };
-    map.insert(ACCEPT_ENCODING, encoding);
 
-    map.remove(REFERER);
+    // User-agent client hints are only sent to potentially trustworthy origins.
+    if secure {
+        for (name, value) in [
+            ("sec-ch-ua", config.sec_ch_ua.as_str()),
+            ("sec-ch-ua-mobile", "?0"),
+            ("sec-ch-ua-platform", config.sec_ch_ua_platform.as_str()),
+        ] {
+            let _ = take(&mut client, name);
+            if let Ok(v) = HeaderValue::from_str(value) {
+                put(&mut out, name, v);
+            }
+        }
+    }
+    let navigation = matches!(destination, Destination::Document | Destination::Iframe);
+    if navigation {
+        put(&mut out, "upgrade-insecure-requests", HeaderValue::from_static("1"));
+    }
+    let ua = take(&mut client, "user-agent").or_else(|| HeaderValue::from_str(&config.user_agent).ok());
+    let accept = take(&mut client, "accept").unwrap_or_else(|| accept_for(destination, config));
+    let language = take(&mut client, "accept-language")
+        .or_else(|| HeaderValue::from_str(&config.accept_language).ok());
+    let client_origin = take(&mut client, "origin");
+    let _ = take(&mut client, "referer");
+    let _ = take(&mut client, "upgrade-insecure-requests");
+    let client_dest = take(&mut client, "sec-fetch-dest");
+    let client_mode = take(&mut client, "sec-fetch-mode");
+    let client_site = take(&mut client, "sec-fetch-site");
+    let client_user = take(&mut client, "sec-fetch-user");
+    let _ = take(&mut client, "priority");
+
+    if let Some(ua) = ua {
+        put(&mut out, "user-agent", ua);
+    }
+    for (name, value) in client {
+        out.append(name, value);
+    }
+    put(&mut out, "accept", accept);
+
+    let mode = client_mode
+        .as_ref()
+        .and_then(|m| m.to_str().ok())
+        .unwrap_or(match destination {
+            Destination::Document | Destination::Iframe => "navigate",
+            Destination::Fetch | Destination::Font => "cors",
+            _ => "no-cors",
+        })
+        .to_owned();
+    // Fetch "append a request Origin header": for cors-mode requests to another origin
+    // (fetch/XHR, fonts, `crossorigin` scripts), whatever the method; otherwise only for
+    // unsafe methods.
+    let cross_origin_cors = mode == "cors" && referrer.is_some_and(|r| r.origin() != url.origin());
+    let origin = client_origin.or_else(|| {
+        if !(cross_origin_cors || !is_safe_method(method)) {
+            return None;
+        }
+        HeaderValue::from_str(&referrer?.origin().ascii_serialization()).ok()
+    });
+    if let Some(origin) = origin {
+        put(&mut out, "origin", origin);
+    }
+
+    if secure {
+        // Sec-Fetch-Site is always sent; a request without initiator (the address bar, the
+        // browser itself) is "none".
+        let site = match referrer {
+            None => "none",
+            Some(r) if r.origin() == url.origin() => "same-origin",
+            Some(r) if same_site(r, url) => "same-site",
+            Some(_) => "cross-site",
+        };
+        put(&mut out, "sec-fetch-site", client_site.unwrap_or_else(|| HeaderValue::from_static(site)));
+        put(
+            &mut out,
+            "sec-fetch-mode",
+            HeaderValue::from_str(&mode).unwrap_or_else(|_| HeaderValue::from_static("no-cors")),
+        );
+        if destination == Destination::Document && referrer.is_none() {
+            put(&mut out, "sec-fetch-user", client_user.unwrap_or_else(|| HeaderValue::from_static("?1")));
+        }
+        put(
+            &mut out,
+            "sec-fetch-dest",
+            client_dest.unwrap_or_else(|| HeaderValue::from_static(sec_fetch_dest(destination))),
+        );
+    }
     if let Some(value) = referrer
         .and_then(|r| referrer_value(r, url))
         .and_then(|v| HeaderValue::from_str(&v).ok())
     {
-        map.insert(REFERER, value);
+        put(&mut out, "referer", value);
     }
-    // Fetch "append a request Origin header": always for cors-mode requests to another
-    // origin (fetch/XHR and fonts), whatever the method; otherwise only for unsafe methods.
-    let cross_origin_cors = matches!(destination, Destination::Fetch | Destination::Font)
-        && referrer.is_some_and(|r| r.origin() != url.origin());
-    if (cross_origin_cors || !is_safe_method(method))
-        && !map.contains_key(ORIGIN)
-        && let Some(r) = referrer
-        && let Ok(origin) = HeaderValue::from_str(&r.origin().ascii_serialization())
-    {
-        map.insert(ORIGIN, origin);
+    // Byte ranges of a content-coded representation can't be decoded piecewise; media
+    // elements always ask for the identity coding.
+    let encoding = if destination == Destination::Media {
+        HeaderValue::from_static("identity;q=1, *;q=0")
+    } else if has_range {
+        HeaderValue::from_static("identity")
+    } else {
+        HeaderValue::from_static(SUPPORTED_ENCODINGS)
+    };
+    put(&mut out, "accept-encoding", encoding);
+    if let Some(language) = language {
+        put(&mut out, "accept-language", language);
     }
-    if destination == Destination::Document {
-        set_if_absent(
-            map,
-            HeaderName::from_static("upgrade-insecure-requests"),
-            HeaderValue::from_static("1"),
-        );
+    // Chrome sends `Priority` on h2/h3 only, i.e. (in practice) over TLS.
+    if url.scheme() == "https" {
+        put(&mut out, "priority", HeaderValue::from_static(priority_for(destination)));
     }
-    if is_potentially_trustworthy(url) {
-        apply_sec_fetch(map, url, destination, referrer);
-    }
+    *map = out;
 }
 
-/// Fetch metadata request headers. Values supplied by the client (which knows the real
-/// request initiator) are kept; otherwise they are derived from the referrer.
-fn apply_sec_fetch(map: &mut HeaderMap, url: &Url, destination: Destination, referrer: Option<&Url>) {
-    let dest = match destination {
-        Destination::Document => "document",
-        Destination::Script => "script",
-        Destination::Style => "style",
-        Destination::Image => "image",
-        Destination::Font => "font",
-        Destination::Media => "video",
-        Destination::Fetch | Destination::Other => "empty",
-    };
-    let mode = match destination {
-        Destination::Document => "navigate",
-        Destination::Fetch | Destination::Font => "cors",
-        _ => "no-cors",
-    };
-    set_if_absent(map, HeaderName::from_static("sec-fetch-dest"), HeaderValue::from_static(dest));
-    set_if_absent(map, HeaderName::from_static("sec-fetch-mode"), HeaderValue::from_static(mode));
-    let site = match referrer {
-        None if destination == Destination::Document => Some("none"),
-        None => None,
-        Some(r) if r.origin() == url.origin() => Some("same-origin"),
-        Some(r) if same_site(r, url) => Some("same-site"),
-        Some(_) => Some("cross-site"),
-    };
-    if let Some(site) = site {
-        set_if_absent(map, HeaderName::from_static("sec-fetch-site"), HeaderValue::from_static(site));
-    }
-    if destination == Destination::Document && referrer.is_none() {
-        set_if_absent(map, HeaderName::from_static("sec-fetch-user"), HeaderValue::from_static("?1"));
+/// Adds the `Cookie` header in Chrome's slot (after `accept-language`, before `priority`).
+pub(crate) fn insert_cookie(map: &mut HeaderMap, cookie: HeaderValue) {
+    // `priority` is the last entry, so removing and re-adding it keeps the others in place.
+    let priority = map.remove("priority");
+    map.insert(COOKIE, cookie);
+    if let Some(priority) = priority {
+        map.insert("priority", priority);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use http::header::{ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, ORIGIN, USER_AGENT};
+
+    fn names(map: &HeaderMap) -> Vec<&str> {
+        map.keys().map(|k| k.as_str()).collect()
+    }
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
@@ -289,6 +382,8 @@ mod tests {
         assert_eq!(map["sec-fetch-site"], "none");
         assert_eq!(map["sec-fetch-user"], "?1");
         assert_eq!(map["upgrade-insecure-requests"], "1");
+        assert!(map[ACCEPT].to_str().unwrap().contains("image/avif"));
+        assert!(map[ACCEPT].to_str().unwrap().ends_with("application/signed-exchange;v=b3;q=0.7"));
 
         let mut map = HeaderMap::new();
         apply_defaults(&mut map, &url("https://api.other.org/v1"), &Method::POST, Destination::Fetch, Some(&referrer), &config);
@@ -307,8 +402,108 @@ mod tests {
         // No Sec-Fetch-* for insecure origins; ranges are not content-coded.
         let mut map = HeaderMap::new();
         map.insert(RANGE, HeaderValue::from_static("bytes=0-"));
-        apply_defaults(&mut map, &url("http://example.com/v.mp4"), &Method::GET, Destination::Media, None, &config);
+        apply_defaults(&mut map, &url("http://example.com/v.mp4"), &Method::GET, Destination::Fetch, None, &config);
         assert!(!map.contains_key("sec-fetch-dest"));
         assert_eq!(map[ACCEPT_ENCODING], "identity");
+    }
+
+    #[test]
+    fn chrome_navigation_header_order() {
+        let config = NetConfig::ephemeral();
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://www.example.com/"), &Method::GET, Destination::Document, None, &config);
+        insert_cookie(&mut map, HeaderValue::from_static("a=b"));
+        assert_eq!(
+            names(&map),
+            [
+                "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "upgrade-insecure-requests",
+                "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-user",
+                "sec-fetch-dest", "accept-encoding", "accept-language", "cookie", "priority",
+            ]
+        );
+        assert_eq!(map["sec-ch-ua"], config.sec_ch_ua.as_str());
+        assert_eq!(map["sec-ch-ua-mobile"], "?0");
+        assert_eq!(map["sec-ch-ua-platform"], "\"Windows\"");
+        assert_eq!(map["priority"], "u=0, i");
+        assert_eq!(map["sec-fetch-dest"], "document");
+    }
+
+    #[test]
+    fn chrome_subresource_header_order_and_values() {
+        let config = NetConfig::ephemeral();
+        let page = url("https://www.example.com/index.html");
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://www.example.com/app.js"), &Method::GET, Destination::Script, Some(&page), &config);
+        insert_cookie(&mut map, HeaderValue::from_static("a=b"));
+        assert_eq!(
+            names(&map),
+            [
+                "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "user-agent", "accept",
+                "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "referer", "accept-encoding",
+                "accept-language", "cookie", "priority",
+            ]
+        );
+        assert_eq!(map["sec-fetch-dest"], "script");
+        assert_eq!(map["sec-fetch-mode"], "no-cors");
+        assert_eq!(map["sec-fetch-site"], "same-origin");
+        assert_eq!(map["referer"], "https://www.example.com/index.html");
+        assert_eq!(map["priority"], "u=1");
+        assert!(!map.contains_key(ORIGIN));
+
+        // A `crossorigin` script (mode carried as Sec-Fetch-Mode) to another origin sends Origin.
+        let mut map = HeaderMap::new();
+        map.insert("sec-fetch-mode", HeaderValue::from_static("cors"));
+        apply_defaults(&mut map, &url("https://cdn.other.org/app.js"), &Method::GET, Destination::Script, Some(&page), &config);
+        assert_eq!(map["sec-fetch-mode"], "cors");
+        assert_eq!(map["origin"], "https://www.example.com");
+        assert_eq!(map["sec-fetch-site"], "cross-site");
+        assert_eq!(map["sec-fetch-dest"], "script");
+
+        // Client headers (content-type, custom) sit between user-agent and accept.
+        let mut map = HeaderMap::new();
+        map.insert("content-type", HeaderValue::from_static("application/json"));
+        map.insert("x-custom", HeaderValue::from_static("y"));
+        map.append("x-custom", HeaderValue::from_static("z"));
+        apply_defaults(&mut map, &url("https://www.example.com/api"), &Method::POST, Destination::Fetch, Some(&page), &config);
+        let n = names(&map);
+        assert_eq!(&n[3..8], ["user-agent", "content-type", "x-custom", "accept", "origin"]);
+        assert_eq!(map.get_all("x-custom").iter().count(), 2);
+        assert_eq!(map["priority"], "u=1, i");
+        assert_eq!(map["sec-fetch-dest"], "empty");
+    }
+
+    #[test]
+    fn iframe_font_media_and_insecure() {
+        let config = NetConfig::ephemeral();
+        let page = url("https://www.example.com/");
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://www.example.com/frame.html"), &Method::GET, Destination::Iframe, Some(&page), &config);
+        assert_eq!(map["sec-fetch-dest"], "iframe");
+        assert_eq!(map["sec-fetch-mode"], "navigate");
+        assert_eq!(map["sec-fetch-site"], "same-origin");
+        assert!(!map.contains_key("sec-fetch-user"));
+        assert_eq!(map["upgrade-insecure-requests"], "1");
+        assert_eq!(map[ACCEPT], config.document_accept.as_str());
+
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://fonts.other.org/a.woff2"), &Method::GET, Destination::Font, Some(&page), &config);
+        assert_eq!(map["sec-fetch-dest"], "font");
+        assert_eq!(map["sec-fetch-mode"], "cors");
+        assert_eq!(map["origin"], "https://www.example.com");
+
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://www.example.com/v.mp4"), &Method::GET, Destination::Media, Some(&page), &config);
+        assert_eq!(map["sec-fetch-dest"], "video");
+        assert_eq!(map[ACCEPT_ENCODING], "identity;q=1, *;q=0");
+
+        // Client hints and Priority only go to trustworthy origins / TLS; Sec-Fetch-Site is
+        // always sent otherwise (and "none" without initiator).
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("http://example.com/a.png"), &Method::GET, Destination::Image, Some(&page), &config);
+        assert!(!map.contains_key("sec-ch-ua") && !map.contains_key("priority") && !map.contains_key("sec-fetch-site"));
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://www.example.com/x.css"), &Method::GET, Destination::Style, None, &config);
+        assert_eq!(map["sec-fetch-site"], "none");
+        assert_eq!(map["priority"], "u=0");
     }
 }

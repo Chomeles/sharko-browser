@@ -4,7 +4,7 @@ members = ["crates/common", "crates/netstack", "crates/script", "crates/engine",
 default-members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "crates/browser", "crates/shell", "crates/core", "crates/launcher"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.89"
 license-file = "LICENSE.md"
@@ -54,3 +54,6 @@ anyrender_vello = { path = "vendor/anyrender_vello" }
 parley = { path = "vendor/parley" }
 taffy = { path = "vendor/taffy" }
 stylo_taffy = { path = "vendor/stylo_taffy" }
+# PATCH 80: container queries.
+stylo = { path = "vendor/stylo" }
+stylo_atoms = { path = "vendor/stylo_atoms" }

@@ -1,7 +1,7 @@
 /target
 /target-*
 /dist
-node_modules/
+node_modules
 *.png
 !resources/**/*.png
 update-signing.key

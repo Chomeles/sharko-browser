@@ -531,6 +531,8 @@ impl BaseDocument {
                             crate::net::stamped_request(
                                 (**new_url).clone(),
                                 self.abort_signal.as_ref(),
+                                Some(&self.url),
+                                "image",
                             ),
                             ResourceHandler::boxed(
                                 self.tx.clone(),

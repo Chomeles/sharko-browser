@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>DOMParser adoption + focus on fixed</title>
+<style>body.lock{overflow:hidden;height:100%} #long{height:6000px;background:#eee} #cmp{position:fixed;left:0;top:0;width:300px;height:100px;background:#fc0}</style></head>
+<body>
+<div id="first">first content</div><div id="long"></div>
+<div id="cmp" tabindex="-1">consent dialog (fixed)</div>
+<script>
+window.__probe = function () {
+  const R = {};
+  // 1. nodes created by DOMParser(text/html) appended into the main document (stepstone ccm.js)
+  try {
+    const doc = new DOMParser().parseFromString('<div id="adopted">hi</div>', 'text/html');
+    const n = doc.body.firstChild;
+    document.body.appendChild(n);
+    const link = new DOMParser().parseFromString('<link rel="stylesheet" href="data:text/css,%23adopted%7Bcolor%3Argb(9%2C8%2C7)%7D" />', 'text/html').head.firstChild;
+    document.head.appendChild(link);
+    const el = document.getElementById('adopted');
+    R.adopt = { found: !!el, ownerIsMain: el && el.ownerDocument === document, connected: !!el && el.isConnected, rectW: el ? el.getBoundingClientRect().width : -1, text: document.body.innerText.includes('hi') };
+  } catch (e) { R.adopt = 'threw: ' + e.message; }
+  // 2. focus() on a position:fixed element at the end of a long overflow-hidden body
+  document.body.classList.add('lock');
+  document.getElementById('cmp').focus();
+  R.focus = { active: document.activeElement.id, scrollY: window.scrollY, bodyScrollTop: document.body.scrollTop, firstTop: Math.round(document.getElementById('first').getBoundingClientRect().top), cmpTop: Math.round(document.getElementById('cmp').getBoundingClientRect().top) };
+  return JSON.stringify(R);
+};
+</script></body></html>

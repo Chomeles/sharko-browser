@@ -126,9 +126,11 @@
     return id;
   }
   function cancelAnimationFrame(id) { rafCallbacks.delete(Number(id)); }
+  L.firstFrameAt = 0; // N.now() of the first animation frame the host ran (window.chrome.loadTimes)
   L.onFrame = function (ts) {
     frameRequested = false;
     const t = Number(ts);
+    if (L.firstFrameAt === 0) L.firstFrameAt = N.now() || 0.001;
     try { L.tickAnimations(); } catch (e) { L.reportException(e); }
     const maxId = rafId;
     for (const [id, cb] of rafCallbacks) {
@@ -392,7 +394,7 @@
     postMessage(message) {
       if (this.#closed) throw new DOMException("Failed to execute 'postMessage' on 'BroadcastChannel': Channel is closed", 'InvalidStateError');
       const data = cloneValue(message);
-      const origin = L.location ? L.location.origin : '';
+      const origin = L.docOrigin();
       for (const ch of broadcastChannels.get(this.#name)) {
         if (ch === this) continue;
         L.postTask(() => { if (!L.bcClosed(ch)) L.fire(ch, 'message', { data: cloneValue(data), origin }, L.MessageEvent); });
@@ -535,7 +537,7 @@
     let t = targetOrigin !== null && typeof targetOrigin === 'object'
       ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
       : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
-    if (t === '/') t = L.location.origin;
+    if (t === '/') t = L.docOrigin();
     else if (t !== '*') {
       const p = N.urlParse(t, null);
       if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
@@ -620,7 +622,7 @@
     return isFallbackKey(p) ? CROSS_ORIGIN_FALLBACK : undefined;
   }
   function crossOriginErr(st, verb, p) {
-    const blocked = `Blocked a frame with origin "${L.location.origin}" from accessing a cross-origin frame.`;
+    const blocked = `Blocked a frame with origin "${L.docOrigin()}" from accessing a cross-origin frame.`;
     if (verb === undefined) return new DOMException(blocked, 'SecurityError');
     const index = typeof p === 'string' && INDEX_RE.test(p);
     const what = index ? `an indexed property [${p}]` : `a named property${typeof p === 'string' ? ` '${p}'` : ''}`;
@@ -738,7 +740,7 @@
     const src = N.getAttr(id, 'src');
     if (src === null || src.trim() === '' || N.getAttr(id, 'srcdoc') !== null) return false;
     const p = N.urlParse(src.trim(), L.baseURL());
-    return p !== null && (p[1] === 'https:' || p[1] === 'http:') && p[10] !== L.location.origin;
+    return p !== null && (p[1] === 'https:' || p[1] === 'http:') && p[10] !== L.docOrigin();
   }
   // Child frames of this document in tree order (window.length, window[i]).
   L.childFrames = function () {
@@ -759,7 +761,7 @@
     } else {
       target = targetOrigin === undefined ? '/' : `${targetOrigin}`;
     }
-    const origin = L.location.origin;
+    const origin = L.docOrigin();
     let elsewhere = false;
     if (target !== '*' && target !== '/') {
       const p = N.urlParse(target, null);
@@ -772,7 +774,8 @@
     if (elsewhere) return;
     const src = source !== null && source !== undefined ? source : L.window;
     let srcOrigin = origin;
-    if (src !== L.window) { try { srcOrigin = src.location.origin; } catch (_) { /* keep ours */ } }
+    // (the document's origin, not the Location's: an about:srcdoc frame has its parent's)
+    if (src !== L.window) { try { const o = src.origin; if (typeof o === 'string') srcOrigin = o; } catch (_) { /* keep ours */ } }
     L.postTask(() => L.fire(L.window, 'message', { data: t.data, origin: srcOrigin, source: src, ports: t.ports }, L.MessageEvent));
   };
 
@@ -1177,7 +1180,7 @@
     }
     static createObjectURL(obj) {
       if (!(obj instanceof Blob) && !(L.MediaSource && obj instanceof L.MediaSource)) throw new TypeError("Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.");
-      const origin = L.location ? L.location.origin : 'null';
+      const origin = L.docOrigin();
       const url = 'blob:' + (origin === 'null' ? 'null' : origin) + '/' + randomUUID();
       blobURLs.set(url, obj);
       if (typeof N.registerBlobURL === 'function') {
@@ -2396,7 +2399,7 @@
   const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
   // `initiator` ('fetch', 'xmlhttprequest'): record a PerformanceResourceTiming entry. The
   // first downloaded bytes (a progress report) stand in for responseStart.
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator) {
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator, dest) {
     const reqId = nextReqId++;
     if (initiator !== undefined) {
       const timing = { start: N.now(), firstByte: 0 };
@@ -2413,7 +2416,7 @@
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
-      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function');
+      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function', dest || '');
     } catch (e) {
       pendingFetches.delete(reqId);
       fetchProgress.delete(reqId);
@@ -2488,7 +2491,7 @@
         fail(); return;
       }
       if (scheme !== 'http' && scheme !== 'https' && scheme !== 'file') { fail(); return; }
-      const docOrigin = L.location.origin;
+      const docOrigin = L.docOrigin();
       const sameOrigin = originOf(url) === docOrigin;
       if (d.mode === 'same-origin' && !sameOrigin) { fail(); return; }
       const b = bodies.get(request);
@@ -2647,7 +2650,7 @@
         } else flat.push(n, v);
       }
       if (!hasCT && ctype !== null) flat.push('Content-Type', ctype);
-      const mode = originOf(s.url) === L.location.origin ? 'same-origin' : 'cors';
+      const mode = 'cors'; // XHR is always a cors-mode request (Sec-Fetch-Mode: cors, even same-origin)
       if (!s.async) { this.#sendSync(flat, bytes, mode); return; }
       s.send = true;
       s.error = false;
@@ -2986,7 +2989,7 @@
       super();
       const fail = (msg, name) => new DOMException(`Failed to construct 'WebSocket': ${msg}`, name || 'SyntaxError');
       if (arguments.length === 0) throw new TypeError("Failed to construct 'WebSocket': 1 argument required, but only 0 present.");
-      const base = L.location ? L.location.href : null;
+      const base = L.documentURL();
       const p = N.urlParse(`${url}`, base);
       if (p === null) throw fail(`The URL '${url}' is invalid.`);
       let href = p[0];
@@ -2994,7 +2997,7 @@
       if (scheme === 'http' || scheme === 'https') { href = (scheme === 'http' ? 'ws' : 'wss') + href.slice(scheme.length); scheme = scheme === 'http' ? 'ws' : 'wss'; }
       if (scheme !== 'ws' && scheme !== 'wss') throw fail(`The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '${scheme}' is not allowed.`);
       if (href.includes('#')) throw fail(`The URL contains a fragment identifier ('${href.slice(href.indexOf('#') + 1)}'). Fragment identifiers are not allowed in WebSocket URLs.`);
-      if (scheme === 'ws' && L.location && L.location.protocol === 'https:') {
+      if (scheme === 'ws' && L.docProtocol() === 'https:') {
         const host = N.urlParse(href, null);
         const h = host === null ? '' : host[5];
         if (h !== 'localhost' && h !== '127.0.0.1' && h !== '[::1]') {
@@ -3014,7 +3017,7 @@
       this.#id = nextSocketId++;
       liveSockets.set(this.#id, this);
       let ok = false;
-      try { ok = N.wsOpen(this.#id, href, list, L.location ? L.location.origin : 'null'); } catch (_) { ok = false; }
+      try { ok = N.wsOpen(this.#id, href, list, L.docOrigin()); } catch (_) { ok = false; }
       if (!ok) {
         const id = this.#id;
         L.postTask(() => { L.onWebSocket(id, 'error', 'WebSocket is not supported here'); L.onWebSocket(id, 'close', 1006, '', false); });
@@ -3139,10 +3142,10 @@
       super();
       if (arguments.length === 0) throw new TypeError("Failed to construct 'Worker': 1 argument required, but only 0 present.");
       if (typeof N.workerCreate !== 'function') throw new DOMException("Failed to construct 'Worker': Workers are not supported.", 'NotSupportedError');
-      const p = N.urlParse(`${url}`, L.location ? L.location.href : null);
+      const p = N.urlParse(`${url}`, L.documentURL());
       if (p === null) throw new DOMException(`Failed to construct 'Worker': The URL '${url}' is invalid.`, 'SyntaxError');
       const href = p[0];
-      const pageOrigin = L.location ? L.location.origin : 'null';
+      const pageOrigin = L.docOrigin();
       if (p[1] !== 'blob:' && p[1] !== 'data:' && p[10] !== pageOrigin) {
         throw new DOMException(`Failed to construct 'Worker': Script at '${href}' cannot be accessed from origin '${pageOrigin}'.`, 'SecurityError');
       }
@@ -3220,7 +3223,7 @@
         try { v = win[k]; } catch (_) { v = undefined; }
         if (v !== undefined) define(k, v);
       }
-      const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.location ? L.location.href : null)); return q === null ? `${u}` : q[0]; };
+      const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.documentURL())); return q === null ? `${u}` : q[0]; };
       define('self', g);
       define('name', this.#name);
       define('navigator', win.navigator);
@@ -3312,6 +3315,75 @@
     TextDecoder, Blob, File, FileList, FileReader, FormData, ReadableStream, ReadableStreamDefaultReader,
     ReadableStreamDefaultController, WritableStream, TransformStream, Headers, Request, Response, XMLHttpRequest,
     XMLHttpRequestUpload, XMLHttpRequestEventTarget, IdleDeadline })) L.expose(k, v);
+
+  // =======================================================================================
+  // Cookie Store API (https://cookiestore.spec.whatwg.org), secure contexts. A view of the
+  // document's cookies (what document.cookie shows: no HttpOnly ones) through promises.
+  // =======================================================================================
+  function cookieArgs(method, args, needValue) {
+    const a = args[0];
+    if (a !== null && typeof a === 'object') {
+      const o = { name: a.name === undefined ? undefined : `${a.name}` };
+      for (const k of ['value', 'path', 'domain', 'sameSite']) if (a[k] !== undefined) o[k] = `${a[k]}`;
+      if (a.expires !== undefined && a.expires !== null) o.expires = Number(a.expires);
+      if (a.partitioned) o.partitioned = true;
+      if (needValue && (o.name === undefined || o.value === undefined)) throw new TypeError(`Failed to execute '${method}' on 'CookieStore': Required member is undefined.`);
+      return o;
+    }
+    if (args.length === 0) return {};
+    const o = { name: `${a}` };
+    if (needValue) {
+      if (args.length < 2) throw new TypeError(`Failed to execute '${method}' on 'CookieStore': 2 arguments required, but only 1 present.`);
+      o.value = `${args[1]}`;
+    }
+    return o;
+  }
+  class CookieStore extends EventTarget {
+    constructor(key) { if (key !== INTERNAL) throw new TypeError('Illegal constructor'); super(); }
+    #list(o) {
+      const out = [];
+      for (const part of N.getCookie().split(';')) {
+        const t = part.trim();
+        if (t === '') continue;
+        const i = t.indexOf('=');
+        const name = i < 0 ? '' : t.slice(0, i), value = i < 0 ? t : t.slice(i + 1);
+        if (o.name === undefined || o.name === name) out.push({ name, value });
+      }
+      return out;
+    }
+    get(...args) {
+      try { const o = cookieArgs('get', args, false); if (args.length === 0) throw new TypeError("Failed to execute 'get' on 'CookieStore': At least one of name or url is required."); return Promise.resolve(this.#list(o)[0] || null); } catch (e) { return Promise.reject(e); }
+    }
+    getAll(...args) {
+      try { return Promise.resolve(this.#list(cookieArgs('getAll', args, false))); } catch (e) { return Promise.reject(e); }
+    }
+    set(...args) {
+      try {
+        const o = cookieArgs('set', args, true);
+        const enc = (v) => v.replace(/[;\u0000-\u001f\u007f]/g, '');
+        let c = `${enc(o.name)}=${enc(o.value)}; path=${o.path === undefined ? '/' : o.path}`;
+        if (o.domain !== undefined) c += `; domain=${o.domain}`;
+        if (o.expires !== undefined) c += `; expires=${new Date(o.expires).toUTCString()}`;
+        c += `; samesite=${(o.sameSite || 'strict').toLowerCase()}`;
+        if (L.location && L.location.protocol === 'https:') c += '; secure';
+        N.setCookie(c);
+        return Promise.resolve();
+      } catch (e) { return Promise.reject(e); }
+    }
+    delete(...args) {
+      try {
+        const o = cookieArgs('delete', args, false);
+        if (o.name === undefined) throw new TypeError("Failed to execute 'delete' on 'CookieStore': Required member is undefined.");
+        let c = `${o.name}=; path=${o.path === undefined ? '/' : o.path}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        if (o.domain !== undefined) c += `; domain=${o.domain}`;
+        N.setCookie(c);
+        return Promise.resolve();
+      } catch (e) { return Promise.reject(e); }
+    }
+  }
+  L.defineEventHandlers(CookieStore.prototype, ['onchange']);
+  L.expose('CookieStore', CookieStore);
+  L.cookieStore = new CookieStore(INTERNAL);
 
   // =======================================================================================
   // crypto
@@ -4241,6 +4313,15 @@
   // =======================================================================================
   // navigator
   // =======================================================================================
+  // Whether this document is a secure context (https, file, localhost); frames without a URL of
+  // their own (about:blank, srcdoc) inherit it because the layer's document URL is the parent's.
+  L.isSecureContext = function () {
+    const p = N.urlParse(L.documentURL(), null);
+    if (p === null) return false;
+    if (p[1] === 'https:' || p[1] === 'wss:' || p[1] === 'file:') return true;
+    const h = p[5];
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost');
+  };
   let uaCache = null;
   function ua() { if (uaCache === null) uaCache = `${N.userAgent()}`; return uaCache; }
   function chromeVersion() { const m = /Chrome\/(\d+)(?:\.(\d+\.\d+\.\d+))?/.exec(ua()); return m ? [m[1], m[1] + '.' + (m[2] || '0.0.0')] : ['130', '130.0.0.0']; }
@@ -4306,17 +4387,41 @@
     get state() { return this.#state; }
   }
   L.defineEventHandlers(PermissionStatus.prototype, ['onchange']);
-  const PERMISSION_NAMES = ['accelerometer', 'background-fetch', 'background-sync', 'camera', 'clipboard-read', 'clipboard-write',
-    'display-capture', 'geolocation', 'gyroscope', 'local-fonts', 'magnetometer', 'microphone', 'midi', 'notifications',
-    'payment-handler', 'persistent-storage', 'push', 'screen-wake-lock', 'storage-access', 'top-level-storage-access',
-    'window-management', 'idle-detection', 'periodic-background-sync', 'system-wake-lock', 'nfc', 'speaker-selection', 'captured-surface-control', 'keyboard-lock', 'pointer-lock'];
+  L.orderKeys(PermissionStatus.prototype, ['name', 'state', 'onchange', 'constructor']);
+  // Chrome's answers for a profile without grants: `granted` for the permissions that need no
+  // prompt (or that only check a user gesture later), `prompt` for the others. In an insecure
+  // context everything is `denied` (Chrome cannot prompt there).
+  const PERMISSION_STATES = {
+    'accelerometer': 'granted', 'background-fetch': 'granted', 'background-sync': 'granted', 'camera': 'prompt',
+    'clipboard-read': 'prompt', 'clipboard-write': 'granted', 'display-capture': 'prompt', 'geolocation': 'prompt',
+    'gyroscope': 'granted', 'local-fonts': 'prompt', 'magnetometer': 'granted', 'microphone': 'prompt', 'midi': 'prompt',
+    'notifications': 'prompt', 'payment-handler': 'granted', 'persistent-storage': 'prompt', 'push': 'prompt',
+    'screen-wake-lock': 'granted', 'storage-access': 'granted', 'top-level-storage-access': 'prompt',
+    'window-management': 'prompt', 'idle-detection': 'prompt', 'periodic-background-sync': 'denied',
+    'captured-surface-control': 'prompt', 'keyboard-lock': 'granted', 'pointer-lock': 'granted',
+  };
+  // Names of the enum that Chrome rejects with a feature message (the feature is off).
+  const PERMISSION_DISABLED = {
+    'system-wake-lock': 'System Wake Lock is not enabled.', 'nfc': 'Web NFC is not enabled.',
+    'speaker-selection': 'The Speaker Selection API is not enabled.', 'ambient-light-sensor': 'GenericSensorExtraClasses flag is not enabled.',
+  };
   class Permissions {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     query(desc) {
-      if (desc === null || typeof desc !== 'object') return L.rejectedPromise(new TypeError("Failed to execute 'query' on 'Permissions': parameter 1 is not of type 'Object'."));
-      const name = `${desc.name}`;
-      if (!PERMISSION_NAMES.includes(name)) return L.rejectedPromise(new TypeError(`Failed to execute 'query' on 'Permissions': Failed to read the 'name' property from 'PermissionDescriptor': The provided value '${name}' is not a valid enum value of type PermissionName.`));
-      const st = name === 'clipboard-write' ? 'granted' : 'prompt';
+      const fail = (msg, type = TypeError) => L.rejectedPromise(type === TypeError ? new TypeError(`Failed to execute 'query' on 'Permissions': ${msg}`) : new DOMException(`Failed to execute 'query' on 'Permissions': ${msg}`, 'NotSupportedError'));
+      if (arguments.length === 0) return fail('1 argument required, but only 0 present.');
+      if (desc === null || typeof desc !== 'object') return fail("parameter 1 is not of type 'object'.");
+      let name;
+      try { name = desc.name; } catch (e) { return L.rejectedPromise(e); }
+      if (name === undefined) return fail("Failed to read the 'name' property from 'PermissionDescriptor': Required member is undefined.");
+      name = `${name}`;
+      if (Object.prototype.hasOwnProperty.call(PERMISSION_DISABLED, name)) return fail(PERMISSION_DISABLED[name]);
+      if (!Object.prototype.hasOwnProperty.call(PERMISSION_STATES, name)) return fail(`Failed to read the 'name' property from 'PermissionDescriptor': The provided value '${name}' is not a valid enum value of type PermissionName.`);
+      if (name === 'push' && desc.userVisibleOnly !== true) return fail("Push Permission without userVisibleOnly:true isn't supported yet.", DOMException);
+      if (name === 'top-level-storage-access' && typeof desc.requestedOrigin !== 'string') return fail('The requested origin is invalid.');
+      let st = PERMISSION_STATES[name];
+      if (!L.isSecureContext()) st = 'denied';
+      else if (name === 'notifications') st = notificationPermission() === 'default' ? 'prompt' : 'denied';
       return L.resolvedPromise(new PermissionStatus(INTERNAL, name, st));
     }
   }
@@ -4344,21 +4449,48 @@
     writeText(data) { this.#text = `${data}`; if (typeof N.clipboardWrite === 'function') { try { N.clipboardWrite(this.#text); } catch (_) { } } return L.resolvedPromise(undefined); }
     write(items) { return L.resolvedPromise(undefined); }
   }
+  // The brand list of `navigator.userAgentData` / Sec-CH-UA, generated like Chromium's
+  // `GenerateBrandVersionList` (components/embedder_support/user_agent_utils.cc): the "GREASE"
+  // brand and its version depend on the major version, and its position in the list on
+  // `major % 6`. Chrome 140 gives Chromium, "Not=A?Brand" 24, Google Chrome.
+  const GREASE_CHARS = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
+  const GREASE_VERSIONS = ['8', '99', '24'];
+  const BRAND_ORDERS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  function brandList(major, full) {
+    const seed = Number(major) | 0;
+    const gv = GREASE_VERSIONS[seed % 3];
+    const grease = ['Not' + GREASE_CHARS[seed % 11] + 'A' + GREASE_CHARS[(seed + 1) % 11] + 'Brand', full ? gv + '.0.0.0' : gv];
+    const list = new Array(3);
+    const order = BRAND_ORDERS[seed % 6];
+    list[order[0]] = grease;
+    list[order[1]] = ['Chromium', full ? full : major];
+    list[order[2]] = ['Google Chrome', full ? full : major];
+    return list.map((b) => Object.freeze({ brand: b[0], version: b[1] }));
+  }
+  L.brandList = brandList;
+  // The build of the claimed Chrome (the User-Agent string only carries `140.0.0.0`).
+  const CHROME_BUILDS = { 140: '140.0.7339.207' };
+  function chromeFullVersion() {
+    const [major, full] = chromeVersion();
+    return full.endsWith('.0.0.0') && CHROME_BUILDS[major] !== undefined ? CHROME_BUILDS[major] : full;
+  }
   class NavigatorUAData {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
-    get brands() { const [v] = chromeVersion(); return Object.freeze([Object.freeze({ brand: 'Chromium', version: v }), Object.freeze({ brand: 'Google Chrome', version: v }), Object.freeze({ brand: 'Not?A_Brand', version: '99' })]); }
+    get brands() { return Object.freeze(brandList(chromeVersion()[0], null)); }
     get mobile() { return false; }
     get platform() { return 'Windows'; }
     getHighEntropyValues(hints) {
-      const [v, full] = chromeVersion();
+      if (arguments.length === 0) return L.rejectedPromise(new TypeError("Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': 1 argument required, but only 0 present."));
+      const [major] = chromeVersion();
+      const full = chromeFullVersion();
       const all = {
-        brands: this.brands, mobile: false, platform: 'Windows', architecture: 'x86', bitness: '64', model: '',
-        platformVersion: '15.0.0', uaFullVersion: full, wow64: false, formFactors: ['Desktop'],
-        fullVersionList: Object.freeze([{ brand: 'Chromium', version: full }, { brand: 'Google Chrome', version: full }, { brand: 'Not?A_Brand', version: '99.0.0.0' }]),
+        architecture: 'x86', bitness: '64', model: '', platformVersion: '15.0.0', uaFullVersion: full, wow64: false,
+        formFactors: ['Desktop'], fullVersionList: Object.freeze(brandList(major, full)),
       };
-      const out = { brands: all.brands, mobile: false, platform: 'Windows' };
-      for (const h of Array.from(hints || [], String)) if (h in all) out[h] = all[h];
-      void v;
+      const out = { brands: this.brands, mobile: false, platform: 'Windows' };
+      let list;
+      try { list = Array.from(hints, String); } catch (e) { return L.rejectedPromise(new TypeError("Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': The provided value cannot be converted to a sequence.")); }
+      for (const h of list) if (h in all) out[h] = all[h];
       return L.resolvedPromise(out);
     }
     toJSON() { return { brands: this.brands, mobile: false, platform: 'Windows' }; }
@@ -4371,6 +4503,7 @@
     get saveData() { return false; }
   }
   L.defineEventHandlers(NetworkInformation.prototype, ['onchange']);
+  L.orderKeys(NetworkInformation.prototype, ['onchange', 'effectiveType', 'rtt', 'downlink', 'saveData', 'constructor']);
   class DeprecatedStorageQuota {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     queryUsageAndQuota(success, error) {
@@ -4381,19 +4514,23 @@
       L.microtask(() => { try { if (typeof success === 'function') success(Number(bytes) || 0); } catch (e) { L.reportException(e); } });
     }
   }
-  // Notifications: never granted (no permission prompt), like a denied site in Chrome.
+  // Notifications: never granted (there is no permission prompt). As in Chrome without a grant
+  // the permission is `default` in a secure context (`denied` in an insecure one), and
+  // requestPermission() resolves `denied` without changing it (headless Chrome, no UI).
+  function notificationPermission() { return L.isSecureContext() ? 'default' : 'denied'; }
   class Notification extends EventTarget {
     #title; #options;
-    constructor(title, options) {
+    constructor(title, options = undefined) {
       super();
       if (arguments.length === 0) throw new TypeError("Failed to construct 'Notification': 1 argument required, but only 0 present.");
       this.#title = `${title}`;
       this.#options = options !== null && typeof options === 'object' ? options : {};
       L.microtask(() => L.fire(this, 'error', {}));
     }
-    static get permission() { return 'denied'; }
+    static get permission() { return notificationPermission(); }
     static get maxActions() { return 2; }
-    static requestPermission(callback) {
+    static requestPermission(callback = undefined) {
+      if (callback !== undefined && typeof callback !== 'function') return L.rejectedPromise(new TypeError("Failed to execute 'requestPermission' on 'Notification': parameter 1 is not of type 'Function'."));
       const p = L.resolvedPromise('denied');
       if (typeof callback === 'function') L.promiseThen.call(p, (v) => { try { callback(v); } catch (e) { L.reportException(e); } });
       return p;
@@ -4416,6 +4553,8 @@
     close() { }
   }
   L.defineEventHandlers(Notification.prototype, ['onclick', 'onshow', 'onerror', 'onclose']);
+  L.orderKeys(Notification.prototype, ['onclick', 'onshow', 'onerror', 'onclose', 'title', 'dir', 'lang', 'body', 'tag', 'icon', 'badge',
+    'vibrate', 'timestamp', 'renotify', 'silent', 'requireInteraction', 'data', 'actions', 'close', 'image', 'constructor']);
   class StorageManager {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     estimate() { return L.resolvedPromise({ quota: 299977904946, usage: 0, usageDetails: {} }); }
@@ -4515,6 +4654,44 @@
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     isInputPending() { return false; }
   }
+  // navigator.mediaDevices: the machine has no capture devices, so enumerateDevices() is empty
+  // and every capture request fails like it does on a computer without camera and microphone.
+  const SUPPORTED_CONSTRAINTS = ['aspectRatio', 'autoGainControl', 'brightness', 'channelCount', 'colorTemperature', 'contrast',
+    'deviceId', 'displaySurface', 'echoCancellation', 'exposureCompensation', 'exposureMode', 'exposureTime', 'facingMode',
+    'focusDistance', 'focusMode', 'frameRate', 'groupId', 'height', 'iso', 'latency', 'noiseSuppression', 'pan',
+    'pointsOfInterest', 'resizeMode', 'restrictOwnAudio', 'sampleRate', 'sampleSize', 'saturation', 'sharpness',
+    'suppressLocalAudioPlayback', 'tilt', 'torch', 'voiceIsolation', 'whiteBalanceMode', 'width', 'zoom'];
+  function wantsMedia(c) {
+    if (c === undefined || c === null) return false;
+    if (typeof c !== 'object') return false;
+    const t = (v) => v !== undefined && v !== null && v !== false && v !== 0 && v !== '';
+    return t(c.audio) || t(c.video);
+  }
+  class MediaDevices extends EventTarget {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); super(); }
+    enumerateDevices() { return L.resolvedPromise([]); }
+    getSupportedConstraints() { const o = {}; for (const k of SUPPORTED_CONSTRAINTS) o[k] = true; return o; }
+    getUserMedia(constraints = undefined) {
+      if (constraints !== undefined && constraints !== null && typeof constraints !== 'object') return L.rejectedPromise(new TypeError("Failed to execute 'getUserMedia' on 'MediaDevices': The provided value is not of type 'MediaStreamConstraints'."));
+      if (!wantsMedia(constraints)) return L.rejectedPromise(new TypeError("Failed to execute 'getUserMedia' on 'MediaDevices': At least one of audio and video must be requested"));
+      return L.rejectedPromise(new DOMException('Requested device not found', 'NotFoundError'));
+    }
+    getDisplayMedia(options = undefined) {
+      if (!navigator.userActivation.isActive) return L.rejectedPromise(new DOMException('getDisplayMedia requires transient activation from a user gesture.', 'NotAllowedError'));
+      return L.rejectedPromise(new DOMException('Permission denied', 'NotAllowedError'));
+    }
+  }
+  L.defineEventHandlers(MediaDevices.prototype, ['ondevicechange']);
+  L.orderKeys(MediaDevices.prototype, ['ondevicechange', 'enumerateDevices', 'getSupportedConstraints', 'getUserMedia', 'getDisplayMedia', 'constructor']);
+  // The callback form (`navigator.getUserMedia(constraints, success, error)`), still present in Chrome.
+  function legacyGetUserMedia(method, args) {
+    if (args.length < 3) throw new TypeError(`Failed to execute '${method}' on 'Navigator': 3 arguments required, but only ${args.length} present.`);
+    const error = args[2];
+    if (typeof args[1] !== 'function') throw new TypeError(`Failed to execute '${method}' on 'Navigator': parameter 2 is not of type 'Function'.`);
+    if (typeof error !== 'function') throw new TypeError(`Failed to execute '${method}' on 'Navigator': parameter 3 is not of type 'Function'.`);
+    const e = wantsMedia(args[0]) ? new DOMException('Requested device not found', 'NotFoundError') : new TypeError('At least one of audio and video must be requested');
+    L.postTask(() => L.safeCall(error, undefined, [e]));
+  }
   class Navigator {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     get userAgent() { return ua(); }
@@ -4526,7 +4703,6 @@
     get vendor() { return 'Google Inc.'; }
     get vendorSub() { return ''; }
     get platform() { return 'Win32'; }
-    get oscpu() { return undefined; }
     get language() { return 'de-DE'; }
     get languages() { return lazy('languages', () => Object.freeze(['de-DE', 'de', 'en-US', 'en'])); }
     get onLine() { return true; }
@@ -4552,8 +4728,11 @@
     get locks() { return lazy('locks', () => new LockManager(INTERNAL)); }
     get userActivation() { return lazy('userActivation', () => new UserActivation(INTERNAL)); }
     get scheduling() { return lazy('scheduling', () => new Scheduling(INTERNAL)); }
-    // No `serviceWorker` / `mediaDevices` members (like Chrome in an insecure context):
-    // sites test `'serviceWorker' in navigator` and then call methods on it.
+    // No `serviceWorker` member: sites test `'serviceWorker' in navigator` and then call methods on it.
+    // `mediaDevices` is a device-less MediaDevices (no camera, no microphone, nothing to enumerate).
+    get mediaDevices() { return lazy('mediaDevices', () => new MediaDevices(INTERNAL)); }
+    getUserMedia(constraints, success, error) { return legacyGetUserMedia('getUserMedia', arguments); }
+    webkitGetUserMedia(constraints, success, error) { return legacyGetUserMedia('webkitGetUserMedia', arguments); }
     sendBeacon(url, data) {
       const p = N.urlParse(L.toUSV(url), L.baseURL());
       if (p === null) throw new TypeError(`Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported.`);
@@ -4578,8 +4757,68 @@
       }));
     }
   }
+  // Blink's order (V8 installs `constructor` after the members that are always there and before
+  // the [SecureContext] ones); members this engine does not have are left out.
+  L.orderKeys(Navigator.prototype, ['vendorSub', 'productSub', 'vendor', 'maxTouchPoints', 'scheduling', 'userActivation', 'geolocation',
+    'doNotTrack', 'connection', 'plugins', 'mimeTypes', 'pdfViewerEnabled', 'webkitTemporaryStorage', 'webkitPersistentStorage',
+    'hardwareConcurrency', 'cookieEnabled', 'appCodeName', 'appName', 'appVersion', 'platform', 'product', 'userAgent', 'language',
+    'languages', 'onLine', 'webdriver', 'getGamepads', 'javaEnabled', 'sendBeacon', 'vibrate', 'constructor', 'clipboard',
+    'mediaDevices', 'storage', 'deviceMemory', 'userAgentData', 'locks', 'permissions', 'getBattery', 'getUserMedia',
+    'webkitGetUserMedia', 'registerProtocolHandler', 'unregisterProtocolHandler']);
   const navigator = new Navigator(INTERNAL);
   L.navigator = navigator;
+
+  // =======================================================================================
+  // window.chrome
+  // =======================================================================================
+  // What a Chrome page without extension access sees (there is no `runtime`): `loadTimes()` and
+  // `csi()` (deprecated page timing, derived from the same milestones as performance.timing) and
+  // `app`, the packaged-app stub of a browser tab. Shapes and function names follow Chromium:
+  // loadTimes/csi are anonymous constructor-like functions, the `app` members are methods.
+  // `rel`: a milestone of L.milestones (ms since the time origin; undefined: has not happened yet)
+  function epochMs(rel) { return rel === undefined ? 0 : Math.round(N.timeOrigin()) + Math.round(rel); }
+  function loadTimes() {
+    const origin = Math.round(N.timeOrigin());
+    const sec = (rel) => epochMs(rel) / 1000;
+    const m = L.milestones;
+    const https = /^https:/i.test(L.documentURL());
+    const web = /^https?:/i.test(L.documentURL());
+    return {
+      requestTime: origin / 1000,
+      startLoadTime: origin / 1000,
+      commitLoadTime: sec(m.responseEnd || 0),
+      finishDocumentLoadTime: sec(m.domContentLoadedEventEnd),
+      finishLoadTime: sec(m.loadEventEnd),
+      firstPaintTime: L.firstFrameAt === 0 ? 0 : sec(L.firstFrameAt),
+      firstPaintAfterLoadTime: 0,
+      navigationType: 'Other',
+      wasFetchedViaSpdy: false,
+      wasNpnNegotiated: https,
+      npnNegotiatedProtocol: https ? 'http/1.1' : '',
+      wasAlternateProtocolAvailable: false,
+      connectionInfo: web ? 'http/1.1' : 'unknown',
+    };
+  }
+  function csi() {
+    const origin = Math.round(N.timeOrigin());
+    return { startE: origin, onloadT: epochMs(L.milestones.loadEventEnd), pageT: N.now(), tran: 15 };
+  }
+  // Anonymous, like Chromium's (`chrome.loadTimes.name === ''`, prints as `function () { [native code] }`).
+  Object.defineProperty(loadTimes, 'name', { value: '', configurable: true });
+  Object.defineProperty(csi, 'name', { value: '', configurable: true });
+  const chromeApp = {
+    isInstalled: false,
+    ...{
+      getDetails() { return null; },
+      getIsInstalled() { return false; },
+      installState() { const callback = arguments[0]; if (typeof callback === 'function') L.postTask(() => L.safeCall(callback, undefined, ['not_installed'])); },
+      runningState() { return 'cannot_run'; },
+    },
+    InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+    RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+  };
+  // (installState's callback receives the state asynchronously in Chrome.)
+  L.chrome = { loadTimes, csi, app: chromeApp };
 
   // =======================================================================================
   // screen / visualViewport
@@ -4629,6 +4868,8 @@
   // Location / History
   // =======================================================================================
   const locCache = { url: null, p: null };
+  // The host's URL of this document, split (see L.documentURL): what the layer itself needs
+  // (origin checks, resolving, storage keys). The Location object shows exposedParts().
   function curParts() {
     const u = L.documentURL();
     if (u !== locCache.url) {
@@ -4636,6 +4877,19 @@
       locCache.p = N.urlParse(u, null) || [u, ':', '', '', '', '', '', '', '', '', 'null'];
     }
     return locCache.p;
+  }
+  // The origin of the document (an about:blank frame has its parent's, unlike its Location).
+  L.docOrigin = function () { return curParts()[10]; };
+  L.docProtocol = function () { return curParts()[1]; };
+  const exposedCache = { url: null, p: null };
+  function exposedParts() {
+    const u = L.exposedURL();
+    if (u === L.documentURL()) return curParts();
+    if (u !== exposedCache.url) {
+      exposedCache.url = u;
+      exposedCache.p = N.urlParse(u, null) || [u, ':', '', '', '', '', '', '', '', '', 'null'];
+    }
+    return exposedCache.p;
   }
   function stripHash(u) { const i = u.indexOf('#'); return i < 0 ? u : u.slice(0, i); }
   L.lastURL = null;
@@ -4679,22 +4933,22 @@
   L.navigateTo = navigateTo;
   class Location {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
-    get href() { return L.documentURL(); }
+    get href() { return L.exposedURL(); }
     set href(v) { navigateTo(`${v}`, false, 'href'); }
-    get origin() { return curParts()[10]; }
-    get protocol() { return curParts()[1]; }
+    get origin() { return exposedParts()[10]; }
+    get protocol() { return exposedParts()[1]; }
     set protocol(v) { setLocPart('protocol', v); }
-    get host() { return curParts()[4]; }
+    get host() { return exposedParts()[4]; }
     set host(v) { setLocPart('host', v); }
-    get hostname() { return curParts()[5]; }
+    get hostname() { return exposedParts()[5]; }
     set hostname(v) { setLocPart('hostname', v); }
-    get port() { return curParts()[6]; }
+    get port() { return exposedParts()[6]; }
     set port(v) { setLocPart('port', v); }
-    get pathname() { return curParts()[7]; }
+    get pathname() { return exposedParts()[7]; }
     set pathname(v) { setLocPart('pathname', v); }
-    get search() { return curParts()[8]; }
+    get search() { return exposedParts()[8]; }
     set search(v) { setLocPart('search', v); }
-    get hash() { return curParts()[9]; }
+    get hash() { return exposedParts()[9]; }
     set hash(v) {
       const u = new URL(L.documentURL());
       let s = `${v}`;
@@ -4707,7 +4961,7 @@
     assign(url) { navigateTo(`${url}`, false, 'assign'); }
     replace(url) { navigateTo(`${url}`, true, 'replace'); }
     reload() { N.reload(); }
-    toString() { return L.documentURL(); }
+    toString() { return L.exposedURL(); }
     get ancestorOrigins() { return lazy('ancestorOrigins', () => L.makeDOMStringList([])); }
   }
   function setLocPart(part, v) {
@@ -4888,13 +5142,115 @@
     removeListener(cb) { if (cb !== null && cb !== undefined) this.removeEventListener('change', cb); }
   }
   L.defineEventHandlers(MediaQueryList.prototype, ['onchange']);
+  // The style engine answers the media features of Stylo's Servo build (width, height,
+  // orientation, resolution, hover, pointer, prefers-color-scheme, ...). The others make a
+  // query "unknown", i.e. false, although a screen browser has fixed answers for them: these
+  // are decided here, where a feature the engine does not know is replaced by a condition
+  // that is always true or false. (A feature the engine learns to answer is left to it.)
+  //   enum: [current value, in boolean context]     int: current value (min-/max- allowed)
+  const MQ_FEATURES = {
+    'color-gamut': { enum: 'srgb', values: ['srgb', 'p3', 'rec2020'], bool: true },
+    'display-mode': { enum: 'browser', values: ['fullscreen', 'standalone', 'minimal-ui', 'browser', 'picture-in-picture', 'window-controls-overlay'], bool: true },
+    'dynamic-range': { enum: 'standard', values: ['standard', 'high'], bool: false },
+    'forced-colors': { enum: 'none', values: ['none', 'active'], bool: false },
+    'prefers-contrast': { enum: 'no-preference', values: ['no-preference', 'more', 'less', 'custom'], bool: false },
+    'prefers-reduced-motion': { enum: 'no-preference', values: ['no-preference', 'reduce'], bool: false },
+    'prefers-reduced-transparency': { enum: 'no-preference', values: ['no-preference', 'reduce'], bool: false },
+    'scripting': { enum: 'enabled', values: ['none', 'initial-only', 'enabled'], bool: true },
+    'update': { enum: 'fast', values: ['none', 'slow', 'fast'], bool: true },
+    'overflow-block': { enum: 'scroll', values: ['none', 'scroll', 'paged'], bool: true },
+    'overflow-inline': { enum: 'scroll', values: ['none', 'scroll'], bool: true },
+    'color': { int: 8 },
+    'color-index': { int: 0 },
+    'monochrome': { int: 0 },
+    'grid': { int: 0, noRange: true },
+  };
+  const MQ_TRUE = '(width >= 0px)';
+  const MQ_FALSE = '(width < 0px)';
+  const mqNativeKnows = new Map();
+  function nativeKnowsFeature(name, f) {
+    let k = mqNativeKnows.get(name);
+    if (k === undefined) {
+      const probe = f.values !== undefined ? f.values.map((v) => `(${name}: ${v})`).join(', ') : `(min-${name}: 0)`;
+      try { k = !!N.matchMedia(probe); } catch (_) { k = false; }
+      mqNativeKnows.set(name, k);
+    }
+    return k;
+  }
+  function cmp(a, op, b) {
+    switch (op) {
+      case '<': return a < b; case '<=': return a <= b; case '>': return a > b; case '>=': return a >= b; default: return a === b;
+    }
+  }
+  const FLIP = { '<': '>', '<=': '>=', '>': '<', '>=': '<=', '=': '=' };
+  // The answer ('t' / 'f') for one `( ... )` condition of a media feature we decide, else null.
+  function shimCondition(inner) {
+    const t = inner.trim().toLowerCase();
+    let name = null, prefix = '', value = null, ops = null;
+    let m = /^(min-|max-)?([a-z][a-z-]*)\s*(?::\s*(.*?))?$/.exec(t);
+    if (m !== null && MQ_FEATURES[m[2]] !== undefined) { prefix = m[1] || ''; name = m[2]; value = m[3] === undefined ? null : m[3]; }
+    else {
+      // range syntax: `name op value`, `value op name`, `value op name op value`
+      m = /^([a-z][a-z-]*)\s*(<=|>=|<|>|=)\s*(.+)$/.exec(t);
+      if (m !== null && MQ_FEATURES[m[1]] !== undefined) { name = m[1]; ops = [[m[2], m[3]]]; }
+      else {
+        m = /^(.+?)\s*(<=|>=|<|>|=)\s*([a-z][a-z-]*)\s*(?:(<=|>=|<|>|=)\s*(.+))?$/.exec(t);
+        if (m !== null && MQ_FEATURES[m[3]] !== undefined) {
+          name = m[3]; ops = [[FLIP[m[2]], m[1]]];
+          if (m[4] !== undefined) ops.push([m[4], m[5]]);
+        }
+      }
+    }
+    if (name === null) return null;
+    const f = MQ_FEATURES[name];
+    if (nativeKnowsFeature(name, f)) return null;
+    if (f.enum !== undefined) {
+      if (prefix !== '' || ops !== null) return 'f';
+      if (value === null) return f.bool ? 't' : 'f';
+      return value === f.enum ? 't' : 'f';
+    }
+    const num = (v) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
+    if (ops !== null) {
+      if (f.noRange) return 'f';
+      for (const [op, v] of ops) { const n = num(v); if (Number.isNaN(n) || !cmp(f.int, op, n)) return 'f'; }
+      return 't';
+    }
+    if (value === null) return prefix === '' && f.int !== 0 ? 't' : 'f';
+    const n = num(value);
+    if (Number.isNaN(n)) return 'f';
+    if (prefix !== '' && f.noRange) return 'f';
+    if (prefix === 'min-') return f.int >= n ? 't' : 'f';
+    if (prefix === 'max-') return f.int <= n ? 't' : 'f';
+    return f.int === n ? 't' : 'f';
+  }
+  const MQ_LEAF = /\(([^()]*)\)/g;
+  const MQ_NAMES = /(?:^|[^a-z-])(?:min-|max-)?(?:color-gamut|display-mode|dynamic-range|forced-colors|prefers-contrast|prefers-reduced-motion|prefers-reduced-transparency|scripting|update|overflow-block|overflow-inline|color|color-index|monochrome|grid)(?![a-z-])/i;
+  const mqRewrites = new Map();
+  function shimMedia(q) {
+    if (!MQ_NAMES.test(q)) return q;
+    let r = mqRewrites.get(q);
+    if (r === undefined) {
+      r = q.replace(MQ_LEAF, (whole, inner) => {
+        const a = shimCondition(inner);
+        return a === null ? whole : a === 't' ? MQ_TRUE : MQ_FALSE;
+      });
+      if (mqRewrites.size > 200) mqRewrites.clear();
+      mqRewrites.set(q, r);
+    }
+    return r;
+  }
   function evalMQ(q) {
     if (q.trim() === '') return true;
-    try { return !!N.matchMedia(q); } catch (_) { return false; }
+    try { return !!N.matchMedia(shimMedia(q)); } catch (_) { return false; }
+  }
+  // MediaQueryList.media: the query in canonical form (lower case, `(name: value)`, `a, b`).
+  function serializeMedia(q) {
+    return q.toLowerCase().replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')')
+      .replace(/\s*:\s*/g, ': ').replace(/\s*,\s*/g, ', ').trim();
   }
   function matchMedia(query) {
     if (arguments.length === 0) throw new TypeError("Failed to execute 'matchMedia' on 'Window': 1 argument required, but only 0 present.");
-    const q = `${query}`.trim().replace(/\s+/g, ' ');
+    const q = serializeMedia(`${query}`);
     const m = new MediaQueryList(INTERNAL);
     mqlData.set(m, { media: q, last: evalMQ(q) });
     mqls.push(typeof WeakRef === 'function' ? new WeakRef(m) : { deref: () => m });
@@ -5992,7 +6348,7 @@
     Crypto, SubtleCrypto, CryptoKey, Performance, PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
     PerformanceNavigationTiming, PerformanceTiming, PerformanceNavigation, PerformanceObserver, PerformanceObserverEntryList,
     Navigator, MimeType, MimeTypeArray, Plugin, PluginArray, Permissions, PermissionStatus, Clipboard, ClipboardItem,
-    NavigatorUAData, NetworkInformation, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
+    NavigatorUAData, NetworkInformation, MediaDevices, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
     UserActivation, Scheduling,
     Screen, ScreenOrientation, VisualViewport, Location, History, DOMStringList, Storage, MediaQueryList,
     IntersectionObserver, IntersectionObserverEntry, ResizeObserver, ResizeObserverEntry, ResizeObserverSize,

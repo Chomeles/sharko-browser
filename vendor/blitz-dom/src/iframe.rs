@@ -52,11 +52,13 @@ impl BaseDocument {
         &self,
         node_id: NodeId,
         base_url: Option<String>,
+        fallback_base_url: Option<String>,
         abort_signal: AbortSignal,
     ) -> DocumentConfig {
         DocumentConfig {
             viewport: None,
             base_url,
+            fallback_base_url,
             ua_stylesheets: None,
             net_provider: Some(self.net_provider.clone()),
             navigation_provider: Some(Arc::new(IframeNavigationProvider {
@@ -101,9 +103,11 @@ impl BaseDocument {
         node_id: NodeId,
         html: &str,
         base_url: Option<String>,
+        fallback_base_url: Option<String>,
         abort_signal: AbortSignal,
     ) {
-        let config = self.iframe_document_config(node_id, base_url, abort_signal);
+        let config =
+            self.iframe_document_config(node_id, base_url, fallback_base_url, abort_signal);
         let sub_doc = self
             .html_parser_provider
             .clone()
@@ -118,7 +122,9 @@ impl BaseDocument {
     pub(crate) fn load_iframe_srcdoc(&mut self, node_id: NodeId, srcdoc: &str) {
         let signal = self.new_iframe_generation(node_id, None);
         let base_url = Some(self.url.to_string());
-        self.attach_iframe_document(node_id, srcdoc, base_url, signal);
+        // PATCH: HTML "fallback base URL": a srcdoc document's is its parent's document base URL.
+        let fallback = Some(self.document_base.to_string());
+        self.attach_iframe_document(node_id, srcdoc, base_url, fallback, signal);
         // PATCH: a `srcdoc` document loads like a fetched one (the `<iframe>`'s `load`
         // event); the initial empty document of a src-less iframe fires none.
         if !srcdoc.is_empty() {
@@ -139,7 +145,7 @@ impl BaseDocument {
         let signal = self.new_iframe_generation(node_id, Some(handler.request_id()));
         self.net_provider.fetch(
             self.id(),
-            stamped_request(url, Some(&signal)),
+            stamped_request(url, Some(&signal), Some(&self.url), "iframe"),
             Box::new(handler),
         );
     }
@@ -184,6 +190,6 @@ impl BaseDocument {
             return;
         }
 
-        self.attach_iframe_document(node_id, html, resolved_url, signal);
+        self.attach_iframe_document(node_id, html, resolved_url, None, signal);
     }
 }

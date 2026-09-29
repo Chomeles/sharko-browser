@@ -148,6 +148,9 @@ pub struct Node {
     pub sticky_offset: Cell<(f32, f32)>,
     /// PATCH: the parent's absolute position used when this node's layout was last rounded.
     pub round_origin: Cell<(f32, f32)>,
+    /// PATCH 80 (container queries): content-box size (packed `Au` pair, see
+    /// `container_query.rs`) that style last saw when it queried this node as a container.
+    pub cq_used: std::sync::atomic::AtomicU64,
     /// PATCH: last known index in the parent's `children` (validated on use), so sibling
     /// lookups during selector matching are O(1) instead of a scan of the child list.
     child_idx_hint: std::sync::atomic::AtomicUsize,
@@ -340,6 +343,7 @@ impl Node {
             stacking_context: None,
             sticky_offset: Cell::new((0.0, 0.0)),
             round_origin: Cell::new((f32::NAN, f32::NAN)),
+            cq_used: std::sync::atomic::AtomicU64::new(crate::container_query::NEVER_QUERIED),
             child_idx_hint: std::sync::atomic::AtomicUsize::new(0),
 
             flags: NodeFlags::empty(),
@@ -724,7 +728,19 @@ impl Node {
         {
             if !input_data.is_multiline {
                 let content_box_height = self.final_layout().content_box_height();
-                let input_height = input_data.editor.try_layout().unwrap().height() / scale as f32;
+                let mut layout_height = input_data.editor.try_layout().unwrap().height();
+                // PATCH: an empty layout has no height (its only line is the empty last one),
+                // but what shows there, the placeholder or the caret, is a line tall.
+                if layout_height == 0.0 && input_data.editor.raw_text().is_empty() {
+                    layout_height = match &input_data.placeholder {
+                        Some(placeholder) => placeholder.height(),
+                        None => input_data
+                            .editor
+                            .cursor_geometry(1.5)
+                            .map_or(0.0, |caret| (caret.y1 - caret.y0) as f32),
+                    };
+                }
+                let input_height = layout_height / scale as f32;
                 let y_offset = ((content_box_height - input_height) / 2.0).max(0.0);
 
                 return y_offset as f64;

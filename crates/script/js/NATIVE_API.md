@@ -134,7 +134,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.styleLength(id)` / `N.styleItem(id, i)` | number / property name |
 | `N.computedStyle(id, cssPropName, pseudoOrEmpty)` | resolved value string (forces style) |
 | `N.cssSupports(prop, value)` | bool |
-| `N.matchMedia(query)` | bool – evaluates a media query against the current viewport |
+| `N.matchMedia(query)` | bool – evaluates a media query list against the current viewport. Features the engine does not know make a query false. The layer decides the fixed answers of a screen browser for the features it lists (`color-gamut: srgb`, `display-mode: browser`, `prefers-reduced-motion: no-preference`, `scripting: enabled`, `update: fast`, `color`, ..., see "Chrome consistency" in the README) by replacing those conditions with `(width >= 0px)` / `(width < 0px)` before it asks, and only for features that the native answers `false` for both values (so an engine that learns a feature, e.g. `prefers-reduced-motion`, is asked directly). Range syntax on `width` must be supported |
 
 ## Forms / focus / interaction
 | function | returns |
@@ -181,6 +181,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | function | returns |
 |---|---|
 | `N.location()` | current document URL (string) |
+| `N.baseURL()` | document base URL (string): first `<base href>` against the fallback base URL, else the fallback (HTML "document base URL"); same value the engine resolves subresources with |
 | `N.navigate(url, replace)` | begin navigation of this tab |
 | `N.reload()` | – |
 | `N.historyPush(url, replace)` | same-document URL change (pushState/replaceState). Rust updates the document URL; state objects are kept in JS |
@@ -204,7 +205,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.frameNavigate(path, url, replace)` | Optional. Navigate the frame at `path` (`[]`: the page) to the absolute `url`, replacing its history entry if `replace`: `top.location = url`, `parent.location.replace(url)` where that window is not scriptable from here. `javascript:` URLs are never passed. Without it those calls do nothing |
 | `N.realmGlobal(path)` | The real `window` (global object) of the frame at `path` if it is same-origin and part of this page (its realm is created on demand, running that document's scripts), else `null` |
 | `N.frameGlobal(id)`, `N.parentGlobal()`, `N.topGlobal()` | `realmGlobal` for this document's `<iframe id>`, the parent frame and the page |
-| `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null` |
+| `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null`. The layer also uses it (with `N.location()`, which the host sets to the parent's URL for the initial `about:blank` document and for `srcdoc` documents) to tell those two from documents with a URL of their own, see "about:blank and srcdoc frames" in the README |
 | `N.foreignNodeType(o)` | `o`'s nodeType if it is a node wrapper of another realm of this page, else `0` (this realm's wrappers, non-nodes) |
 | `N.windowPostMessage(message, targetOrigin, transfer)` | `window.postMessage` itself (installed as the method, so V8 knows the calling realm): runs hook `windowPostMessage` of this realm with the caller's window as `source` |
 | `N.cryptoDigest(hash, data)`, `N.cryptoHmac(hash, key, data)` | ArrayBuffer (SHA-1/256/384/512, aws-lc-rs) |
@@ -288,7 +289,7 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `N.fetchSync(method, url, headersFlat, bodyOrNull, credentials)` | synchronous request for sync XHR. Returns `[status, statusText, finalUrl, headersFlat, bodyArrayBuffer\|null, errorOrNull]`; status 0 + error if unsupported. (sync XHR throws `InvalidAccessError`) |
 | `N.clipboardWrite(text)` | `navigator.clipboard.writeText`. |
 | `N.doctype()` | `[name, publicId, systemId]` of the main document's `<!DOCTYPE>` as parsed, or `null` if the source had none (then JS reports quirks mode). The Rust DOM has no DocumentType nodes, so at `onDocumentParsed` JS inserts a comment-backed DocumentType before `<html>`. It does the same for DOMParser and `createHTMLDocument` documents, reading the doctype from the markup there. (`<!DOCTYPE html>` assumed) |
-| `N.fetch(reqId, method, url, headersFlat, body, mode, credentials, cache, redirect)` | trailing args added to `N.fetch`. `credentials`: `"omit"`, `"same-origin"` (default) or `"include"`. `cache`: a RequestCache value. `redirect`: `"follow"`, `"error"` or `"manual"`. For `"error"` and `"manual"` Rust does not follow; on a 3xx JS rejects (`"error"`) or returns an `opaqueredirect` Response (`"manual"`). What JS passes: `fetch()` uses the Request's values; XHR sends `include` if `withCredentials`, else `same-origin`; classic scripts send `include` (no `crossorigin` or `use-credentials`) or `same-origin` (anonymous); `sendBeacon` sends `include`. |
+| `N.fetch(reqId, method, url, headersFlat, body, mode, credentials, cache, redirect, progress, destination)` | trailing args added to `N.fetch`. `destination` (optional): the Fetch destination, `"script"` for `<script src>` and module loads (other values: `style`, `image`, `font`, `video`/`audio`, `iframe`); it selects `Accept`, `Sec-Fetch-Dest` and `Priority`. `mode` also becomes `Sec-Fetch-Mode` (and decides on `Origin`) when it differs from the destination's default (`no-cors` fetches, `crossorigin` scripts). `credentials`: `"omit"`, `"same-origin"` (default) or `"include"`. `cache`: a RequestCache value. `redirect`: `"follow"`, `"error"` or `"manual"`. For `"error"` and `"manual"` Rust does not follow; on a 3xx JS rejects (`"error"`) or returns an `opaqueredirect` Response (`"manual"`). What JS passes: `fetch()` uses the Request's values; XHR sends `include` if `withCredentials`, else `same-origin`; classic scripts send `include` (no `crossorigin` or `use-credentials`) or `same-origin` (anonymous); `sendBeacon` sends `include`. |
 | `N.templateContent(id)` | (Rust addition) id of a `<template>`'s content fragment, created on demand. Native innerHTML/outerHTML/setInnerHTML/cloneNode treat it as the template's contents. After every parse, JS calls it for each `<template>`, so parsed contents that a native left as children get moved. (JS-side fragments; native serialization then cannot see them) |
 | `N.setShadowHost(id, isHost)` | (Rust addition) marks `id` as the host of an emulated shadow tree: `<style>`/`<link>` stylesheets inside it only apply to its subtree (`:host`, `::slotted()` supported). Called by `attachShadow` and for declarative shadow roots. |
 | `N.setDefined(id)` | (Rust addition) the custom element `id` was upgraded or created from its definition: CSS `:defined` matches it (built-in elements always match). |
