@@ -384,6 +384,8 @@
   let inNonBlockingScript = 0;     // depth of async/defer script execution
   let parserQueue = [];            // parser-blocking scripts in order
   const deferQueue = [];           // defer classic + non-async module scripts
+  const endQueue = [];             // the same, written after parsing: they run when document.close() ends the parser
+  let endRunning = false;
   let asyncPending = 0;            // scripts delaying the load event
   let parsingFinished = false, deferredDone = false, dclFired = false, loadQueued = false;
   let inlineModuleCounter = 0;
@@ -459,11 +461,12 @@
     }
   }
   // Parser-blocking scripts written (document.write) during the current parser step,
-  // already queued ahead of the rest: later writes queue behind them (two written
-  // `<script src>`s ran in reverse order when the second one arrived first).
+  // already queued ahead of the rest: later writes queue behind them, inline scripts
+  // included (two written `<script src>`s ran in reverse order when the second one
+  // arrived first).
   let writtenQueued = 0;
   function pumpParser() {
-    if (parserQueue.length === 0) { finishParsing(); return; }
+    if (parserQueue.length === 0) { finishParsing(); parserIdle(); return; }
     const rec = parserQueue[0];
     if (rec.state === 'pending') return;
     parserQueue.shift();
@@ -504,6 +507,29 @@
     if (rec.state === 'error') { fireScriptEvent(rec.el, 'error'); return; }
     execClassic(rec, 'nonblocking');
   }
+  // "The end" of a script-created parser: after document.close(), and once no written
+  // script is left to wait for, the deferred and module scripts written into it run in order.
+  function runEndQueue() {
+    if (endRunning || reopened || parserQueue.length !== 0) return;
+    while (endQueue.length) {
+      const rec = endQueue[0];
+      if (rec.type === 'module') {
+        endQueue.shift();
+        endRunning = true;
+        runModuleRecord(rec).then(() => { endRunning = false; runEndQueue(); });
+        return;
+      }
+      if (rec.state === 'pending') return;
+      endQueue.shift();
+      if (rec.state === 'error') fireScriptEvent(rec.el, 'error');
+      else execClassic(rec, 'nonblocking');
+    }
+  }
+  // The parser has no script left to wait for.
+  function parserIdle() {
+    runEndQueue();
+    maybeFireLoad();
+  }
   function fireDOMContentLoaded() {
     if (dclFired) return;
     dclFired = true;
@@ -520,6 +546,7 @@
   function maybeFireLoad() {
     if (loadQueued || !dclFired) return;
     if (asyncPending > 0) return;
+    if (parserQueue.length > 0) return; // scripts written after parsing that the parser still waits for
     let pending = 0;
     try { pending = N.pendingResourceCount(); } catch (_) { pending = 0; }
     if (pending > 0) return;
@@ -538,6 +565,7 @@
   function onScriptFetched(rec) {
     if (parserQueue.length && parserQueue[0] === rec) pumpParser();
     else if (parsingFinished && deferQueue.length && deferQueue[0] === rec) runDeferred();
+    else if (endQueue.length && endQueue[0] === rec) runEndQueue();
   }
   function scheduleParserRecord(rec) {
     // classify a parser-inserted script (initial document or document.write)
@@ -560,7 +588,7 @@
         return 'async';
       }
       if (rec.external && rec.defer) {
-        deferQueue.push(rec);
+        (parsingFinished ? endQueue : deferQueue).push(rec);
         startScriptFetch(rec, onScriptFetched);
         return 'defer';
       }
@@ -573,7 +601,7 @@
       runModuleRecord(rec).then(() => { asyncPending--; maybeFireLoad(); });
       return 'async';
     }
-    deferQueue.push(rec);
+    (parsingFinished ? endQueue : deferQueue).push(rec);
     return 'defer';
   }
   function onDocumentParsed() {
@@ -694,21 +722,24 @@
     if (kids.length) L.insertCore(parentId, ctx, wrap(frag), frag, refId);
     return { kids, scripts };
   }
-  function runWrittenScripts(ids) {
-    let blocked = false;
-    const queued = [];
+  // The scripts of written markup are parser-inserted. An inline classic one runs at once
+  // unless a written blocking script is still pending; an external one blocks the scripts
+  // after it, also those of later writes and of the rest of an outer chunk. `atEnd`: the
+  // write came from outside any script, after parsing, so its scripts go behind what the
+  // parser already waits for; otherwise the insertion point is right after the running
+  // script and they go in front of the rest.
+  function runWrittenScripts(ids, atEnd) {
     for (const id of ids) {
       L.pendingScripts.delete(id);
       const rec = makeRecord(id, true);
       if (rec === null) continue;
+      rec.written = true;
       if (rec.state === 'error' && rec.external) { L.postTask(() => fireScriptEvent(rec.el, 'error')); continue; }
+      const blocked = atEnd ? parserQueue.length !== 0 : writtenQueued !== 0;
       if (!blocked && !rec.external && rec.type === 'classic') { execClassic(rec, 'parser'); continue; }
-      const kind = scheduleParserRecord(rec);
-      if (kind === 'blocking') { queued.push(rec); blocked = true; }
-    }
-    if (queued.length) {
-      parserQueue.splice(Math.min(writtenQueued, parserQueue.length), 0, ...queued);
-      writtenQueued += queued.length;
+      if (scheduleParserRecord(rec) !== 'blocking') continue;
+      if (atEnd) parserQueue.push(rec);
+      else parserQueue.splice(Math.min(writtenQueued++, parserQueue.length), 0, rec);
     }
   }
   function writeAtInsertionPoint(ws, html) {
@@ -745,11 +776,24 @@
     }
     if (scripts.length) runWrittenScripts(scripts);
   }
+  // "Document open steps" of a document that is past parsing (the body stands in for the whole
+  // document). Written scripts that have not run yet are dropped, as in browsers, then a
+  // script-created parser starts with an empty body.
+  function openWrittenParser() {
+    parserQueue = parserQueue.filter((r) => !r.written);
+    writtenQueued = 0;
+    endQueue.length = 0;
+    const bid = L.bodyId();
+    if (bid !== 0) L.replaceAllCore(bid, wrap(bid), () => N.setTextContent(bid, ''));
+    reopened = true;
+    maybeFireLoad(); // the dropped scripts may have been all the load event waited for
+  }
   function docWrite(doc, args, newline) {
     let html = '';
     for (const a of args) html += `${a}`;
     if (newline) html += '\n';
     if (doc !== document) {
+      // no browsing context (createHTMLDocument, DOMParser): the markup is inserted but its scripts never run
       const b = doc.body;
       if (b !== null) writeInto(idOf(b), 0, html);
       return;
@@ -766,16 +810,14 @@
       if (b !== 0) { const r = writeInto(b, 0, html); if (r.scripts.length) runWrittenScripts(r.scripts); }
       return;
     }
-    // After parsing: implicit document.open() replaces the body content
+    // After parsing: the implicit document.open() replaces the body content and starts a
+    // script-created parser, whose scripts are parser-inserted like those of the initial one
+    // (not "dynamically inserted": an external one blocks the inline script written after it).
     const b = L.bodyId();
     if (b === 0) return;
-    if (!reopened) {
-      reopened = true;
-      L.replaceAllCore(b, wrap(b), () => N.setTextContent(b, ''));
-    }
+    if (!reopened) openWrittenParser();
     const r = writeInto(b, 0, html);
-    for (const id of r.scripts) L.pendingScripts.add(id);
-    if (r.scripts.length) L.checkPendingScripts();
+    if (r.scripts.length) runWrittenScripts(r.scripts, true);
   }
   L.mixin(L.Document.prototype, {
     write(...text) { docWrite(this, text, false); },
@@ -784,14 +826,16 @@
       if (arguments.length >= 3) return g.open(a, b, c);
       if (this !== document) return this;
       if (inParserScript !== null) return this;
-      if (parsingFinished || L.readyState !== 'loading') {
-        const bid = L.bodyId();
-        if (bid !== 0) L.replaceAllCore(bid, wrap(bid), () => N.setTextContent(bid, ''));
-        reopened = true;
-      }
+      if (parsingFinished || L.readyState !== 'loading') openWrittenParser();
       return this;
     },
-    close() { if (this === document) reopened = false; },
+    close() {
+      if (this !== document) return;
+      reopened = false;
+      // the parser ends after the script that closes it, not inside it
+      if (inParserScript !== null || inNonBlockingScript > 0) L.internalTimeout(runEndQueue, 0);
+      else runEndQueue();
+    },
   });
 
   // =======================================================================================
