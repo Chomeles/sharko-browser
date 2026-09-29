@@ -2775,15 +2775,19 @@ impl BaseDocument {
                 .iter()
                 .map(|r| r.y + r.height)
                 .fold(f64::NEG_INFINITY, f64::max);
-            return match rects.is_empty() {
-                true => None,
-                false => Some(BoundingRect {
-                    x: x0,
-                    y: y0,
-                    width: x1 - x0,
-                    height: y1 - y0,
-                }),
-            };
+            if rects.is_empty() {
+                // PATCH: an inline element whose content is block-level (`<a><h2>..</h2></a>`,
+                // the block splits the inline) has no fragment in a text layout: its rect
+                // is the union of the boxes of its children (CSSOM: the boxes the element
+                // generates, and the block-level ones of its children belong to it).
+                return self.union_of_child_rects(node_id);
+            }
+            return Some(BoundingRect {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            });
         }
 
         let node = self.get_node(node_id)?;
@@ -2847,6 +2851,36 @@ impl BaseDocument {
             width: x1 - x0,
             height: y1 - y0,
         })
+    }
+
+    /// PATCH: the union of the border boxes of the rendered element children of `node_id`
+    /// (`None` when there are none).
+    fn union_of_child_rects(&self, node_id: NodeId) -> Option<BoundingRect> {
+        let node = self.get_node(node_id)?;
+        let mut acc: Option<(f64, f64, f64, f64)> = None;
+        for &child in &node.children {
+            let Some(c) = self.get_node(child) else { continue };
+            if !c.is_element() {
+                continue;
+            }
+            let hidden = c
+                .primary_styles()
+                .is_none_or(|s| s.clone_display().is_none());
+            if hidden {
+                continue;
+            }
+            let Some(r) = self.get_client_bounding_rect(child) else { continue };
+            acc = Some(match acc {
+                Some((x0, y0, x1, y1)) => (
+                    x0.min(r.x),
+                    y0.min(r.y),
+                    x1.max(r.x + r.width),
+                    y1.max(r.y + r.height),
+                ),
+                None => (r.x, r.y, r.x + r.width, r.y + r.height),
+            });
+        }
+        acc.map(|(x0, y0, x1, y1)| BoundingRect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
     }
 
     /// Whether a layout ancestor of `node_id` is `position: fixed` or transformed (then a

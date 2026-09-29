@@ -309,3 +309,15 @@ Patches so far:
     `prepend`, emotion's `prepend: true`) used to win the cascade against it: coursera.org's
     `.cds-2 { padding-inline: 0 }` beat `.css-j55dmx { padding: 0 48px }` and the nav
     container lost its padding.
+83. `parley/src/layout/{data,layout,line_break}.rs` (`base_text_wrap_mode`,
+    `set_base_text_wrap_mode`), `blitz-dom/src/layout/inline.rs`: inline boxes that come
+    before any text of the paragraph (or in a paragraph without text: a row of `inline-block`
+    tiles) followed `wrap` because the wrap mode was only ever taken from the previous text
+    cluster. Under `white-space: nowrap` they were break opportunities for the min-content
+    width (a `nowrap` carousel of `inline-block` tiles inside an `inline-block` was as wide as
+    its container, 1236px instead of 3880px on bing.com) and could wrap at line breaking. The
+    inline layout root now hands its own `text-wrap-mode` to the layout.
+84. `blitz-dom/src/document.rs` (`get_client_bounding_rect`, `union_of_child_rects`): the
+    rect of an inline element that has no fragment in a text layout because its content is
+    block-level (`<a><span><h2>..</h2></span></a>`) is the union of the boxes of its children
+    instead of `None` (0x0 at the origin in script).

@@ -321,10 +321,13 @@ impl<'a, B: Brush> BreakLines<'a, B> {
         lines.swap(&mut layout.data);
         lines.lines.clear();
         lines.line_items.clear();
+        let mut state = BreakerState::default();
+        // PATCH: see `Layout::set_base_text_wrap_mode`.
+        state.line.text_wrap_mode = layout.data.base_text_wrap_mode;
         Self {
             layout,
             lines,
-            state: BreakerState::default(),
+            state,
             prev_state: None,
             done: false,
         }
