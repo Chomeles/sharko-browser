@@ -7,7 +7,7 @@ const vm = require('vm');
 const { MockNative } = require('./mock_native');
 
 const JS_DIR = path.join(__dirname, '..');
-const LAYER_FILES = ['00_prelude.js', '10_events.js', '20_dom.js', '30_html.js', '40_webapi.js', '45_indexeddb.js', '90_bootstrap.js'];
+const LAYER_FILES = ['00_prelude.js', '10_events.js', '20_dom.js', '25_xpath.js', '30_html.js', '40_webapi.js', '45_indexeddb.js', '90_bootstrap.js'];
 const layerSources = LAYER_FILES.map((f) => [f, fs.readFileSync(path.join(JS_DIR, f), 'utf8')]);
 const compiled = layerSources.map(([f, src]) => [f, new vm.Script(src, { filename: path.join(JS_DIR, f) })]);
 

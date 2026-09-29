@@ -478,3 +478,29 @@ test('live children/childNodes stay correct with per-parent invalidation', async
     r.join(',');
   `), '3,3,0,3,3,2,2,1,2,0,3,4,2,1,2,0,0,0');
 });
+
+test('getElementsByTagNameNS: elements without a namespace in XML documents', async () => {
+  const e = await env();
+  e.run(`
+    var xd = new DOMParser().parseFromString('<r><a/><b xmlns="urn:x"><a/></b><c:a xmlns:c="urn:c"/></r>', 'text/xml');
+    var made = document.implementation.createDocument('', '');
+    made.appendChild(made.createElement('root')).appendChild(made.createElement('a'));
+    made.documentElement.appendChild(made.createElementNS('urn:n', 'a'));
+  `);
+  const count = (doc, ns, local) => e.run(`${doc}.getElementsByTagNameNS(${JSON.stringify(ns)}, ${JSON.stringify(local)}).length`);
+  assert.strictEqual(count('xd', null, 'a'), 1);
+  assert.strictEqual(count('xd', '', 'a'), 1);
+  assert.strictEqual(count('xd', 'urn:x', 'a'), 1);
+  assert.strictEqual(count('xd', 'urn:c', 'a'), 1);
+  assert.strictEqual(count('xd', '*', 'a'), 3);
+  assert.strictEqual(count('xd', 'http://www.w3.org/1999/xhtml', 'a'), 0);
+  assert.strictEqual(count('xd', null, '*'), 2);
+  assert.strictEqual(count('xd.documentElement', null, 'a'), 1);
+  assert.strictEqual(count('made', null, 'a'), 1);
+  assert.strictEqual(count('made', 'urn:n', 'a'), 1);
+  assert.strictEqual(count('made', null, '*'), 2);
+  assert.strictEqual(count('made', 'http://www.w3.org/1999/xhtml', 'a'), 0);
+  // HTML elements are in the HTML namespace only
+  assert.strictEqual(count('document', null, 'body'), 0);
+  assert.strictEqual(count('document', 'http://www.w3.org/1999/xhtml', 'body'), 1);
+});
