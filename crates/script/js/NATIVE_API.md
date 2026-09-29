@@ -8,11 +8,16 @@ layer files in this directory in this order:
                        internal registry objects (`__priv` symbols etc.)
 2. `10_events.js`    – Event classes + EventTarget
 3. `20_dom.js`       – Node / Element / Document / collections / CSSOM
-4. `30_html.js`      – HTML element subclasses (input, a, img, script, form, template, ...)
-5. `40_webapi.js`    – URL, TextEncoder/Decoder, fetch/Headers/Request/Response, XHR,
+4. `25_xpath.js`     – XPath 1.0 (`document.evaluate`, `XPathResult`, ...); reads the tree through
+                       `nodeType`, `localName`, `namespaceURI`, `parent`, `childIds`, `nextSibling`,
+                       `prevSibling`, `attrNames`, `getAttr`, `getText`, `textContent`, `contains`,
+                       `compareDocumentPosition`, `getElementById`, `querySelector` and needs no native of its own
+5. `30_html.js`      – HTML element subclasses (input, a, img, script, form, template, ...)
+6. `40_webapi.js`    – URL, TextEncoder/Decoder, fetch/Headers/Request/Response, XHR,
                        Blob, FormData, AbortController, MessageChannel, storage, timers,
                        rAF, performance, crypto, navigator, location, history, observers…
-6. `90_bootstrap.js` – creates `window`/`document` globals, registers hooks with `N.setHooks`
+7. `45_indexeddb.js` – IndexedDB (in memory; uses only `N.structuredClone` through the layer)
+8. `90_bootstrap.js` – creates `window`/`document` globals, registers hooks with `N.setHooks`
 
 All files are plain classic scripts (no ES modules, no imports). They share state via a
 single IIFE-local object passed through `globalThis.__layer` which `90_bootstrap.js`
@@ -196,6 +201,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.framePath()` | This document's frame path: the `<iframe>` node ids from the page down (each in its parent's document); `[]` for the page |
 | `N.framePost(path, message, targetOrigin)` | `postMessage` to the window of the frame at `path`; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
 | `N.frameList(path)` | The frames of the document at `path` in tree order as `[id, name]` pairs (`parent.frames[name]`, `top.length`), or `null` if unknown |
+| `N.frameNavigate(path, url, replace)` | Optional. Navigate the frame at `path` (`[]`: the page) to the absolute `url`, replacing its history entry if `replace`: `top.location = url`, `parent.location.replace(url)` where that window is not scriptable from here. `javascript:` URLs are never passed. Without it those calls do nothing |
 | `N.realmGlobal(path)` | The real `window` (global object) of the frame at `path` if it is same-origin and part of this page (its realm is created on demand, running that document's scripts), else `null` |
 | `N.frameGlobal(id)`, `N.parentGlobal()`, `N.topGlobal()` | `realmGlobal` for this document's `<iframe id>`, the parent frame and the page |
 | `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null` |
@@ -228,10 +234,10 @@ Rust calls these; exceptions thrown inside hooks are reported to the console.
 | `onViewportChanged()` | viewport resized → JS dispatches `resize` on window | – |
 | `onScroll()` | viewport scrolled → JS dispatches `scroll` on document (bubbling to window) | – |
 | `onPageHide()` | before navigating away → `pagehide`, `beforeunload` (ignore result), `unload` | – |
-| `onMessage(sourceOrNull, origin, data)` | (addition) a `postMessage` from another frame: `null` = from the parent window, else from the document of the `<iframe>` with that id; `data` is already deserialized | – |
+| `onMessage(source, origin, data)` | (addition) a `postMessage` from another frame's window (`N.framePost`): `source` is the sender's frame path (`N.framePath` of the sender: `[]` for the page), `origin` its origin, `data` is already deserialized. The JS layer also carries MessagePort traffic between frames this way, see "Ports across frames" | – |
 | `wrapNode(id)` | (addition) the wrapper of node `id` of this realm's document, for another realm (`frameElement`) | the wrapper |
 | `nodeTypeOf(o)` | (addition) `o`'s nodeType if it is a node wrapper of this realm, else `0` (asked by another realm's `N.foreignNodeType`) | number |
-| `windowPostMessage(message, targetOrigin, transfer, source)` | (addition) `window.postMessage` with `source` = the caller's window (`null`: this one); exceptions propagate to the caller | – |
+| `windowPostMessage(message, targetOrigin, transfer, source)` | (addition) `window.postMessage` with `source` = the caller's window (`null`: this one); exceptions propagate to the caller. `transfer` and `message` may hold objects of the caller's realm (MessagePorts, ArrayBuffers); the layer only uses them through their public API | – |
 
 ## Script execution model (implemented in JS)
 After `onDocumentParsed`:
@@ -247,7 +253,16 @@ After `onDocumentParsed`:
    goes `"loading"` → `"interactive"` (before DOMContentLoaded) → `"complete"` (before load).
 6. `document.write()`/`writeln()` while a parser-inserted script is running: parse the
    HTML and insert the resulting nodes right after the current script element (approximation).
-   After load, `document.write` replaces the document body content.
+   After load, `document.write` replaces the document body content (an implicit
+   `document.open()`, which also drops written scripts that have not run yet).
+   The scripts of written markup are parser-inserted, in every case: an inline classic one
+   runs at once unless an earlier written external script is still pending; an external one
+   without `async`/`defer` blocks the scripts written after it (also by later `write` calls
+   and from timers), so a `<script src>` followed by an inline script that needs it works
+   in an iframe that was written to after load just like during parsing. Scripts written
+   by a written script run before the rest of the outer chunk. After load, `defer` and
+   module scripts wait for `document.close()`. Documents without a browsing context
+   (`createHTMLDocument`) never run written scripts.
 7. Scripts inserted later by JS (`appendChild` of a `<script>` element, or of a subtree
    containing scripts, that becomes connected) execute exactly once: inline ones
    immediately (synchronously during the insertion call), external ones asynchronously
@@ -291,6 +306,27 @@ Everything here is optional unless noted. JS feature-detects each native with
 | `onRejectionHandled(promise, reason)` | queued as a task. JS fires `rejectionhandled`. |
 | `onError(msg, file, line, col, error)` | an uncaught exception reached Rust, which already logged it. JS dispatches the window `ErrorEvent` (`window.onerror`) and does not log. Not used for `N.evalScript`: JS catches the rethrown exception and dispatches the event itself. |
 | `onWebSocket(id, kind, ...)` | an event of a socket opened with `N.wsOpen`, in order: `open` (protocol, extensions), `message` (string or ArrayBuffer), `sent` (bytes written, for `bufferedAmount`), `error` (message) and finally `close` (code, reason, wasClean). |
+
+### Ports across frames
+`postMessage(message, targetOrigin, [ports])` and `port.postMessage(message, [ports])` move MessagePorts (and detach
+ArrayBuffers) between the documents of a page without any native beyond `framePost`/`onMessage`. What the host must
+provide, and what it can rely on:
+
+* `N.framePost(path, message, targetOrigin)` reaches **any** frame of the page (parent, child, sibling), not only
+  descendants, and the receiver's `onMessage` gets the sender's frame path as `source`. Messages of one sender to one
+  target must arrive in order (port messages are ordered by it). A message to a frame without a realm is dropped.
+* The traffic is ordinary messages whose `data` is a plain object with the key `"\u0001sharko:port"` (an envelope):
+  `w` = a `window.postMessage` that transferred ports, `m` = a message for a port, `c` = a port was closed. The host
+  neither looks into nor filters them; port envelopes go out with `targetOrigin` `*`. The layer validates them: a
+  message for a port is honored only if it comes from the frame that port was handed to (the `source` path is set by
+  the host, a page can't choose it), and drops it silently otherwise.
+* A transferred port becomes a new MessagePort in the receiving realm. Its undelivered messages travel with it. The
+  realm it left keeps a stub that passes on what the old peer still posts and relays what the new owner posts to the
+  old peer, so a channel whose ports left keeps running **through the realm that made it**; when that document is
+  replaced or removed, its channels end. (A port table kept by the host would remove that dependence.)
+* Same-origin frames hold each other's objects, so a foreign realm's port is used through its public API
+  (`postMessage`, `addEventListener('message')`, `start`) and wrapped by a port of the receiving realm: the layer
+  recognizes it by `Object.prototype.toString`, and doesn't need a native for it.
 
 ### `onEvent`: return flag 4 and the default-action split
 Return value: `1` = canceled, `2` = propagation stopped, **`4` = the JS layer performed the

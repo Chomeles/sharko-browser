@@ -204,6 +204,71 @@ test('innerHTML/outerHTML/insertAdjacentHTML/textContent/innerText', async () =>
   assert.deepStrictEqual(e.mock.titles.slice(-1), ['New']);
 });
 
+test('innerText: whitespace between blocks adds no line breaks', async () => {
+  const e = await createEnv({
+    html: `<!DOCTYPE html><html><body>
+<div id="a">
+  <p>one</p>
+  <p>two</p>
+</div>
+<div id="b"> <div>x</div> <span> y </span> <div>z</div> </div>
+<div id="c">m <div>n</div> o <div>p</div> </div>
+</body></html>`,
+    url: 'https://example.com/',
+  });
+  const text = (id) => e.run(`document.getElementById('${id}').innerText`);
+  // Whitespace that collapses away entirely used to release the pending break early, so
+  // the next block's own break counted again ("one\n\n\n\ntwo\n\n").
+  assert.strictEqual(text('a'), 'one\n\ntwo');
+  assert.strictEqual(text('b'), 'x\ny\nz');
+  assert.strictEqual(text('c'), 'm\nn\no\np');
+  assert.strictEqual(e.run("document.body.innerText"), 'one\n\ntwo\n\nx\ny\nz\nm\nn\no\np');
+});
+
+test('innerText: blocks at the edges of inline-blocks keep their line breaks', async () => {
+  const e = await createEnv({
+    html: `<!DOCTYPE html><html><head><style>
+      li, .tile { display: inline-block } .cap { display: block } .flex { display: inline-flex }
+    </style></head><body>
+<ul id="tiles"><li><a href="#"><span><h2><span>Storm uncovers shipwreck</span></h2><img alt=""></span></a></li><li><a href="#"><span><h2><span>AEW star dies</span></h2></span></a></li></ul>
+<div id="kicker"><span class="flex"><a class="cap" href="#">Deutschland</a></span><span>Bundestag</span></div>
+<div id="around">before <span class="tile"><div>A1</div><div>A2</div></span><span class="tile"><div>B1</div></span> after</div>
+<div id="wetter"><span class="tile"><span class="cap">Wolken</span><span class="cap">Di</span></span><span class="tile"><span class="cap">45</span><span class="cap">Das</span></span></div>
+<div id="paras"><div class="flex"><p>para one</p></div><div class="flex"><p>para two</p></div></div>
+<div id="pretty"><span class="tile">
+  <div>A</div>
+</span><span class="tile">
+  <div>B</div>
+</span></div>
+<div id="plain">x <span class="tile"> y </span> <span class="tile">z</span> w</div>
+<div id="nested">x<span class="tile"><span class="tile"><div>A</div></span> y</span></div>
+<div id="empty">a<span class="tile"><div></div></span>b</div>
+<div id="edge"><span class="tile"><div>A</div></span></div>
+<div id="cells"><span class="tile"><table><tr><td>1</td><td>2</td></tr><tr><td>3</td></tr></table></span>t</div>
+</body></html>`,
+    url: 'https://example.com/',
+  });
+  const text = (id) => e.run(`document.getElementById('${id}').innerText`);
+  // The bing trending tiles: words of neighbouring tiles used to fuse ("shipwreckAEW").
+  assert.strictEqual(text('tiles'), 'Storm uncovers shipwreck\nAEW star dies');
+  assert.strictEqual(text('kicker'), 'Deutschland\nBundestag');
+  // Spaces beside the box stay where they are: the line break comes from inside the box.
+  assert.strictEqual(text('around'), 'before \nA1\nA2\nB1\n after');
+  assert.strictEqual(text('wetter'), 'Wolken\nDi\n45\nDas');
+  assert.strictEqual(text('paras'), 'para one\n\npara two');
+  assert.strictEqual(text('pretty'), 'A\nB');
+  // No block inside: still one line, spaces collapse as before.
+  assert.strictEqual(text('plain'), 'x y z w');
+  // Edges bubble up through nested boxes; an empty block still separates its neighbours.
+  assert.strictEqual(text('nested'), 'x\nA\n y');
+  assert.strictEqual(text('empty'), 'a\nb');
+  // At the very start or end of the result the edge breaks go, as for any block.
+  assert.strictEqual(text('edge'), 'A');
+  assert.strictEqual(text('cells'), '1\t2\n3\nt');
+  // The box's own innerText is the plain rendered text of its children.
+  assert.strictEqual(e.run("document.querySelector('#around .tile').innerText"), 'A1\nA2');
+});
+
 test('cloneNode, importNode, isEqualNode, template content', async () => {
   const e = await env();
   e.run("var m = document.getElementById('main'); var c = m.cloneNode(true); var sh = m.cloneNode(false)");
@@ -412,4 +477,30 @@ test('live children/childNodes stay correct with per-parent invalidation', async
     r.push(ac.length, an.length);
     r.join(',');
   `), '3,3,0,3,3,2,2,1,2,0,3,4,2,1,2,0,0,0');
+});
+
+test('getElementsByTagNameNS: elements without a namespace in XML documents', async () => {
+  const e = await env();
+  e.run(`
+    var xd = new DOMParser().parseFromString('<r><a/><b xmlns="urn:x"><a/></b><c:a xmlns:c="urn:c"/></r>', 'text/xml');
+    var made = document.implementation.createDocument('', '');
+    made.appendChild(made.createElement('root')).appendChild(made.createElement('a'));
+    made.documentElement.appendChild(made.createElementNS('urn:n', 'a'));
+  `);
+  const count = (doc, ns, local) => e.run(`${doc}.getElementsByTagNameNS(${JSON.stringify(ns)}, ${JSON.stringify(local)}).length`);
+  assert.strictEqual(count('xd', null, 'a'), 1);
+  assert.strictEqual(count('xd', '', 'a'), 1);
+  assert.strictEqual(count('xd', 'urn:x', 'a'), 1);
+  assert.strictEqual(count('xd', 'urn:c', 'a'), 1);
+  assert.strictEqual(count('xd', '*', 'a'), 3);
+  assert.strictEqual(count('xd', 'http://www.w3.org/1999/xhtml', 'a'), 0);
+  assert.strictEqual(count('xd', null, '*'), 2);
+  assert.strictEqual(count('xd.documentElement', null, 'a'), 1);
+  assert.strictEqual(count('made', null, 'a'), 1);
+  assert.strictEqual(count('made', 'urn:n', 'a'), 1);
+  assert.strictEqual(count('made', null, '*'), 2);
+  assert.strictEqual(count('made', 'http://www.w3.org/1999/xhtml', 'a'), 0);
+  // HTML elements are in the HTML namespace only
+  assert.strictEqual(count('document', null, 'body'), 0);
+  assert.strictEqual(count('document', 'http://www.w3.org/1999/xhtml', 'body'), 1);
 });

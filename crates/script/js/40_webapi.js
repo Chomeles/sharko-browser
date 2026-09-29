@@ -44,6 +44,8 @@
     N.setTimer(id, normDelay(delay));
     return id;
   };
+  // The id the next timer gets: it changes when a timer is set in between (IndexedDB looks at this).
+  L.timerSeq = function () { return nextTimerId; };
   L.clearInternalTimeout = function (id) {
     if (internalTimers.delete(id)) N.clearTimer(id);
   };
@@ -180,9 +182,10 @@
     try {
       return N.structuredClone(value);
     } catch (e) {
+      // A DataCloneError from the serializer, or else what a getter of the value threw (rethrown as is).
       const c = L.fromNative(e);
-      if (c instanceof DOMException) throw c;
-      throw new DOMException(`Failed to execute 'structuredClone' on 'Window': ${e && e.message ? e.message : 'value could not be cloned.'}`, 'DataCloneError');
+      if (c === undefined || c === null) throw new DOMException("Failed to execute 'structuredClone' on 'Window': value could not be cloned.", 'DataCloneError');
+      throw c;
     }
   }
   L.cloneValue = cloneValue;
@@ -191,13 +194,120 @@
     return cloneValue(value);
   }
 
+  // The entries of a `transfer` argument: a sequence, or the `transfer` member of an options dictionary.
+  const transferOf = (x) => (Array.isArray(x) ? x : (x !== null && typeof x === 'object' && Array.isArray(x.transfer) ? x.transfer : []));
+  const abTransfer = ArrayBuffer.prototype.transfer;
+  const isBuffer = (x) => Object.prototype.toString.call(x) === '[object ArrayBuffer]';
+  // A MessagePort of any realm of the page: a same-origin frame's objects are reachable, but
+  // their class (and so its private state) is another one, so they are recognized by their shape.
+  const isPort = (x) => x instanceof MessagePort || (Object.prototype.toString.call(x) === '[object MessagePort]'
+    && typeof x.postMessage === 'function' && typeof x.addEventListener === 'function' && typeof x.start === 'function');
+  // Only ports and ArrayBuffers can be transferred. Other transferables (ImageBitmap, streams, ...)
+  // don't exist here, so listing one is ignored rather than an error.
+  function transferables(list, self, iface) {
+    const ports = [], orig = [], buffers = [];
+    if (list.length === 0) return { ports, orig, buffers };
+    const seen = new Set();
+    for (let i = 0; i < list.length; i++) {
+      const x = list[i];
+      if (x === null || typeof x !== 'object') continue;
+      const port = isPort(x);
+      if (!port && !isBuffer(x)) continue;
+      const fail = (what) => new DOMException(`Failed to execute 'postMessage' on '${iface}': ${port ? 'Port' : 'ArrayBuffer'} at index ${i} ${what}.`, 'DataCloneError');
+      if (seen.has(x)) throw fail('is a duplicate');
+      seen.add(x);
+      if (port) {
+        const p = asLocalPort(x);
+        if (p === self) throw fail('contains the source port');
+        if (L.portDetached(p)) throw fail('is already neutered');
+        ports.push(p);
+        orig.push(x);
+      } else {
+        if (x.detached === true) throw fail('is already detached');
+        buffers.push(x);
+      }
+    }
+    return { ports, orig, buffers };
+  }
+  // The buffers of a transfer list are detached in the sender once the message is on its way.
+  // The receiver got a copy (the clone); `transfer()` hands the sender's memory to a buffer that is
+  // dropped right away, without another copy.
+  function detachBuffers(list) {
+    if (typeof abTransfer !== 'function') return;
+    for (const b of list) {
+      try { abTransfer.call(b); } catch (_) { /* not detachable */ }
+    }
+  }
+  // A transferred port is a plain object when the message is cloned, so where the message holds
+  // ports (`{ channel: port }`) is noted as paths from the root: a property name, or [index] for
+  // the value of the index-th entry of a Map. Sets and Map keys are not searched.
+  function portPaths(root, ports) {
+    const out = [];
+    const seen = new Set();
+    const walk = (v, path) => {
+      if (v === null || typeof v !== 'object') return;
+      const i = ports.indexOf(v);
+      if (i >= 0) { out.push([path, i]); return; }
+      if (seen.has(v)) return;
+      seen.add(v);
+      const tag = Object.prototype.toString.call(v);
+      if (tag === '[object Map]') {
+        let n = 0;
+        for (const x of v.values()) walk(x, [...path, [n++]]);
+      } else if (Array.isArray(v) || tag === '[object Object]') {
+        for (const k of Object.keys(v)) walk(v[k], [...path, k]);
+      }
+    };
+    walk(root, []);
+    return out;
+  }
+  // Puts `ports[i]` at each path of a clone made without them; returns the clone (the root itself
+  // may be a port). The paths of a message from another frame are not trusted.
+  function setPortPaths(data, paths, ports) {
+    if (!Array.isArray(paths)) return data;
+    for (const e of paths) {
+      if (!Array.isArray(e) || !Array.isArray(e[0]) || !(ports[e[1]] instanceof MessagePort)) continue;
+      const path = e[0], port = ports[e[1]];
+      if (path.length === 0) return port;
+      let cur = data;
+      for (let i = 0; i < path.length - 1 && cur !== null && typeof cur === 'object'; i++) {
+        const k = path[i];
+        if (Array.isArray(k)) cur = Object.prototype.toString.call(cur) === '[object Map]' ? [...cur.values()][k[0]] : null;
+        else cur = Object.prototype.hasOwnProperty.call(cur, k) ? cur[k] : null;
+      }
+      if (cur === null || typeof cur !== 'object') continue;
+      const last = path[path.length - 1];
+      if (Array.isArray(last)) {
+        if (Object.prototype.toString.call(cur) === '[object Map]') { const key = [...cur.keys()][last[0]]; if (cur.has(key)) cur.set(key, port); }
+      } else if (Object.prototype.hasOwnProperty.call(cur, last)) {
+        Object.defineProperty(cur, last, { value: port, writable: true, enumerable: true, configurable: true });
+      }
+    }
+    return data;
+  }
+  // The clone of `message` for a receiver in this realm; ports of the transfer list (`orig`) that
+  // it holds become `ports` (their stand-ins in this realm).
+  function cloneMessage(message, orig, ports) {
+    const paths = orig.length === 0 ? [] : portPaths(message, orig);
+    return setPortPaths(cloneValue(message), paths, ports);
+  }
+  // StructuredSerializeWithTransfer within this realm.
+  function serializeWithTransfer(message, transfer, self, iface) {
+    const t = transferables(transferOf(transfer), self, iface);
+    return { data: cloneMessage(message, t.orig, t.ports), ports: t.ports, buffers: t.buffers };
+  }
+
   class MessagePort extends EventTarget {
-    #other = null; #queue = []; #started = false; #closed = false;
+    // A port's peer is another port of this realm (#other) or, once its channel spans realms,
+    // a link that carries what is posted (#link). A port that has been transferred (#fwd) stays
+    // behind as a stub: it hands what it still receives on to the new owner.
+    #other = null; #link = null; #fwd = null; #queue = []; #started = false; #closed = false;
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); super(); }
     static {
       L.entangle = (a, b) => { a.#other = b; b.#other = a; };
       L.portEnqueue = (port, data, ports) => {
         if (port.#closed) return;
+        if (port.#fwd !== null) { port.#fwd.send(data, ports); return; }
         port.#queue.push([data, ports]);
         if (port.#started) L.postTask(() => L.portDeliver(port));
       };
@@ -212,16 +322,48 @@
         port.#started = true;
         for (let i = 0; i < port.#queue.length; i++) L.postTask(() => L.portDeliver(port));
       };
+      // `port` posts towards its peer.
+      L.portSend = (port, data, ports) => {
+        if (port.#other !== null) L.portEnqueue(port.#other, data, ports);
+        else if (port.#link !== null) port.#link.send(data, ports);
+      };
+      // The peer is in another realm: `link.send(data, ports)` posts, `link.close()` closes.
+      L.portLink = (port, link) => { port.#other = null; port.#link = link; };
+      L.portUnlink = (port) => { port.#link = null; };
+      L.portDetached = (port) => port.#fwd !== null;
+      // Transfer: the port's undelivered messages leave with it and `fwd.send` gets what arrives
+      // later. `undo` puts everything back (the message could not be sent after all).
+      L.portDetach = (port, fwd) => {
+        const queue = port.#queue, closed = port.#closed;
+        port.#queue = [];
+        port.#fwd = fwd;
+        return { queue, closed, undo() { port.#fwd = null; port.#queue = queue; } };
+      };
+      // The peer of a stub closed its end.
+      L.portPeerClosed = (port) => {
+        if (port.#closed) return;
+        port.#closed = true;
+        const link = port.#link;
+        port.#link = null;
+        if (link !== null) link.close();
+      };
     }
     postMessage(message, transfer) {
-      const other = this.#other;
-      if (this.#closed || other === null) return;
-      const list = Array.isArray(transfer) ? transfer : (transfer && Array.isArray(transfer.transfer) ? transfer.transfer : []);
-      const ports = list.filter((x) => x instanceof MessagePort);
-      L.portEnqueue(other, cloneValue(message), ports);
+      // Like a detached port: nothing happens, not even a DataCloneError.
+      if (this.#closed || this.#fwd !== null || (this.#other === null && this.#link === null)) return;
+      const t = serializeWithTransfer(message, transfer, this, 'MessagePort');
+      L.portSend(this, t.data, t.ports);
+      detachBuffers(t.buffers);
     }
     start() { L.portStart(this); }
-    close() { this.#closed = true; }
+    close() {
+      if (this.#closed || this.#fwd !== null) return;
+      this.#closed = true;
+      const link = this.#link;
+      this.#link = null;
+      if (link !== null) link.close();
+      forgetPort(this);
+    }
     get onmessage() { return L.getHandlerIDL(this, 'message'); }
     set onmessage(v) { L.setHandlerIDL(this, 'message', v); L.portStart(this); }
   }
@@ -263,19 +405,16 @@
   // Windows of other frames. The documents of a page and its frames run in one isolate,
   // each in its own realm (context): a same-origin frame's window is its real global
   // object (`N.realmGlobal`), so its document and functions are reachable. A cross-origin
-  // frame gets a stand-in for its WindowProxy (only postMessage reaches it). A window is
-  // named by its frame path: the <iframe> node ids from the page down (the page is []).
-  const REMOTE = new WeakMap(); // RemoteWindow -> frame path
-  const remoteByPath = new Map(); // path key -> RemoteWindow
+  // frame gets a stand-in for its WindowProxy (only the CrossOriginProperties reach it, see
+  // below). A window is named by its frame path: the <iframe> node ids from the page down
+  // (the page is []).
+  const REMOTE = new WeakMap(); // stand-in Proxy and its target -> state {kind, path, props, ...}
+  const remoteByPath = new Map(); // path key -> stand-in window
   const pathKey = (p) => p.join(',');
   let ownPath = null;
   function selfPath() {
     if (ownPath === null) ownPath = typeof N.framePath === 'function' ? N.framePath() : [];
     return ownPath;
-  }
-  function remoteTarget(w) {
-    if (!REMOTE.has(w)) throw L.illegal();
-    return REMOTE.get(w);
   }
   // The real window of a same-origin frame (its realm is created on demand), else null.
   function realmGlobal(path) {
@@ -296,8 +435,7 @@
     if (g !== null) return g;
     let w = remoteByPath.get(key);
     if (w === undefined) {
-      w = new Proxy(new RemoteWindow(INTERNAL, path), remoteHandler);
-      REMOTE.set(w, path);
+      w = newCrossOrigin('Window', path);
       remoteByPath.set(key, w);
     }
     return w;
@@ -318,77 +456,258 @@
     const e = INDEX_RE.test(name) ? list[+name] : (name === '' ? undefined : list.find((f) => f[1] === name));
     return e === undefined ? undefined : L.windowAt([...path, e[0]]);
   }
-  const crossOriginErr = (what) => new DOMException(`Failed to read a named property '${what}' from 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+  // ---------------------------------------------------------------------------------------
+  // Cross-origin objects. The window of another origin and its Location are exotic objects
+  // (HTML "cross-origin objects"): only the CrossOriginProperties are visible, anything else
+  // is a SecurityError, and the prototype is null. Each of those properties is one function
+  // (or accessor pair) per stand-in, created in the current realm, so `w.postMessage ===
+  // w.postMessage`. Like the operations of a [Global] interface they act on their `this`,
+  // where null/undefined stands for the realm's own window: `const post = parent.postMessage;
+  // post(msg, '*')` posts to the calling window, as in browsers.
+  // ---------------------------------------------------------------------------------------
+  // In spec order. m: method, g: getter, gs: getter and setter, s: setter only.
+  const CROSS_ORIGIN_PROPS = {
+    Window: [['window', 'g'], ['self', 'g'], ['location', 'gs'], ['close', 'm'], ['closed', 'g'], ['focus', 'm'], ['blur', 'm'],
+      ['frames', 'g'], ['length', 'g'], ['top', 'g'], ['opener', 'g'], ['parent', 'g'], ['postMessage', 'm']],
+    Location: [['href', 's'], ['replace', 'm']],
+  };
+  // CrossOriginPropertyFallback: "then" and these symbols read as undefined on any cross-origin object.
+  const CROSS_ORIGIN_FALLBACK = Object.freeze({ value: undefined, writable: false, enumerable: false, configurable: true });
+  const isFallbackKey = (p) => p === 'then' || p === Symbol.toStringTag || p === Symbol.hasInstance || p === Symbol.isConcatSpreadable;
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  // The location of a lenient stand-in (see sameOriginChild): its URL isn't known here.
   const remoteLocation = Object.freeze({ replace() { }, set href(v) { }, toString() { return ''; } });
-  class RemoteWindow {
-    constructor(token, path) {
-      if (token !== INTERNAL) throw L.illegal();
-      REMOTE.set(this, path);
-    }
-    postMessage(message, targetOrigin, transfer) {
-      const path = remoteTarget(this);
-      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-      let t = targetOrigin !== null && typeof targetOrigin === 'object'
-        ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
-        : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
-      if (t === '/') t = L.location.origin;
-      else if (t !== '*') {
-        const p = N.urlParse(t, null);
-        if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
-        t = p[10];
-      }
-      N.framePost(path, message, t);
-    }
-    get window() { remoteTarget(this); return this; }
-    get self() { remoteTarget(this); return this; }
-    get frames() { remoteTarget(this); return this; }
-    get parent() { const p = remoteTarget(this); return p.length === 0 ? this : L.windowAt(p.slice(0, -1)); }
-    get top() { remoteTarget(this); return L.windowAt([]); }
-    get opener() { remoteTarget(this); return null; }
-    get closed() { remoteTarget(this); return false; }
-    get length() { return framesOf(remoteTarget(this)).length; }
-    get location() { remoteTarget(this); return remoteLocation; }
-    set location(v) { remoteTarget(this); }
-    get document() {
-      const p = remoteTarget(this);
-      // A child frame of this document that isn't cross-origin: not scriptable from here
-      // yet (null rather than a SecurityError).
-      const own = selfPath();
-      if (p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(p[p.length - 1])) return null;
-      throw crossOriginErr('document');
-    }
-    focus() { remoteTarget(this); }
-    blur() { remoteTarget(this); }
-    close() { remoteTarget(this); }
-    // Listeners on a same-origin child window (its document isn't scriptable from here, so
-    // they never fire); a cross-origin window blocks them, as in browsers.
-    addEventListener(type, listener, options) { remoteEventTarget(this, 'addEventListener').addEventListener(type, listener, options); }
-    removeEventListener(type, listener, options) { remoteEventTarget(this, 'removeEventListener').removeEventListener(type, listener, options); }
-    dispatchEvent(event) { return remoteEventTarget(this, 'dispatchEvent').dispatchEvent(event); }
+  // The state of this realm's own window, which the properties above act on for `this === window`.
+  let ownWindow = null;
+  function ownState() {
+    if (ownWindow === null) ownWindow = { kind: 'Window', path: selfPath() };
+    return ownWindow;
   }
-  const REMOTE_TARGETS = new WeakMap();
-  function remoteEventTarget(w, what) {
-    const p = remoteTarget(w);
+  // A stand-in Proxy for the window (or Location) of the frame at `path`. Its state: `props` caches the
+  // descriptors, `location` the window's cross-origin Location, `events` and `expando` serve the
+  // lenient case.
+  function newCrossOrigin(kind, path) {
+    const target = {};
+    const st = { kind, path, props: new Map(), location: null, events: null, expando: false };
+    const proxy = new Proxy(target, crossOriginHandler);
+    REMOTE.set(target, st);
+    REMOTE.set(proxy, st);
+    return proxy;
+  }
+  // The window (Location) a cross-origin property acts on: its `this`. For a window a null or undefined
+  // `this` is this realm's own window; anything else that isn't one fails the brand check.
+  function windowThis(v) {
+    if (v === undefined || v === null || v === L.window) return ownState();
+    const st = REMOTE.get(v);
+    if (st === undefined || st.kind !== 'Window') throw new TypeError('Illegal invocation');
+    return st;
+  }
+  function locationThis(v) {
+    if (v === L.location) return ownState();
+    const st = REMOTE.get(v);
+    if (st === undefined || st.kind !== 'Location') throw new TypeError('Illegal invocation');
+    return st;
+  }
+  function parentOf(st) {
+    if (st === ownState()) return L.parentWindow();
+    return L.windowAt(st.path.length === 0 ? st.path : st.path.slice(0, -1));
+  }
+  // `window.location` of `st`: the real one, or its cross-origin Location (one per window).
+  function locationOf(st) {
+    if (st === ownState()) return L.location;
+    if (isLenient(st)) return remoteLocation;
+    if (st.location === null) st.location = newCrossOrigin('Location', st.path);
+    return st.location;
+  }
+  // `top.location = url`, `parent.location.replace(url)`: the host navigates the frame (if it can).
+  function navigateFrame(st, url, replace, method) {
+    if (st === ownState()) { L.navigateTo(url, replace, method); return; }
+    const p = N.urlParse(L.toUSV(url), L.baseURL());
+    if (p === null) throw new DOMException(`Failed to execute '${method}' on 'Location': '${url}' is not a valid URL.`, 'SyntaxError');
+    // (a javascript: URL would run in the other origin's document)
+    if (p[1] === 'javascript:' || typeof N.frameNavigate !== 'function') return;
+    N.frameNavigate(st.path, p[0], replace);
+  }
+  function postMessageTo(st, ...args) {
+    if (args.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+    const [message, targetOrigin, transfer] = args;
+    if (st === ownState()) { L.windowPostMessage(message, targetOrigin, transfer, null); return; }
+    let t = targetOrigin !== null && typeof targetOrigin === 'object'
+      ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
+      : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
+    if (t === '/') t = L.location.origin;
+    else if (t !== '*') {
+      const p = N.urlParse(t, null);
+      if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
+      t = p[10];
+    }
+    const { ports, orig, buffers } = transferables(transferArg(targetOrigin, transfer), null, 'Window');
+    // The ports move to the other realm with the message (see the port-control protocol below).
+    const undo = [];
+    try {
+      N.framePost(st.path, ports.length === 0 ? message
+        : { [PORT_CTL]: 'w', data: message, ports: exportPorts(ports, st.path, undo), paths: portPaths(message, orig) }, t);
+    } catch (e) {
+      for (const f of undo.reverse()) f();
+      throw L.fromNative(e);
+    }
+    detachBuffers(buffers);
+  }
+  const windowSelf = { get: (st) => L.windowAt(st.path) };
+  const setHref = (st, v) => navigateFrame(st, `${v}`, false, 'href');
+  const noop = { call() { }, length: 0 };
+  // What each property does to the window (Location) it is invoked on.
+  const WINDOW_OPS = {
+    window: windowSelf,
+    self: windowSelf,
+    frames: windowSelf,
+    location: { get: locationOf, set: setHref },
+    close: noop,
+    closed: { get: () => false },
+    focus: noop,
+    blur: noop,
+    length: { get: (st) => framesOf(st.path).length },
+    top: { get: (st) => (st === ownState() ? L.windowTop() : L.windowAt([])) },
+    opener: { get: () => null },
+    parent: { get: parentOf },
+    postMessage: { call: postMessageTo, length: 1 },
+  };
+  const LOCATION_OPS = {
+    href: { set: setHref },
+    replace: {
+      call(st, ...args) {
+        if (args.length === 0) throw new TypeError("Failed to execute 'replace' on 'Location': 1 argument required, but only 0 present.");
+        navigateFrame(st, `${args[0]}`, true, 'replace');
+      },
+      length: 1,
+    },
+  };
+  function crossOriginFn(name, length, thisOf, run) {
+    const fn = { [name](...args) { return run(thisOf(this), ...args); } }[name];
+    Object.defineProperty(fn, 'length', { value: length, configurable: true });
+    L.nativeFns.add(fn);
+    return fn;
+  }
+  // The descriptor of one of CrossOriginProperties (cached: identity is stable per stand-in).
+  function crossOriginProperty(st, name, kind) {
+    let d = st.props.get(name);
+    if (d !== undefined) return d;
+    const thisOf = st.kind === 'Window' ? windowThis : locationThis;
+    const op = (st.kind === 'Window' ? WINDOW_OPS : LOCATION_OPS)[name];
+    if (kind === 'm') {
+      d = { value: crossOriginFn(name, op.length, thisOf, op.call), writable: false, enumerable: false, configurable: true };
+    } else {
+      d = {
+        get: kind.includes('g') ? crossOriginFn(`get ${name}`, 0, thisOf, op.get) : undefined,
+        set: kind.includes('s') ? crossOriginFn(`set ${name}`, 1, thisOf, op.set) : undefined,
+        enumerable: false, configurable: true,
+      };
+    }
+    st.props.set(name, d);
+    return d;
+  }
+  // [[GetOwnProperty]] without the SecurityError: the descriptor, or undefined for what a cross-origin
+  // object hides. Child frames are the window's indexed (enumerable) and named properties.
+  function crossOriginOwn(st, p) {
+    if (typeof p === 'string') {
+      const e = CROSS_ORIGIN_PROPS[st.kind].find((x) => x[0] === p);
+      if (e !== undefined) return crossOriginProperty(st, e[0], e[1]);
+      if (st.kind === 'Window') {
+        const w = childWindow(st.path, p);
+        if (w !== undefined) return { value: w, writable: false, enumerable: INDEX_RE.test(p), configurable: true };
+      }
+    }
+    return isFallbackKey(p) ? CROSS_ORIGIN_FALLBACK : undefined;
+  }
+  function crossOriginErr(st, verb, p) {
+    const blocked = `Blocked a frame with origin "${L.location.origin}" from accessing a cross-origin frame.`;
+    if (verb === undefined) return new DOMException(blocked, 'SecurityError');
+    const index = typeof p === 'string' && INDEX_RE.test(p);
+    const what = index ? `an indexed property [${p}]` : `a named property${typeof p === 'string' ? ` '${p}'` : ''}`;
+    return new DOMException(`Failed to ${verb} ${what} ${verb === 'read' ? 'from' : 'on'} '${st.kind}': ${blocked}`, 'SecurityError');
+  }
+  // A direct child frame that is not cross-origin but whose real window isn't available (not
+  // loaded yet, ...). Its stand-in is lenient: plain expandos, `document` is null, and it takes
+  // event listeners that never fire.
+  function sameOriginChild(path) {
     const own = selfPath();
-    const child = p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own);
-    if (!child || frameIsCrossOrigin(p[p.length - 1])) throw new DOMException(`Failed to execute '${what}' on 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
-    let t = REMOTE_TARGETS.get(w);
-    if (t === undefined) { t = new EventTarget(); REMOTE_TARGETS.set(w, t); }
-    return t;
+    return path.length === own.length + 1 && pathKey(path.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(path[path.length - 1]);
   }
-  Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
-  // Named and indexed access to a remote window's child frames (`parent.frames['__tcfapiLocator']`, `top[0]`).
-  const remoteHandler = {
-    get(t, p, r) {
-      if (typeof p === 'string' && !(p in t)) {
-        const w = childWindow(REMOTE.get(t), p);
-        if (w !== undefined) return w;
-      }
-      return Reflect.get(t, p, r);
+  const isLenient = (st) => st.kind === 'Window' && sameOriginChild(st.path);
+  function lenientEvents(w) {
+    const st = REMOTE.get(w);
+    if (st === undefined || st.kind !== 'Window') throw new TypeError('Illegal invocation');
+    if (st.events === null) st.events = new EventTarget();
+    return st.events;
+  }
+  const lenientMethods = {
+    addEventListener(type, listener, options) { lenientEvents(this).addEventListener(type, listener, options); },
+    removeEventListener(type, listener, options) { lenientEvents(this).removeEventListener(type, listener, options); },
+    dispatchEvent(event) { return lenientEvents(this).dispatchEvent(event); },
+  };
+  // The essential internal methods of the cross-origin WindowProxy and Location (7.2.3.x).
+  const crossOriginHandler = {
+    getOwnPropertyDescriptor(t, p) {
+      const st = REMOTE.get(t);
+      if (st.expando && hasOwn(t, p)) return Reflect.getOwnPropertyDescriptor(t, p);
+      const d = crossOriginOwn(st, p);
+      if (d !== undefined) return d;
+      if (isLenient(st)) return undefined;
+      throw crossOriginErr(st, 'read', p);
+    },
+    defineProperty(t, p, d) {
+      const st = REMOTE.get(t);
+      if (!isLenient(st)) throw crossOriginErr(st);
+      st.expando = true;
+      return Reflect.defineProperty(t, p, d);
     },
     has(t, p) {
-      return Reflect.has(t, p) || (typeof p === 'string' && childWindow(REMOTE.get(t), p) !== undefined);
+      const st = REMOTE.get(t);
+      if ((st.expando && hasOwn(t, p)) || crossOriginOwn(st, p) !== undefined) return true;
+      if (!isLenient(st)) throw crossOriginErr(st);
+      return p === 'document' || (typeof p === 'string' && hasOwn(lenientMethods, p)) || Reflect.has(t, p);
     },
+    get(t, p, receiver) {
+      const st = REMOTE.get(t);
+      if (st.expando && hasOwn(t, p)) return Reflect.get(t, p, receiver);
+      if (p === Symbol.toStringTag && isLenient(st)) return 'Window';
+      const d = crossOriginOwn(st, p);
+      if (d !== undefined) {
+        if ('value' in d) return d.value;
+        if (d.get !== undefined) return Reflect.apply(d.get, receiver, []);
+        throw crossOriginErr(st, 'read', p);
+      }
+      if (!isLenient(st)) throw crossOriginErr(st, 'read', p);
+      if (p === 'document') return null;
+      if (typeof p === 'string' && hasOwn(lenientMethods, p)) return lenientMethods[p];
+      return Reflect.get(t, p);
+    },
+    set(t, p, v, receiver) {
+      const st = REMOTE.get(t);
+      const d = st.expando && hasOwn(t, p) ? undefined : crossOriginOwn(st, p);
+      if (d !== undefined && d.set !== undefined) { Reflect.apply(d.set, receiver, [v]); return true; }
+      if (!isLenient(st)) throw crossOriginErr(st, 'set', p);
+      st.expando = true;
+      return Reflect.set(t, p, v);
+    },
+    deleteProperty(t, p) {
+      const st = REMOTE.get(t);
+      if (!isLenient(st)) throw crossOriginErr(st);
+      return Reflect.deleteProperty(t, p);
+    },
+    ownKeys(t) {
+      const st = REMOTE.get(t);
+      const keys = [];
+      const n = st.kind === 'Window' ? framesOf(st.path).length : 0;
+      for (let i = 0; i < n; i++) keys.push(`${i}`);
+      for (const e of CROSS_ORIGIN_PROPS[st.kind]) keys.push(e[0]);
+      keys.push('then', Symbol.toStringTag, Symbol.hasInstance, Symbol.isConcatSpreadable);
+      if (st.expando) for (const k of Reflect.ownKeys(t)) if (!keys.includes(k)) keys.push(k);
+      return keys;
+    },
+    getPrototypeOf(t) { return isLenient(REMOTE.get(t)) ? Reflect.getPrototypeOf(t) : null; },
+    setPrototypeOf(t, v) { return v === crossOriginHandler.getPrototypeOf(t); },
+    preventExtensions() { return false; },
   };
   // The window of this document's <iframe> `id`.
   L.remoteWindowFor = (id) => L.windowAt([...selfPath(), id]);
@@ -425,33 +744,171 @@
   L.childFrames = function () {
     try { return N.querySelectorAll(L.documentId, 'iframe,frame'); } catch (_) { return []; }
   };
+  // The `transfer` of window.postMessage(message, targetOrigin, transfer) or of postMessage(message, options).
+  const transferArg = (targetOrigin, transfer) => (targetOrigin !== null && typeof targetOrigin === 'object'
+    ? (Array.isArray(targetOrigin) ? [] : transferOf(targetOrigin)) : transferOf(transfer));
   L.onMessage = function (source, origin, data) {
+    if (data !== null && typeof data === 'object' && PORT_CTL in data) { portControl(source, origin, data); return; }
     L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports: [], lastEventId: '' }, L.MessageEvent);
   };
   // `source`: the caller's window (another realm of this page), null for this one.
   L.windowPostMessage = function (message, targetOrigin, transfer, source) {
     let target = '/';
-    let list = [];
     if (targetOrigin !== null && typeof targetOrigin === 'object') {
       target = targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`;
-      list = Array.isArray(targetOrigin.transfer) ? targetOrigin.transfer : [];
     } else {
       target = targetOrigin === undefined ? '/' : `${targetOrigin}`;
-      list = Array.isArray(transfer) ? transfer : [];
     }
     const origin = L.location.origin;
+    let elsewhere = false;
     if (target !== '*' && target !== '/') {
       const p = N.urlParse(target, null);
       if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${target}' in a call to 'postMessage'.`, 'SyntaxError');
-      if (p[10] !== origin) return;
+      elsewhere = p[10] !== origin;
     }
-    const data = cloneValue(message);
-    const ports = list.filter((x) => x instanceof MessagePort);
+    // The transfer happens even when the message is then dropped for its target origin.
+    const t = serializeWithTransfer(message, transferArg(targetOrigin, transfer), null, 'Window');
+    detachBuffers(t.buffers);
+    if (elsewhere) return;
     const src = source !== null && source !== undefined ? source : L.window;
     let srcOrigin = origin;
     if (src !== L.window) { try { srcOrigin = src.location.origin; } catch (_) { /* keep ours */ } }
-    L.postTask(() => L.fire(L.window, 'message', { data, origin: srcOrigin, source: src, ports }, L.MessageEvent));
+    L.postTask(() => L.fire(L.window, 'message', { data: t.data, origin: srcOrigin, source: src, ports: t.ports }, L.MessageEvent));
   };
+
+  // ---------------------------------------------------------------------------------------
+  // Ports across realms. Every frame is a realm of its own and a port's class keeps its state
+  // private, so a transferred port becomes a new port in the receiving realm and the two
+  // realms carry the channel between them:
+  //  - Frames of another origin are reached through N.framePost, which takes any frame path.
+  //    Port messages travel in envelopes (see PORT_CTL) that portControl unwraps on arrival;
+  //    the host just sees messages. A port is addressed by an id that its owner registered, and
+  //    only the frame it was handed to may use it.
+  //  - Same-origin frames hold each other's objects, so a foreign port is used through its
+  //    public API only (asLocalPort).
+  // The realm a port left keeps it as a stub (L.portDetach): a message posted to the old
+  // port is passed on, and what the new owner posts goes through the stub to the old peer.
+  // A channel whose ports both left therefore still runs through the realm that made it.
+  // ---------------------------------------------------------------------------------------
+  // Marks the envelopes. The key is a value that a page's own messages won't have; forging an
+  // envelope gains nothing, since the ports it names are only usable by their registered peer.
+  const PORT_CTL = '\u0001sharko:port';
+  const portReg = new Map(); // id -> { port, from, relay }: what a message with that id is for
+  const portIds = new WeakMap(); // port -> the ids registered for it
+  let idSalt = '', idCount = 0;
+  function newPortId() {
+    // Unique across documents of the same frame path (a navigated frame keeps its path)
+    if (idSalt === '') idSalt = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+    return `${idSalt}.${++idCount}`;
+  }
+  function registerPort(id, port, from, relay) {
+    portReg.set(id, { port, from: pathKey(from), relay });
+    const ids = portIds.get(port);
+    if (ids === undefined) portIds.set(port, [id]); else ids.push(id);
+  }
+  function unregisterPort(id) {
+    const e = portReg.get(id);
+    portReg.delete(id);
+    if (e === undefined) return;
+    const ids = portIds.get(e.port);
+    const i = ids === undefined ? -1 : ids.indexOf(id);
+    if (i >= 0) ids.splice(i, 1);
+  }
+  function forgetPort(port) {
+    const ids = portIds.get(port);
+    if (ids !== undefined) for (const id of ids.slice()) unregisterPort(id);
+  }
+  // A MessagePort of another realm of this page, as a port of this one.
+  const FOREIGN_PORTS = new WeakMap();
+  function asLocalPort(x) {
+    if (x instanceof MessagePort) return x;
+    let p = FOREIGN_PORTS.get(x);
+    if (p === undefined) {
+      p = new MessagePort(INTERNAL);
+      FOREIGN_PORTS.set(x, p);
+      L.portLink(p, { send: (data, ports) => x.postMessage(data, ports), close() { } });
+      x.addEventListener('message', (ev) => {
+        const orig = Array.from(ev.ports);
+        const ports = orig.map(asLocalPort);
+        L.portEnqueue(p, cloneMessage(ev.data, orig, ports), ports);
+      });
+      x.start();
+    }
+    return p;
+  }
+  // Moves `ports` to the frame at `dest`; returns their descriptions for the envelope. Undo
+  // steps are collected in `undo` and run if the envelope can't be sent.
+  function exportPorts(ports, dest, undo) {
+    return ports.map((port) => {
+      const id = newPortId(), relay = newPortId();
+      const st = L.portDetach(port, { send(data, moved) { portPost(dest, 'm', id, data, moved); } });
+      undo.push(st.undo);
+      if (st.closed) return { closed: true };
+      registerPort(relay, port, dest, true);
+      undo.push(() => unregisterPort(relay));
+      return {
+        id,
+        peer: relay,
+        queue: st.queue.map(([data, qports]) => ({ data, ports: exportPorts(qports, dest, undo), paths: qports.length === 0 ? [] : portPaths(data, qports) })),
+      };
+    });
+  }
+  // A port that came from the frame `from`. Its queue arrives with it.
+  function importPort(d, from) {
+    const port = new MessagePort(INTERNAL);
+    if (d === null || typeof d !== 'object' || d.closed === true || typeof d.id !== 'string' || typeof d.peer !== 'string' || portReg.has(d.id)) {
+      port.close();
+      return port;
+    }
+    L.portLink(port, {
+      send(data, ports) { portPost(from, 'm', d.peer, data, ports); },
+      close() { portPost(from, 'c', d.peer); },
+    });
+    registerPort(d.id, port, from, false);
+    if (Array.isArray(d.queue)) {
+      for (const m of d.queue) {
+        if (m === null || typeof m !== 'object') continue;
+        const ports = importPorts(m.ports, from);
+        L.portEnqueue(port, setPortPaths(m.data, m.paths, ports), ports);
+      }
+    }
+    return port;
+  }
+  const importPorts = (descs, from) => (Array.isArray(descs) ? descs.map((d) => importPort(d, from)) : []);
+  // A port-control message to the frame at `path`: 'm' delivers a message to the port `id`
+  // there (`ports` move with it), 'c' closes it.
+  function portPost(path, kind, id, data, ports) {
+    const undo = [];
+    try {
+      const list = ports === undefined ? [] : ports;
+      N.framePost(path, { [PORT_CTL]: kind, id, data, ports: exportPorts(list, path, undo), paths: list.length === 0 ? [] : portPaths(data, list) }, '*');
+    } catch (e) {
+      for (const f of undo.reverse()) f();
+      // (a close that can't be sent needs no report)
+      if (kind !== 'c') throw L.fromNative(e);
+    }
+  }
+  // An envelope from the frame at path `source`.
+  function portControl(source, origin, d) {
+    const kind = d[PORT_CTL];
+    if (kind === 'w') {
+      // window.postMessage that transferred ports
+      const ports = importPorts(d.ports, source);
+      const data = setPortPaths(d.data, d.paths, ports);
+      L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports, lastEventId: '' }, L.MessageEvent);
+      return;
+    }
+    const e = typeof d.id === 'string' ? portReg.get(d.id) : undefined;
+    if (e === undefined || e.from !== pathKey(source)) return;
+    if (kind === 'm') {
+      const ports = importPorts(d.ports, source);
+      const data = setPortPaths(d.data, d.paths, ports);
+      // A stub relays what its new owner posts to the peer the port had.
+      if (e.relay) L.portSend(e.port, data, ports); else L.portEnqueue(e.port, data, ports);
+    } else if (kind === 'c') {
+      if (e.relay) { L.portPeerClosed(e.port); forgetPort(e.port); } else { unregisterPort(d.id); L.portUnlink(e.port); }
+    }
+  }
 
   // =======================================================================================
   // UTF-8 helpers (JS; used for URL encoding, multipart bodies, ...)
@@ -2652,7 +3109,9 @@
     'BroadcastChannel', 'DOMException', 'crypto', 'Crypto', 'CryptoKey', 'SubtleCrypto', 'performance', 'console',
     'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'ReadableStream', 'ReadableStreamDefaultReader',
     'ReadableStreamDefaultController', 'WritableStream', 'TransformStream', 'TextEncoderStream', 'TextDecoderStream',
-    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBKeyRange', 'caches', 'isSecureContext', 'origin',
+    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBFactory', 'IDBDatabase', 'IDBObjectStore', 'IDBIndex',
+    'IDBTransaction', 'IDBRequest', 'IDBOpenDBRequest', 'IDBCursor', 'IDBCursorWithValue', 'IDBKeyRange', 'IDBRecord',
+    'IDBVersionChangeEvent', 'caches', 'isSecureContext', 'origin',
     'requestAnimationFrame', 'cancelAnimationFrame', 'ImageData', 'createImageBitmap', 'OffscreenCanvas'];
   const WORKER_BRAND = Symbol('WorkerGlobalScope');
   class WorkerScopeTarget extends EventTarget { }
@@ -3609,6 +4068,7 @@
     try {
       if (isNode(v)) return inspectNode(v);
       if (v === L.window) return 'Window';
+      if (REMOTE.has(v)) return REMOTE.get(v).kind;
       if (v instanceof Error || (typeof v.stack === 'string' && typeof v.message === 'string' && 'name' in v)) return L.errToString(v);
       if (v instanceof Date) return isNaN(v) ? 'Invalid Date' : v.toISOString();
       if (v instanceof RegExp) return String(v);
@@ -4267,7 +4727,12 @@
     *[Symbol.iterator]() { yield* this.#list; }
   }
   L.makeIndexed(DOMStringList.prototype, (o, i) => L.dslItems(o)[i], 8);
-  L.makeDOMStringList = (list) => new DOMStringList(INTERNAL, list);
+  // The indexed properties are own properties of the list (not only prototype getters), as for a platform object.
+  L.makeDOMStringList = (list) => {
+    const d = new DOMStringList(INTERNAL, list);
+    for (let i = 0; i < list.length; i++) Object.defineProperty(d, i, { value: list[i], enumerable: true, configurable: true });
+    return d;
+  };
 
   // states/urls are keyed by session history index (N.historyIndex()); urls let us notice a
   // new entry created by a Rust-side fragment navigation at an index that had a (pruned) state.
