@@ -457,9 +457,21 @@
       }
     }
   }
+  // Template contents belong to an inert document without a browsing context: "look up a
+  // custom element definition" returns null there (HTML spec; Ladybird
+  // Document::lookup_custom_element_definition), so nothing in them is upgraded until it is
+  // imported/adopted into the main document. Otherwise constructors run on the template's
+  // own nodes and can mutate the prototype every later clone is made from.
+  const templateRoots = new Set(); // ids of template content fragments (registered by 30_html.js)
+  L.templateRoots = templateRoots;
+  function inTemplateContents(id) {
+    if (templateRoots.size === 0) return false;
+    for (let p = N.parent(id); p !== 0; p = N.parent(id)) id = p;
+    return templateRoots.has(id);
+  }
   // Upgrade elements in a (possibly detached) subtree without connected callbacks.
   function ceUpgradeSubtree(rootId, includeRoot) {
-    if (!ceActive()) return;
+    if (!ceActive() || inTemplateContents(rootId)) return;
     for (const id of collectCE(rootId, includeRoot)) {
       const w = wrap(id);
       if (!ceState.has(w)) upgradeElement(w);
@@ -1342,12 +1354,13 @@
     if (t === 9) return cloneDocument(w, deep);
     if (t === 2) return w.cloneNode(deep);
     const id = idOf(w);
+    const inert = ceActive() && inTemplateContents(id); // clones of template contents stay inert
     const cid = nativeCall(() => N.cloneNode(id, deep));
     if (t === 1 || t === 11) mirrorForeignWrappers(id, cid, deep);
     else if (t === 4 || t === 7 || t === 10) mirrorTypedLeaf(w, cid);
     const cw = wrap(cid);
     for (const h of L.cloneHooks) h(w, cw, deep);
-    if (ceActive()) ceUpgradeSubtree(cid, true);
+    if (ceActive() && !inert) ceUpgradeSubtree(cid, true);
     return cw;
   }
   // Elements of XML documents carry their namespace/case only in the JS stamp; give their
@@ -2919,7 +2932,10 @@
       if (!isNode(node) && !L.isAttr(node)) throw new TypeError("Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.");
       if (L.isAttr(node)) return node.cloneNode();
       if (typeOf(node) === 9 || isShadowRoot(node)) throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", 'NotSupportedError');
-      return ownDoc(this, cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep));
+      const inertSrc = ceActive() && inTemplateContents(idOf(node));
+      const clone = cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep);
+      if (inertSrc) ceUpgradeSubtree(idOf(clone), true); // now owned by a document with a registry
+      return ownDoc(this, clone);
     },
     adoptNode(node) {
       if (L.isAttr(node)) { if (L.attrOwner(node)) L.attrOwner(node).removeAttributeNode(node); return node; }
