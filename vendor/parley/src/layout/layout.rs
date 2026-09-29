@@ -151,6 +151,14 @@ impl<B: Brush> Layout<B> {
         self.data.indent_options = options;
     }
 
+    /// PATCH: sets the `text-wrap-mode` of the block container. Inline boxes (`inline-block`)
+    /// that come before any text, or in a paragraph without text, follow it: with `nowrap`
+    /// they neither break onto a new line nor count as break opportunities for the
+    /// min-content width. Call before measuring or breaking.
+    pub fn set_base_text_wrap_mode(&mut self, mode: crate::TextWrapMode) {
+        self.data.base_text_wrap_mode = mode;
+    }
+
     /// Returns line breaker to compute lines for the layout.
     pub fn break_lines(&mut self) -> BreakLines<'_, B> {
         unjustify(&mut self.data);

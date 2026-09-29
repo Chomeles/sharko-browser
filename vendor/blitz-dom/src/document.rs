@@ -33,7 +33,7 @@ use selectors::{Element, matching::QuirksMode};
 use smallvec::SmallVec;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, Bound, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -1292,6 +1292,16 @@ impl BaseDocument {
     }
 
     pub fn process_style_element(&mut self, target_id: NodeId) {
+        // PATCH: a `<style>` applies only while it is connected (HTML §4.2.6 "update a style
+        // block": the element must be connected). A detached one (created by script, text
+        // set, not inserted yet, or inserted into another document) used to register its
+        // rules in this document's stylist anyway: airbnb.de's `<browser-font-size>` probe
+        // builds `div { width: 1rem; height: 1rem }` for its iframe, and every `<div>` of
+        // the page became 16x16.
+        if !self.is_connected_to_root(target_id) {
+            self.remove_stylesheet_for_node(target_id);
+            return;
+        }
         let css = self.nodes[target_id].text_content();
         let css = html_escape::decode_html_entities(&css);
         let media = self.media_list_of(target_id);
@@ -1362,6 +1372,19 @@ impl BaseDocument {
 
     /// PATCH: where a `<style>`/`<link>` element's stylesheet applies: nowhere inside
     /// `<template>` contents, only to the host's subtree inside an emulated shadow tree.
+    /// PATCH: whether the parent chain of `node_id` ends at the document root node.
+    pub(crate) fn is_connected_to_root(&self, node_id: NodeId) -> bool {
+        let root = self.root_node().id;
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            if id == root {
+                return true;
+            }
+            cur = self.nodes.get(id).and_then(|n| n.parent);
+        }
+        false
+    }
+
     pub fn style_scope(&self, node_id: NodeId) -> StyleScope {
         let mut cur = self.nodes.get(node_id).and_then(|n| n.parent);
         while let Some(id) = cur {
@@ -1609,12 +1632,21 @@ impl BaseDocument {
         let element = &mut self.nodes[node_id].element_data_mut().unwrap();
         element.special_data = SpecialElementData::Stylesheet(stylesheet.clone());
 
-        // TODO: Nodes could potentially get reused so ordering by node_id might be wrong.
-        let insertion_point = self
-            .nodes_to_stylesheet
-            .range((Bound::Excluded(node_id), Bound::Unbounded))
-            .next()
-            .map(|(_, sheet)| sheet);
+        // PATCH: the sheet goes before the first sheet of a node that follows this one in
+        // tree order (the cascade orders author sheets by tree position, CSS Cascade 4
+        // §6.4.1). It used to be ordered by node id, i.e. by creation: a `<style>` that script
+        // created and inserted before an older one (emotion's `prepend`, `insertBefore`)
+        // won the cascade against it, e.g. coursera.org's padding of the nav container.
+        let mine = self.tree_path(node_id);
+        let insertion_point = mine.and_then(|mine| {
+            self.nodes_to_stylesheet
+                .iter()
+                .filter(|(other, _)| **other != node_id)
+                .filter_map(|(other, sheet)| Some((self.tree_path(*other)?, sheet)))
+                .filter(|(path, _)| *path > mine)
+                .min_by(|(a, _), (b, _)| a.cmp(b))
+                .map(|(_, sheet)| sheet)
+        });
 
         // PATCH: adopted stylesheets stay behind every node's sheet.
         let insertion_point = insertion_point.or_else(|| self.first_adopted_stylesheet());
@@ -1628,6 +1660,20 @@ impl BaseDocument {
             self.stylist
                 .append_stylesheet(stylesheet, &self.guard.read())
         }
+    }
+
+    /// PATCH: the child indices from the root down to `id` (`None` when detached).
+    fn tree_path(&self, id: NodeId) -> Option<Vec<usize>> {
+        let root = self.root_node().id;
+        let mut path = Vec::new();
+        let mut cur = id;
+        while cur != root {
+            let parent = self.nodes.get(cur)?.parent?;
+            path.push(self.nodes.get(parent)?.children.iter().position(|c| *c == cur)?);
+            cur = parent;
+        }
+        path.reverse();
+        Some(path)
     }
 
     fn first_adopted_stylesheet(&self) -> Option<&DocumentStyleSheet> {
@@ -2788,15 +2834,19 @@ impl BaseDocument {
                 .iter()
                 .map(|r| r.y + r.height)
                 .fold(f64::NEG_INFINITY, f64::max);
-            return match rects.is_empty() {
-                true => None,
-                false => Some(BoundingRect {
-                    x: x0,
-                    y: y0,
-                    width: x1 - x0,
-                    height: y1 - y0,
-                }),
-            };
+            if rects.is_empty() {
+                // PATCH: an inline element whose content is block-level (`<a><h2>..</h2></a>`,
+                // the block splits the inline) has no fragment in a text layout: its rect
+                // is the union of the boxes of its children (CSSOM: the boxes the element
+                // generates, and the block-level ones of its children belong to it).
+                return self.union_of_child_rects(node_id);
+            }
+            return Some(BoundingRect {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            });
         }
 
         let node = self.get_node(node_id)?;
@@ -2860,6 +2910,36 @@ impl BaseDocument {
             width: x1 - x0,
             height: y1 - y0,
         })
+    }
+
+    /// PATCH: the union of the border boxes of the rendered element children of `node_id`
+    /// (`None` when there are none).
+    fn union_of_child_rects(&self, node_id: NodeId) -> Option<BoundingRect> {
+        let node = self.get_node(node_id)?;
+        let mut acc: Option<(f64, f64, f64, f64)> = None;
+        for &child in &node.children {
+            let Some(c) = self.get_node(child) else { continue };
+            if !c.is_element() {
+                continue;
+            }
+            let hidden = c
+                .primary_styles()
+                .is_none_or(|s| s.clone_display().is_none());
+            if hidden {
+                continue;
+            }
+            let Some(r) = self.get_client_bounding_rect(child) else { continue };
+            acc = Some(match acc {
+                Some((x0, y0, x1, y1)) => (
+                    x0.min(r.x),
+                    y0.min(r.y),
+                    x1.max(r.x + r.width),
+                    y1.max(r.y + r.height),
+                ),
+                None => (r.x, r.y, r.x + r.width, r.y + r.height),
+            });
+        }
+        acc.map(|(x0, y0, x1, y1)| BoundingRect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
     }
 
     /// Whether a layout ancestor of `node_id` is `position: fixed` or transformed (then a

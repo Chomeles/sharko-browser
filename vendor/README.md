@@ -351,3 +351,28 @@ Patches so far:
     boxes, and `innerText` leaves them out. `auto` parses and computes but is not yet
     skipped: it needs a relevance test (viewport distance) that has to run after the first
     layout, so offscreen `auto` subtrees are still laid out.
+81. `blitz-dom/src/document.rs` (`process_style_element`, `is_connected_to_root`),
+    `mutator.rs` (test): a `<style>` applies only while connected (HTML §4.2.6 "update a
+    style block"). A detached one (created by script and given text, or handed to another
+    document's tree) registered its rules in the stylist anyway and kept them after removal.
+    airbnb.de builds `div { width: 1rem; height: 1rem }` for a `<browser-font-size>` probe
+    iframe; every `<div>` of the page became 16x16 and the whole react tree collapsed.
+82. `blitz-dom/src/document.rs` (`add_stylesheet_for_node`, `tree_path`): the sheet of a
+    `<style>`/`<link>` is inserted into the stylist before the first sheet of a node that
+    follows it in tree order (CSS Cascade 4 §6.4.1), not before the next larger node id. A
+    `<style>` that script created and put in front of an older one (`insertBefore`,
+    `prepend`, emotion's `prepend: true`) used to win the cascade against it: coursera.org's
+    `.cds-2 { padding-inline: 0 }` beat `.css-j55dmx { padding: 0 48px }` and the nav
+    container lost its padding.
+83. `parley/src/layout/{data,layout,line_break}.rs` (`base_text_wrap_mode`,
+    `set_base_text_wrap_mode`), `blitz-dom/src/layout/inline.rs`: inline boxes that come
+    before any text of the paragraph (or in a paragraph without text: a row of `inline-block`
+    tiles) followed `wrap` because the wrap mode was only ever taken from the previous text
+    cluster. Under `white-space: nowrap` they were break opportunities for the min-content
+    width (a `nowrap` carousel of `inline-block` tiles inside an `inline-block` was as wide as
+    its container, 1236px instead of 3880px on bing.com) and could wrap at line breaking. The
+    inline layout root now hands its own `text-wrap-mode` to the layout.
+84. `blitz-dom/src/document.rs` (`get_client_bounding_rect`, `union_of_child_rects`): the
+    rect of an inline element that has no fragment in a text layout because its content is
+    block-level (`<a><span><h2>..</h2></span></a>`) is the union of the boxes of its children
+    instead of `None` (0x0 at the origin in script).
