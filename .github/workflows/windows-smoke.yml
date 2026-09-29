@@ -1,0 +1,95 @@
+name: Windows smoke
+
+# Builds the Windows package, runs it headless against real sites next to Chromium
+# (tools/sitediff) and uploads the results and the package as artifacts. Not a release:
+# nothing is signed or published and installed browsers never see it.
+#
+# Runs when a push changes tools/ci/windows-smoke.trigger (bump the number in it), or
+# manually. The repository is public, so the minutes are free.
+on:
+  push:
+    paths: ['tools/ci/windows-smoke.trigger']
+  workflow_dispatch:
+    inputs:
+      random:
+        description: 'Random Tranco domains to add to the curated site list'
+        required: false
+        default: '20'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: smoke-x86_64-pc-windows-msvc
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc -p browser-core -p browser-launcher
+      - name: Package
+        run: cargo xtask package --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: dist/*.zip
+          retention-days: 14
+          if-no-files-found: error
+      - name: Unpack
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist -Filter *.zip | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath smoke -Force
+          $exe = Get-ChildItem smoke -Recurse -Filter browser.exe | Select-Object -First 1
+          "SHARKO_BIN=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "browser: $($exe.FullName)"
+      - name: Smoke
+        run: |
+          "$SHARKO_BIN" --version
+          "$SHARKO_BIN" --headless --settle=500 --console '--eval=document.title' https://example.com/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JS layer tests
+        continue-on-error: true
+        working-directory: crates/script/js/test
+        run: |
+          npm install --no-audit --no-fund
+          node run.js
+      - name: Install Playwright (Chromium reference)
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install chromium
+      - name: Tranco list
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tools/sitediff/out | Out-Null
+          curl.exe -sSL -o tranco.zip https://tranco-list.eu/top-1m.csv.zip
+          Expand-Archive -Path tranco.zip -DestinationPath tranco -Force
+          Move-Item tranco/top-1m.csv tools/sitediff/out/tranco-top-1m.csv -Force
+      - name: Compare with Chromium (sitediff)
+        run: node tools/sitediff/run.js --jobs=2 --settle=3000 --random=${{ github.event.inputs.random || '20' }} --seed=7
+      - name: Report
+        if: always()
+        run: |
+          if [ -f tools/sitediff/out/report.md ]; then head -c 60000 tools/sitediff/out/report.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sitediff-windows
+          path: |
+            tools/sitediff/out
+            !tools/sitediff/out/tranco-top-1m.csv
+          retention-days: 7
