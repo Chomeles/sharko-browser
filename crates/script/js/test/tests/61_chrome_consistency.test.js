@@ -347,3 +347,8 @@ test('a frame that got a src after it was created is not turned into a blank doc
   // still the initial document until the new one arrives
   assert.strictEqual(blank.run('[location.href, document.URL].join()'), 'about:blank,about:blank');
 });
+
+test('interfaces without a constructor have length 0', async () => {
+  const e = await createEnv();
+  assert.deepStrictEqual(Array.from(e.run('[TextTrackList, TextTrack, MediaError, TimeRanges].map((C) => C.length)')), [0, 0, 0, 0]);
+});
