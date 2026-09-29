@@ -60,6 +60,10 @@ class MockNative {
     this.pendingResources = 0;
     this.blobURLs = new Map();
     this.ctx = vm.createContext({});
+    this.global = vm.runInContext('globalThis', this.ctx); // what `frames` hand to each other
+    this.frame = opts.frame || null; // { path, group }, see harness.js frameGroup
+    this.posted = []; // what N.framePost handed to another frame
+    if (this.frame) this.frame.group.set(Array.from(this.frame.path).join(','), this);
     this.R = vm.runInContext('({Array, ArrayBuffer, Uint8Array, Error, TypeError, RangeError, Promise, Object})', this.ctx);
     this.cloneInRealm = vm.runInContext(CLONE_SRC, this.ctx);
     this.templateContents = new Map();
@@ -393,6 +397,32 @@ class MockNative {
     return [px('left') || 0, px('top') || 0, w || 0, h || 0];
   }
 
+  // ------------------------------------------------------------------ frames
+  // Several mocks (one per document of a page) share a `group` (path key -> MockNative), like the
+  // realms of one isolate. Messages between them are queued on the receiver like the host does.
+  get originString() { return new URL(this.url).origin; }
+  frameNatives() {
+    const M = this, F = this.frame;
+    const key = (p) => Array.from(p).join(',');
+    const same = (p) => { const o = F.group.get(key(p)); return o && o !== M && o.originString === M.originString ? o : null; };
+    return {
+      framePath: () => M.arr(F.path),
+      framePost: (path, message, targetOrigin) => {
+        const to = F.group.get(key(path));
+        // the message is serialized in the sender (it may throw) and read in the receiver's realm
+        const data = (to || M).cloneInRealm(message);
+        if (!to || key(path) === key(F.path)) return;
+        if (targetOrigin !== '*' && targetOrigin !== to.originString) return;
+        M.posted.push({ path: Array.from(path), message: data, targetOrigin });
+        to.schedule(to.clock, 'hook', { name: 'onMessage', args: [to.arr(F.path), M.originString, data] });
+      },
+      frameList: () => null,
+      realmGlobal: (path) => { const o = same(path); return o ? o.global : null; },
+      parentGlobal: () => { const o = same(F.path.slice(0, -1)); return F.path.length && o ? o.global : null; },
+      topGlobal: () => { const o = same([]); return F.path.length && o ? o.global : null; },
+    };
+  }
+
   // ------------------------------------------------------------------ events for the harness
   schedule(due, kind, data) {
     const e = Object.assign({ due, seq: this.seq++, kind }, data);
@@ -509,7 +539,9 @@ class MockNative {
       foreignNodeType: () => 0,
       windowPostMessage: function (message, targetOrigin, transfer) {
         if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-        return M.hooks.windowPostMessage(message, targetOrigin, transfer, null);
+        // Like V8's incumbent realm: the window whose script is running, if it is another one
+        const active = M.frame ? M.frame.group.active : null;
+        return M.hooks.windowPostMessage(message, targetOrigin, transfer, active && active !== M.global ? active : null);
       },
       setAdoptedSheets: (hostId, sources, bases) => { if (hostId !== 0) M.n(hostId); M.adoptedSheets.set(hostId, sources.map((s, i) => [s, bases[i]])); },
       setDefined: (id) => { M.n(id); M.definedIds.add(id); },
@@ -828,6 +860,7 @@ class MockNative {
         return M.arr([r.status, r.statusText, r.finalUrl, M.arr(r.flat), r.body === null ? null : M.ab(r.body), r.error]);
       },
     };
+    if (this.frame) Object.assign(nat, this.frameNatives());
     if (this.opts.noTemplateSupport) delete nat.templateContent;
     for (const k of this.opts.disable || []) delete nat[k];
     return nat;
@@ -973,7 +1006,7 @@ const CLONE_SRC = `(function () {
     switch (tag) {
       case '[object Date]': out = new Date(v.getTime()); break;
       case '[object RegExp]': out = new RegExp(v.source, v.flags); break;
-      case '[object ArrayBuffer]': out = v.slice(0); break;
+      case '[object ArrayBuffer]': out = new ArrayBuffer(v.byteLength); new Uint8Array(out).set(new Uint8Array(v)); break; // of this realm
       case '[object Boolean]': out = new Boolean(v.valueOf()); break;
       case '[object Number]': out = new Number(v.valueOf()); break;
       case '[object String]': out = new String(v.valueOf()); break;
@@ -981,6 +1014,7 @@ const CLONE_SRC = `(function () {
       case '[object Set]': out = new Set(); memo.set(v, out); for (const x of v) out.add(clone(x, memo)); return out;
       case '[object Error]': out = new Error(v.message); out.name = v.name; break;
       case '[object Array]': out = new Array(v.length); memo.set(v, out); for (let i = 0; i < v.length; i++) if (i in v) out[i] = clone(v[i], memo); return out;
+      case '[object MessagePort]': out = {}; break; // like V8: a class instance with private state only
       case '[object Object]': out = {}; memo.set(v, out); for (const k of Object.keys(v)) out[k] = clone(v[k], memo); return out;
       default:
         if (ArrayBuffer.isView(v)) { out = new v.constructor(v); break; }

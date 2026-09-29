@@ -37,7 +37,7 @@ It follows the Rust semantics: template contents live in content fragments, sele
 
 Coverage:
 - DOM core and HTML semantics, MutationObserver, custom elements (including customized built-ins), forms and validation
-- the script execution model, event dispatch and activation, timers, microtasks and messaging
+- the script execution model, event dispatch and activation, timers, microtasks and messaging (`45_ports`: several documents of a page as separate realms, messages between them routed by the mock like the host does)
 - networking, URL, encoding, storage, history, observers
 - the Rust integration points (`70_integration`) and guards against quadratic hot paths (`80_perf`)
 - smoke tests with real libraries: React 19 (production and development builds, bundled with esbuild), Preact + hooks, Vue 3 (global build with the template compiler), and jQuery 3 including `$.ajax`, `$.getJSON` and `$.getScript`
@@ -49,6 +49,7 @@ Coverage:
 - **MutationObserver, custom element reactions and Range only see mutations made through the JS DOM API.** Native changes do not produce records: parser output, user text editing, and Rust-side details toggles or form resets. Ranges are not live: boundary points are not adjusted on mutation.
 - **`document.write` is an approximation.** Written markup is parsed as a fragment and inserted after the current parser-inserted script, with an open-element stack for split tags. After load it replaces the body content. Script-created `document.open()` is not a full reset.
 - **Unsupported, or stubbed as absent or `null`:** import maps (`<script type=importmap>` is ignored), iframes and nested browsing contexts (`contentWindow` is `null` in the unit-test harness; the browser runs each frame in its own realm, see `crates/script/src/lib.rs`), SharedWorker, module workers, EventSource, IndexedDB, Notification, WebGL, WebAssembly streaming helpers, `OffscreenCanvas`. Canvas 2D and media elements are inert stubs.
+- **Transferring ports and buffers.** MessagePorts and ArrayBuffers in a `transfer` list move between the documents of a page (`window.postMessage`, `port.postMessage`, `frame.contentWindow`, `parent`, `event.source`), also nested and inside the message (as a property, array element or Map value, not in a Set or as a Map key); other transferables are ignored. A channel whose ports left runs through the realm that created it (see "Ports across frames" in `NATIVE_API.md`) and ends with that document. Inside one realm the port object itself is delivered rather than a new one. `close` events, `Worker`/`SharedWorker` ports and `structuredClone(x, { transfer })` are not implemented. An ArrayBuffer is copied and then detached, not moved.
 - **Dedicated workers run on the page's thread.** Each `Worker` has its own realm (globals, `importScripts`, `self`, timers, messages), but long-running worker code blocks the page, and `Atomics.wait` is unavailable.
 - **`window.open`** returns `null`, even when `N.openWindow` opens a tab. `alert`/`confirm`/`prompt` only log, returning `undefined`/`false`/`null`.
 - **The DOMParser XML parser is a small JS parser**: predefined and numeric entities only, no DTDs. XSLT and XPath are not implemented.
