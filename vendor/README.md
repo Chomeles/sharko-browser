@@ -305,7 +305,7 @@ Patches so far:
     which the network provider turns into the destination and strips. Without them the
     requests had no `Referer`/`Sec-Fetch-Site`, fonts no `Origin`, and an iframe went out as a
     generic request instead of `Sec-Fetch-Dest: iframe`.
-80. Container queries (`container-type`, `container`, `@container`, `cq*` units): `vendor/stylo`
+82. Container queries (`container-type`, `container`, `@container`, `cq*` units): `vendor/stylo`
     (new, Stylo 0.21.0 from crates.io, patched via `[patch.crates-io]`) parses `@container`,
     the `container` shorthand and the `cqw`…`cqmax` units for the servo engine too (they were
     `gecko`-only), behind `layout.container-queries.enabled`; `blitz-dom/src/container_query.rs`
