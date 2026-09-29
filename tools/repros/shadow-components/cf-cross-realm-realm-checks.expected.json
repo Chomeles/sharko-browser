@@ -1,0 +1,15 @@
+{
+ "sameNode": false,
+ "sameObject": false,
+ "sameFunction": false,
+ "sameDocProto": false,
+ "evalRealm": false,
+ "docNodeProto": false,
+ "instanceofNode": false,
+ "instanceofWNode": true,
+ "body_parent": true,
+ "replace": "ok",
+ "readyState": "complete/complete",
+ "loc": "about:blank",
+ "bb": "[32,18,76.875,17,76.875,11,[11.5625,17]]"
+}

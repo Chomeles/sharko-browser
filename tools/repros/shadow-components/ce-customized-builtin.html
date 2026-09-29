@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>customized built-in element reactions</title>
+<!-- WPT: custom-elements/reactions/customized-builtins/* (0 of 206 subtests pass). Expected values:
+     ce-customized-builtin.expected.json (Chromium). -->
+<body>
+<script>
+const out = {};
+const log = [];
+class B extends HTMLButtonElement {
+  static observedAttributes = ['name', 'autofocus', 'disabled', 'value', 'data-x'];
+  constructor() { super(); log.push('constructed'); }
+  attributeChangedCallback(n, o, v) { log.push('attr:' + n + ':' + o + '>' + v); }
+  connectedCallback() { log.push('connected'); }
+}
+customElements.define('my-b', B, { extends: 'button' });
+const step = (name, fn) => { log.length = 0; try { fn(); } catch (e) { log.push('ERR ' + e.name); } out[name] = log.join(','); };
+let b;
+step('createElement-is', () => { b = document.createElement('button', { is: 'my-b' }); out.isB = b instanceof B; });
+step('setAttribute', () => b.setAttribute('data-x', '1'));
+step('idl-name', () => { b.name = 'n1'; });
+step('idl-autofocus', () => { b.autofocus = true; });
+step('idl-disabled', () => { b.disabled = true; });
+step('idl-value', () => { b.value = 'v'; });
+step('connect', () => document.body.appendChild(b));
+step('setAttribute-again', () => b.setAttribute('name', 'n2'));
+step('parser-is', () => { const d = document.createElement('div'); d.innerHTML = '<button is="my-b" name="p"></button>'; document.body.appendChild(d); out.parsedIsB = d.firstChild instanceof B; });
+// autonomous control: the same IDL reflection on a plain custom element passes in Sharko
+class A extends HTMLElement { static observedAttributes = ['id', 'title']; attributeChangedCallback(n, o, v) { log.push('attr:' + n + ':' + o + '>' + v); } }
+customElements.define('my-a', A);
+step('autonomous-idl-title', () => { const a = document.createElement('my-a'); a.title = 't'; a.id = 'i'; });
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

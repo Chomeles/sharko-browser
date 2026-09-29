@@ -1,0 +1,16 @@
+{
+ "readyStateBefore": "complete",
+ "openReturnsDocument": true,
+ "readyStateAfterOpen": "loading",
+ "readyStateAfterClose": "complete",
+ "htmlAttrs": "de|x",
+ "bodyAttrs": "b|bb|true",
+ "headChildren": "title,style",
+ "title": "T",
+ "bodyChildren": "P,SCRIPT,#text",
+ "doctype": "html",
+ "scriptRanSync": true,
+ "events": "",
+ "bodyOnloadRan": true,
+ "readyStateLater": "complete"
+}

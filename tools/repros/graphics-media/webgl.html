@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>webgl acceptance</title>
+<!-- Backlog item 8, acceptance page for a REAL WebGL. Rule: never a fake context. Until it passes, getContext('webgl') must stay null (this page then reports pass:false,
+     which is the honest state). Chromium: a red triangle on a transparent canvas, ANGLE strings, MAX_TEXTURE_SIZE >= 4096. -->
+<body><canvas id="c" width="64" height="64"></canvas>
+<script>
+const out = {};
+window.report = () => JSON.stringify(out);
+try {
+  const gl = document.getElementById('c').getContext('webgl');
+  out.context = !!gl;
+  if (gl) {
+    out.version = gl.getParameter(gl.VERSION);                                // WebGL 1.0 (OpenGL ES 2.0 Chromium)
+    out.maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 4096;
+    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    const p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }'));
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, 'precision mediump float; void main(){ gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }'));
+    gl.linkProgram(p); gl.useProgram(p);
+    const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 0, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(p, 'a'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const px = new Uint8Array(4); gl.readPixels(32, 20, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    out.centerPixel = Array.from(px).join();                                  // 255,0,0,255
+    gl.readPixels(1, 62, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    out.cornerPixel = Array.from(px).join();                                  // 0,0,0,0 (top-left is outside the triangle)
+    out.error = gl.getError();                                                // 0
+    out.webgl2 = !!document.createElement('canvas').getContext('webgl2');
+  }
+} catch (e) { out.exception = String(e); }
+window.__repro = { issue: 'webgl', expected: { context: true, centerPixel: '255,0,0,255', cornerPixel: '0,0,0,0', error: 0 }, actual: out, pass: out.context === true && out.centerPixel === '255,0,0,255' && out.cornerPixel === '0,0,0,0' && out.error === 0 };
+</script>

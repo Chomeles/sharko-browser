@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>initial about:blank documents of iframes</title>
+<!-- Every iframe starts with a synchronous initial about:blank document (HTML "create a new child navigable"). Sharko: contentWindow.document is null
+     for javascript: sources (Akamai mPulse loader dies with "Cannot read properties of null (reading 'open')"), and about:blank/srcdoc frames report the
+     parent's URL and readyState 'interactive'. WPT: html/webappapis/dynamic-markup-insertion (317 failing subtests), cf-cross-realm-realm-checks. -->
+<body>
+<script>
+const out = {};
+function probe(name, mk) {
+  const f = document.createElement('iframe');
+  mk(f);
+  document.body.appendChild(f);
+  const r = {};
+  try {
+    const w = f.contentWindow, d = f.contentDocument;
+    r.hasWindow = !!w;
+    r.hasDocument = !!d;
+    r.viaWindowDocument = w ? typeof w.document + (w.document === null ? ':null' : '') : 'nowin';
+    if (d) {
+      r.url = d.URL === location.href ? 'PARENT' : d.URL;
+      r.locationHref = w.location.href === location.href ? 'PARENT' : w.location.href;
+      r.readyState = d.readyState;
+      r.compatMode = d.compatMode;
+      r.bodyNull = d.body === null;
+      r.childNodes = d.childNodes.length;
+      r.baseURI = d.baseURI === location.href ? 'PARENT' : d.baseURI;
+      r.origin = w.origin === location.origin ? 'same' : w.origin;
+    }
+  } catch (e) { r.error = String(e); }
+  out[name] = r;
+}
+probe('no-src', () => {});
+probe('about-blank', (f) => { f.src = 'about:blank'; });
+probe('empty-src', (f) => { f.src = ''; });
+probe('javascript-void', (f) => { f.src = 'javascript:void(0)'; });
+probe('srcdoc', (f) => { f.srcdoc = '<p>x</p>'; });
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

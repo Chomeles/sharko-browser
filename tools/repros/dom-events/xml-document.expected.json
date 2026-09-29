@@ -1,0 +1,34 @@
+{
+ "xhr-xml": {
+  "contentType": "application/xml",
+  "ctor": "XMLDocument",
+  "root": "foo|null|Element",
+  "rootText": "\"Dummy XML document\"",
+  "compat": "CSS1Compat",
+  "tag": null,
+  "serialized": "<foo>Dummy XML document</foo>"
+ },
+ "xhr-xhtml": {
+  "contentType": "application/xhtml+xml",
+  "ctor": "XMLDocument",
+  "root": "html|http://www.w3.org/1999/xhtml|HTMLHtmlElement",
+  "rootText": "\"Dummy XHTMLCase\"",
+  "compat": "CSS1Compat",
+  "tag": "P|P",
+  "serialized": "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Dummy XHTML</title></head><body><P id=\"a\">Case</P><br /></body><"
+ },
+ "xhr-malformed": "null",
+ "xhr-html": {
+  "contentType": "text/html",
+  "ctor": "HTMLDocument",
+  "root": "html|http://www.w3.org/1999/xhtml|HTMLHtmlElement",
+  "rootText": "\"x\\n\"",
+  "compat": "BackCompat",
+  "tag": null,
+  "serialized": "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head></head><body><foo>x</foo>\n</body></html>"
+ },
+ "domparser": "r|urn:q|tx<y|application/xml|XMLDocument",
+ "domparserError": "a|null|1",
+ "domparserXhtml": "application/xhtml+xml|P|P",
+ "createDocumentType": "application/xml|XMLDocument|CSS1Compat"
+}

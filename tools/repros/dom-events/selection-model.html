@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Selection API against text controls and the DOM</title>
+<!-- Sharko's Selection is a JS-only single-range model (20_dom.js Selection): modify() is a no-op, control selections are not reflected, and the model is
+     not connected to the native (mouse/keyboard) selection. Expected values from Chromium. -->
+<body>
+<p id="p">Hello <b id="b">brave</b> new world</p>
+<textarea id="t">abcdef</textarea><input id="i" value="012345">
+<script>
+const out = {};
+const s = getSelection();
+const $ = (id) => document.getElementById(id);
+const t = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name; } };
+t('initial', () => [s.rangeCount, s.type, s.isCollapsed].join(','));
+t('selectAllChildren', () => { s.selectAllChildren($('p')); return [s.rangeCount, s.type, s.toString(), s.anchorNode.id, s.anchorOffset, s.focusOffset].join('|'); });
+t('setBaseAndExtent-back', () => { s.setBaseAndExtent($('p').lastChild, 4, $('p').firstChild, 2); return [s.direction, s.toString(), s.anchorOffset, s.focusOffset].join('|'); });
+t('modify-extend-word', () => { s.collapse($('p').firstChild, 0); s.modify('extend', 'forward', 'word'); return s.toString(); });
+t('modify-move-char', () => { s.collapse($('p').firstChild, 0); s.modify('move', 'forward', 'character'); return s.anchorOffset + '|' + s.type; });
+t('textarea-select', () => { $('t').focus(); $('t').setSelectionRange(1, 4); return [s.type, s.toString(), s.anchorNode && s.anchorNode.nodeName, $('t').selectionStart + '-' + $('t').selectionEnd].join('|'); });
+t('input-select', () => { $('i').focus(); $('i').select(); return [s.toString(), $('i').selectionStart + '-' + $('i').selectionEnd, document.activeElement.id].join('|'); });
+t('collapseToEnd', () => { s.selectAllChildren($('p')); s.collapseToEnd(); return [s.type, s.anchorNode.nodeName, s.anchorOffset].join('|'); });
+t('containsNode', () => { s.selectAllChildren($('p')); return [s.containsNode($('b')), s.containsNode($('b'), true), s.containsNode($('t'))].join(','); });
+t('getComposedRanges', () => { s.selectAllChildren($('p')); const r = s.getComposedRanges(); return r.length + '|' + r[0].constructor.name; });
+t('range-toString-in-selection', () => { const r = document.createRange(); r.setStart($('p').firstChild, 6); r.setEnd($('b').firstChild, 3); s.removeAllRanges(); s.addRange(r); return s.toString() + '|' + (s.getRangeAt(0) === r); });
+t('deleteFromDocument', () => { const r = document.createRange(); r.selectNodeContents($('b')); s.removeAllRanges(); s.addRange(r); s.deleteFromDocument(); return $('p').textContent; });
+let n = 0; document.addEventListener('selectionchange', () => n++);
+s.selectAllChildren($('p')); s.collapseToStart(); s.removeAllRanges();
+setTimeout(() => { out.selectionchangeCount = n; window.__out = () => JSON.stringify(out, null, 1); window.__done = true; }, 100);
+</script>

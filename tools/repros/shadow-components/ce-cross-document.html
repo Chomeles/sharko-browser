@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>custom element reactions across documents</title>
+<!-- WPT: custom-elements/connected-callbacks.html, adopted-callback.html, upgrading.html.
+     Expected values: ce-cross-document.expected.json (Chromium). -->
+<body>
+<script>
+const out = {};
+const log = [];
+const which = (d) => (d === document ? 'main' : 'other');
+class A extends HTMLElement {
+  connectedCallback() { log.push('connected:' + which(this.ownerDocument)); }
+  disconnectedCallback() { log.push('disconnected'); }
+  adoptedCallback(o, n) { log.push('adopted:' + which(o) + '>' + which(n)); }
+}
+customElements.define('x-a', A);
+function run(name, fn) { log.length = 0; try { fn(); } catch (e) { log.push('ERR ' + e.name); } out[name] = log.join(','); }
+// A document without a browsing context: no registry, but already-custom elements still get reactions.
+const other = document.implementation.createHTMLDocument('x');
+run('insert-into-createHTMLDocument', () => { other.body.appendChild(document.createElement('x-a')); });
+run('adoptNode', () => { other.adoptNode(document.createElement('x-a')); });
+run('importNode-clone-not-upgraded', () => { out.importedIsA = other.importNode(document.createElement('x-a'), true) instanceof A; });
+run('template-content', () => { const t = document.createElement('template'); t.content.appendChild(document.createElement('x-a')); });
+run('move-connected-to-other', () => { const e = document.createElement('x-a'); document.body.appendChild(e); other.body.appendChild(e); });
+run('move-back', () => { const e = other.body.lastChild; document.body.appendChild(e); });
+run('create-in-other-not-upgraded', () => { const e = other.createElement('x-a'); other.body.appendChild(e); out.otherUpgraded = e instanceof A; });
+run('template-doc-createElement', () => { const t = document.createElement('template'); const e = t.content.ownerDocument.createElement('x-a'); t.content.appendChild(e); out.tplUpgraded = e instanceof A; });
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

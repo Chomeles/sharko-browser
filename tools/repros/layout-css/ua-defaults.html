@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>UA stylesheet defaults</title>
+<!-- Computed style of every common element with no author CSS, as JSON:
+     browser --headless --eval='window.report()' file:///.../ua-defaults.html   (Sharko)
+     Diff against Chromium (node tools/sitediff/../chrome-like Playwright page.evaluate) to find UA-sheet gaps. -->
+<body style="margin:0"><div id="host"></div>
+<script>
+var TAGS = 'a abbr address article aside b bdi bdo blockquote button caption cite code col colgroup data dd del details dfn dialog div dl dt em fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr i iframe img input ins kbd label legend li main mark menu meter nav ol optgroup option output p picture pre progress q rp rt ruby s samp search section select small span strong sub summary sup table tbody td template textarea tfoot th thead time tr u ul var video audio canvas svg br wbr fieldset noscript object embed map area center font big tt strike marquee'.split(' ');
+var PROPS = ['display','position','float','boxSizing','marginTop','marginRight','marginBottom','marginLeft','paddingTop','paddingRight','paddingBottom','paddingLeft','borderTopWidth','borderTopStyle','borderTopColor','borderRightWidth','borderLeftWidth','borderBottomWidth','outlineStyle','fontSize','fontWeight','fontStyle','fontFamily','lineHeight','color','backgroundColor','textAlign','textDecorationLine','textTransform','verticalAlign','whiteSpace','listStyleType','listStylePosition','overflowX','overflowY','width','height','minWidth','cursor','opacity','visibility','borderSpacing','borderCollapse','captionSide','tableLayout','textIndent','letterSpacing','wordSpacing','unicodeBidi','direction','contain','contentVisibility','appearance','resize','zIndex','objectFit','userSelect','pointerEvents','transform','columnCount','writingMode','textOverflow','fontVariant','fontStretch','textAlignLast','tabSize','wordBreak','overflowWrap','clear','flexDirection','alignItems','justifyContent','gap','overflowClipMargin','scrollMarginTop','counterReset','quotes','content','hyphens','textWrapMode'];
+window.report = function(){
+  var host = document.getElementById('host'); var out = {};
+  TAGS.forEach(function(t){
+    var wrap = document.createElement('div'); host.appendChild(wrap);
+    var el = (t==='svg') ? document.createElementNS('http://www.w3.org/2000/svg','svg') : document.createElement(t);
+    if (t==='input') el.setAttribute('type','text');
+    if (t==='td'||t==='th'){ var tb=document.createElement('table'), tr=document.createElement('tr'); tr.appendChild(el); tb.appendChild(tr); wrap.appendChild(tb); el.textContent='x'; }
+    else if (t==='tr'||t==='tbody'||t==='thead'||t==='tfoot'||t==='caption'||t==='col'||t==='colgroup'){ var tb2=document.createElement('table'); tb2.appendChild(el); wrap.appendChild(tb2); }
+    else if (t==='li'){ var ul=document.createElement('ul'); ul.appendChild(el); wrap.appendChild(ul); el.textContent='x'; }
+    else if (t==='dt'||t==='dd'){ var dl=document.createElement('dl'); dl.appendChild(el); wrap.appendChild(dl); el.textContent='x'; }
+    else if (t==='option'||t==='optgroup'){ var sel=document.createElement('select'); sel.appendChild(el); wrap.appendChild(sel); el.textContent='x'; }
+    else if (t==='summary'){ var d=document.createElement('details'); d.appendChild(el); wrap.appendChild(d); el.textContent='x'; }
+    else if (t==='rt'||t==='rp'){ var r=document.createElement('ruby'); r.appendChild(el); wrap.appendChild(r); el.textContent='x'; }
+    else { wrap.appendChild(el); if (!/^(br|wbr|hr|img|input|iframe|video|audio|canvas|svg|col|area|embed|object|meter|progress|template|select|textarea)$/.test(t)) el.textContent = 'x'; }
+    var cs = getComputedStyle(el); var o = {};
+    PROPS.forEach(function(p){ var v = cs[p]; if (v === undefined) v = '(undef)'; o[p] = v; });
+    var r2 = el.getBoundingClientRect(); o.__w = Math.round(r2.width*10)/10; o.__h = Math.round(r2.height*10)/10;
+    out[t] = o;
+  });
+  return JSON.stringify(out);
+};
+</script>

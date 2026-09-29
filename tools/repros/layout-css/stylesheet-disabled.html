@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Disabled and alternate stylesheets</title>
+<!-- Chromium: a, b stay black (a disabled link and an alternate stylesheet do not apply); c (<style disabled>) and d, e are red.
+     Sharko: a, b, e are red; link.disabled = true does not switch a sheet off (web.dev's dark-theme.css is such a link). -->
+<link rel="stylesheet" href="data:text/css,%23a%7Bcolor%3Ared%7D" disabled>
+<link rel="alternate stylesheet" title="alt" href="data:text/css,%23b%7Bcolor%3Ared%7D">
+<style disabled>#c{color:red}</style>
+<style id="s4">#d{color:red}</style>
+<link id="l5" rel="stylesheet" href="data:text/css,%23e%7Bcolor%3Ared%7D">
+<p id="a">a</p><p id="b">b</p><p id="c">c</p><p id="d">d</p><p id="e">e</p>
+<script>
+window.report = function () {
+  var o = {}, col = function (i) { return getComputedStyle(document.getElementById(i)).color; };
+  o.initial = { a: col('a'), b: col('b'), c: col('c'), d: col('d'), e: col('e') };
+  document.getElementById('s4').sheet.disabled = true; o.afterSheetDisabled_d = col('d');
+  document.getElementById('l5').disabled = true; o.afterLinkDisabled_e = col('e');
+  document.getElementById('l5').disabled = false; o.afterLinkEnabled_e = col('e');
+  var l = document.querySelector('link[disabled]'); l.disabled = false; o.afterEnable_a = col('a');
+  l.setAttribute('disabled', ''); o.afterReDisableAttr_a = col('a');
+  return JSON.stringify(o);
+};
+
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+function __reproDone(issue, expected, actual) { window.__repro = { issue: issue, expected: expected, actual: actual, pass: JSON.stringify(expected) === JSON.stringify(actual) }; }
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report()), a = { a: r.initial.a, b: r.initial.b, c: r.initial.c, d: r.initial.d, e: r.initial.e, afterSheetDisabled_d: r.afterSheetDisabled_d, afterLinkDisabled_e: r.afterLinkDisabled_e, afterLinkEnabled_e: r.afterLinkEnabled_e, afterEnable_a: r.afterEnable_a, afterReDisableAttr_a: r.afterReDisableAttr_a };
+  var K = 'rgb(0, 0, 0)', R = 'rgb(255, 0, 0)';
+  __reproDone('layout-css/stylesheet-disabled', { a: K, b: K, c: R, d: R, e: R, afterSheetDisabled_d: K, afterLinkDisabled_e: K, afterLinkEnabled_e: R, afterEnable_a: R, afterReDisableAttr_a: K }, a);
+}, 50); });
+</script>

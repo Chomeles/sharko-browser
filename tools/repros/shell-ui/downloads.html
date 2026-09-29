@@ -1,0 +1,9 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><style>body{font:16px system-ui;margin:24px;max-width:760px}pre{background:#eee;padding:8px;min-height:2em}</style><title>downloads</title><h1>Downloads (run serve.py, open http://127.0.0.1:8765/downloads.html)</h1>
+<ul>
+<li><a href="/dl/attachment">Content-Disposition: attachment (must download as "hello world.txt", not render)</a></li>
+<li><a href="/dl/binary">application/octet-stream 5 MB (must download, not the "can't be displayed" page)</a></li>
+<li><a href="/dl/slow">slow 2 MB zip, 10 s (progress, cancel)</a></li>
+<li><a id=b download="blob.txt">blob: URL with download attribute</a></li>
+<li><a href="data:text/plain;base64,SGVsbG8=" download="data.txt">data: URL with download attribute</a></li>
+</ul>
+<script>b.href=URL.createObjectURL(new Blob(['blob content']))</script>

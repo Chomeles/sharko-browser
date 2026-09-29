@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Referrer policy</title>
+<!-- What the server sees as Referer for fetch() from this page (http://localhost:18941/referrer-policy.html) to /ref of a cross-site (C) and a same-origin
+     target, with the default policy, per-request referrerPolicy/referrer, and after <meta name=referrer>. Sharko ignores referrer and referrerPolicy. -->
+<script>
+function canon(v) { return JSON.stringify(v, function (k, x) { if (x && typeof x === 'object' && !Array.isArray(x)) { var o = {}; Object.keys(x).sort().forEach(function (y) { o[y] = x[y]; }); return o; } return x; }); }
+var R = {}, pend = [], A = location.origin, C = 'http://127.0.0.1:18943';
+function ref(k, url, init) { pend.push(fetch(url, init).then(function (r) { return r.json(); }).then(function (j) { R[k] = j.referer; }, function (e) { R[k] = e.name; })); }
+ref('crossDefault', C + '/ref');
+ref('sameDefault', '/ref');
+ref('crossNoReferrer', C + '/ref', { referrerPolicy: 'no-referrer' });
+ref('crossEmptyReferrer', C + '/ref', { referrer: '' });
+ref('crossSameOrigin', C + '/ref', { referrerPolicy: 'same-origin' });
+ref('sameOriginPolicyOnSame', '/ref', { referrerPolicy: 'same-origin' });
+ref('crossUnsafeUrl', C + '/ref', { referrerPolicy: 'unsafe-url' });
+ref('crossCustomReferrer', C + '/ref', { referrer: '/custom/path', referrerPolicy: 'unsafe-url' });
+Promise.all(pend).then(function () {
+  var m = document.createElement('meta'); m.name = 'referrer'; m.content = 'no-referrer'; document.head.appendChild(m);
+  return fetch(C + '/ref').then(function (r) { return r.json(); }).then(function (j) { R.crossAfterMetaNoReferrer = j.referer; });
+}).then(function () {
+  var expected = { crossDefault: A + '/', sameDefault: A + '/referrer-policy.html', crossNoReferrer: null, crossEmptyReferrer: null, crossSameOrigin: null,
+    sameOriginPolicyOnSame: A + '/referrer-policy.html', crossUnsafeUrl: A + '/referrer-policy.html', crossCustomReferrer: A + '/custom/path', crossAfterMetaNoReferrer: null };
+  window.__repro = { issue: 'network-security/referrer-policy', expected: expected, actual: R, pass: canon(expected) === canon(R) };
+});
+</script>

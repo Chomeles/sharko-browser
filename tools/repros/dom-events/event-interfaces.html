@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>UI event interfaces: members, defaults, dispatch details</title>
+<!-- API surface of the UI Events / Pointer Events / Input Events / Clipboard interfaces as seen by script (synthetic events). WPT: uievents, pointerevents,
+     input-events, clipboard-apis (not checked out yet: git sparse-checkout add, see docs/lanes/dom-events.md). Expected values from Chromium. -->
+<body>
+<input id="i" value="abc">
+<script>
+const out = {};
+const t = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name; } };
+const keys = (o, names) => names.map((n) => typeof o[n] === 'function' ? 'f' : (n in o ? 'p' : '-')).join('');
+t('KeyboardEvent', () => { const e = new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', keyCode: 65, charCode: 0, shiftKey: true, repeat: true, isComposing: false, location: 0 }); return [e.key, e.code, e.keyCode, e.which, e.charCode, e.shiftKey, e.repeat, e.getModifierState('Shift'), e.getModifierState('CapsLock'), e.detail, e.view].join('|'); });
+t('KeyboardEvent-members', () => keys(new KeyboardEvent('x'), ['key', 'code', 'keyCode', 'charCode', 'which', 'location', 'repeat', 'isComposing', 'getModifierState', 'initKeyboardEvent', 'altKey', 'metaKey']));
+t('InputEvent', () => { const e = new InputEvent('beforeinput', { inputType: 'insertText', data: 'a', cancelable: true, composed: true }); return [e.inputType, e.data, e.isComposing, e.cancelable, e.composed, e.dataTransfer, typeof e.getTargetRanges, e.getTargetRanges().length].join('|'); });
+t('CompositionEvent', () => { const e = new CompositionEvent('compositionupdate', { data: 'ka' }); return [e.data, e.bubbles, typeof e.initCompositionEvent].join('|'); });
+t('MouseEvent', () => { const e = new MouseEvent('click', { clientX: 5, clientY: 6, screenX: 7, screenY: 8, button: 1, buttons: 4, detail: 2, relatedTarget: document.body, ctrlKey: true }); return [e.pageX, e.pageY, e.offsetX, e.offsetY, e.x, e.y, e.movementX, e.layerX, e.which, e.button, e.buttons, e.ctrlKey, e.relatedTarget === document.body, e.getModifierState('Control'), typeof e.initMouseEvent].join('|'); });
+t('PointerEvent', () => { const e = new PointerEvent('pointerdown', { pointerId: 3, pointerType: 'pen', width: 2, height: 3, pressure: 0.5, tiltX: 1, isPrimary: true, altitudeAngle: 1, persistentDeviceId: 2 }); return [e.pointerId, e.pointerType, e.width, e.height, e.pressure, e.tangentialPressure, e.tiltX, e.twist, e.isPrimary, typeof e.getCoalescedEvents, e.getCoalescedEvents().length, typeof e.getPredictedEvents, e.altitudeAngle, e.persistentDeviceId].join('|'); });
+t('PointerEvent-defaults', () => { const e = new PointerEvent('pointermove'); return [e.pointerId, e.pointerType === '', e.width, e.height, e.pressure, e.isPrimary, e.bubbles].join('|'); });
+t('WheelEvent', () => { const e = new WheelEvent('wheel', { deltaX: 1, deltaY: 2, deltaZ: 3, deltaMode: 1 }); return [e.deltaX, e.deltaY, e.deltaZ, e.deltaMode, e.wheelDelta, e.wheelDeltaY, WheelEvent.DOM_DELTA_LINE].join('|'); });
+t('FocusEvent', () => { const e = new FocusEvent('focus', { relatedTarget: document.body }); return [e.relatedTarget === document.body, e.bubbles, e.composed, e.view].join('|'); });
+t('ClipboardEvent', () => { const dt = new DataTransfer(); dt.setData('text/plain', 'hi'); const e = new ClipboardEvent('paste', { clipboardData: dt, cancelable: true }); return [e.clipboardData.getData('text/plain'), e.cancelable, e.clipboardData.types.join(','), dt.items.length].join('|'); });
+t('DragEvent', () => { const e = new DragEvent('dragstart', { dataTransfer: new DataTransfer() }); return [e.dataTransfer.effectAllowed, e.dataTransfer.dropEffect, typeof e.dataTransfer.setDragImage, e.dataTransfer.files.length].join('|'); });
+t('TouchEvent', () => typeof TouchEvent + '|' + typeof Touch + '|' + ('ontouchstart' in window) + '|' + navigator.maxTouchPoints);
+t('UIEvent', () => { const e = new UIEvent('resize', { detail: 3, view: window }); return [e.detail, e.view === window, e.sourceCapabilities, typeof e.which].join('|'); });
+t('SubmitEvent', () => { const e = new SubmitEvent('submit', { submitter: null }); return String(e.submitter); });
+t('BeforeUnload', () => typeof BeforeUnloadEvent + '|' + typeof PageTransitionEvent + '|' + typeof HashChangeEvent + '|' + typeof PopStateEvent + '|' + typeof StorageEvent + '|' + typeof SecurityPolicyViolationEvent + '|' + typeof ToggleEvent + '|' + typeof CommandEvent + '|' + typeof CloseEvent + '|' + typeof TransitionEvent + '|' + typeof AnimationEvent);
+t('Event-static', () => [Event.NONE, Event.CAPTURING_PHASE, Event.AT_TARGET, Event.BUBBLING_PHASE].join(','));
+t('onhandlers', () => ['onbeforeinput', 'onpaste', 'oncopy', 'oncut', 'onselectstart', 'onselectionchange', 'onbeforetoggle', 'onpointerrawupdate', 'onscrollend', 'oncontextlost', 'onbeforematch', 'oncommand', 'onwebkitanimationend'].map((n) => (n in document.body) ? 1 : 0).join(''));
+t('dispatch-order', () => { const log = []; const el = document.getElementById('i'); el.addEventListener('focus', () => log.push('focus')); el.addEventListener('focusin', () => log.push('focusin')); el.addEventListener('blur', () => log.push('blur')); el.addEventListener('focusout', () => log.push('focusout')); el.focus(); el.blur(); return log.join(','); });
+t('composedPath', () => { const el = document.getElementById('i'); let p; el.addEventListener('x', (e) => { p = e.composedPath().map((n) => n.nodeName || 'window').join(','); }); el.dispatchEvent(new Event('x', { bubbles: true, composed: true })); document.body.dispatchEvent(new Event('y')); return p; });
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

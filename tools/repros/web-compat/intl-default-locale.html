@@ -1,0 +1,20 @@
+<!doctype html><html lang="de"><body><script>
+const d = new Date(Date.UTC(2024, 0, 5, 13, 4, 5));
+window.__result = {
+  navLang: navigator.language,
+  intlLocale: Intl.DateTimeFormat().resolvedOptions().locale,
+  numLocale: Intl.NumberFormat().resolvedOptions().locale,
+  toLocaleString: d.toLocaleString(),
+  toLocaleDateString: d.toLocaleDateString(),
+  toLocaleTimeString: d.toLocaleTimeString(),
+  number: (1234567.891).toLocaleString(),
+  currency: new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' }).format(1234.5),
+  dateMedium: new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(d),
+  collate: ['z', 'ä', 'a'].sort(new Intl.Collator().compare),
+  localeCompare: ['z', 'ä', 'a'].sort((a, b) => a.localeCompare(b)),
+  toUpperLocale: 'i'.toLocaleUpperCase(),
+  rel: new Intl.RelativeTimeFormat().format(-1, 'day'),
+  dateToString: d.toString(),
+  list: new Intl.ListFormat().format(['a', 'b', 'c']),
+};
+</script></body></html>

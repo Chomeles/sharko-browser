@@ -1,0 +1,13 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><style>body{font:16px system-ui;margin:24px;max-width:760px}pre{background:#eee;padding:8px;min-height:2em}</style><title>file input and drag&drop</title><h1>File dialogs and drag and drop</h1>
+<p><input type=file id=f> <input type=file multiple accept="image/*" id=m></p>
+<div id=drop style="border:2px dashed #888;padding:40px">drop files or text here</div>
+<p draggable=true id=src style="border:1px solid #888;padding:8px;width:200px">drag me into the box</p><div id=t style="border:1px solid #888;height:60px"></div>
+<pre id=log></pre>
+<script>
+const L=s=>log.textContent+=s+'\n';
+f.onchange=m.onchange=e=>L('change '+[...e.target.files].map(x=>x.name+':'+x.size+':'+x.type));
+drop.ondragover=e=>e.preventDefault();
+drop.ondrop=e=>{e.preventDefault();L('drop files='+[...e.dataTransfer.files].map(x=>x.name)+' text='+e.dataTransfer.getData('text/plain'))};
+src.ondragstart=e=>e.dataTransfer.setData('text/plain','hello');
+t.ondragover=e=>e.preventDefault();t.ondrop=e=>{e.preventDefault();L('inner drop '+e.dataTransfer.getData('text/plain'))};
+</script>

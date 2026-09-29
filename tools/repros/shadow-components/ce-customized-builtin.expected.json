@@ -1,0 +1,14 @@
+{
+ "isB": true,
+ "createElement-is": "constructed",
+ "setAttribute": "attr:data-x:null>1",
+ "idl-name": "attr:name:null>n1",
+ "idl-autofocus": "attr:autofocus:null>",
+ "idl-disabled": "attr:disabled:null>",
+ "idl-value": "attr:value:null>v",
+ "connect": "connected",
+ "setAttribute-again": "attr:name:n1>n2",
+ "parsedIsB": true,
+ "parser-is": "constructed,attr:name:null>p,connected",
+ "autonomous-idl-title": "attr:title:null>t,attr:id:null>i"
+}

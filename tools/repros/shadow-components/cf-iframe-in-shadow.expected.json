@@ -1,0 +1,6 @@
+{
+ "a_body": "{\"conn\":true,\"cd\":\"doc\",\"cw\":\"win\",\"body\":\"BODY\",\"head\":\"HEAD\",\"readyState\":\"complete\",\"phParent\":\"BODY\",\"bbox\":\"[true,\\\"number\\\",\\\"function\\\"]\"}",
+ "b_shadowOfDiv": "{\"conn\":true,\"cd\":\"doc\",\"cw\":\"win\",\"body\":\"BODY\",\"head\":\"HEAD\",\"readyState\":\"complete\",\"phParent\":\"BODY\",\"bbox\":\"[true,\\\"number\\\",\\\"function\\\"]\"}",
+ "c_shadowOfBody": "{\"conn\":true,\"cd\":\"doc\",\"cw\":\"win\",\"body\":\"BODY\",\"head\":\"HEAD\",\"readyState\":\"complete\",\"phParent\":\"BODY\",\"bbox\":\"[true,\\\"number\\\",\\\"function\\\"]\"}",
+ "d_lightOfShadowedBody": "{\"conn\":true,\"cd\":\"doc\",\"cw\":\"win\",\"body\":\"BODY\",\"head\":\"HEAD\",\"readyState\":\"complete\",\"phParent\":\"BODY\",\"bbox\":\"[false,\\\"number\\\",\\\"function\\\"]\"}"
+}

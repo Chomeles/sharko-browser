@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>t</title></head><body><script>
+var out={};
+var r=document.createElement("iframe");
+r.src="javascript:void(0)";
+r.title="";r.role="presentation";
+var o=document.getElementsByTagName("script")[0];
+o.parentNode.insertBefore(r,o);
+out.cw = !!r.contentWindow;
+try{ out.doc = r.contentWindow && r.contentWindow.document===null ? 'null' : typeof (r.contentWindow&&r.contentWindow.document);}catch(e){out.err=String(e)}
+try{ var d=r.contentWindow.document; out.open = d && typeof d.open; var x=d.open(); out.opened = x===d; x.write('<body onload="document._l()">'); x.close(); out.body = d.body ? d.body.outerHTML : null }catch(e){out.err2=String(e)}
+document.title=JSON.stringify(out);
+</script></body></html>

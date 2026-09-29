@@ -1,0 +1,7 @@
+# Open issues: each page passes in Chromium (window.__repro.pass === true, checked with --chromium) and fails in Sharko.
+# Remove a line when its fix lands (run.js reports XPASS).
+file-scheme.html
+csp-basic.html
+referrer-policy.html
+samesite-cookies.html
+request-metadata.html

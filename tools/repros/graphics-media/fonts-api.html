@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>font loading api</title>
+<!-- Backlog item 4. document.fonts is an inert stub: it never lists the page's @font-face rules, load() resolves without loading, check() is always true,
+     ready resolves at once. Ahem (every glyph is 1em wide) makes "was the font applied" measurable. Serve over http if file:// fonts are blocked:
+     python3 -m http.server -d tools/repros/graphics-media 8123 -->
+<style>
+  @font-face { font-family: "AhemCss"; src: url(Ahem.ttf); font-display: swap; }
+  #a, #b { display: inline-block; font-size: 20px; white-space: pre; }
+  #a { font-family: AhemCss, monospace; }
+  #b { font-family: AhemDyn, monospace; }
+</style>
+<div id="a">XXXX</div><div id="b">XXXX</div>
+<script>
+const out = {};
+const w = (id) => document.getElementById(id).getBoundingClientRect().width;
+window.report = () => JSON.stringify(out);
+(async () => {
+  try {
+    out.setSizeAtStart = document.fonts.size;                               // 1 (the @font-face rule), Chromium lists CSS-connected faces
+    out.cssFaceFamily = [...document.fonts].map((f) => f.family.replace(/"/g, '')).join(',');   // AhemCss
+    out.checkBeforeLoad = document.fonts.check('20px AhemCss');             // false: the face is in the set and not loaded yet (true if already loaded)
+    const loaded = await document.fonts.load('20px AhemCss');
+    out.loadResult = loaded.length + ':' + (loaded[0] && loaded[0].status);   // 1:loaded
+    out.checkAfterLoad = document.fonts.check('20px AhemCss');              // true
+    out.widthCss = w('a');                                                   // 80 (4 x 20px)
+    const f = new FontFace('AhemDyn', 'url(Ahem.ttf)');
+    out.dynStatusNew = f.status;                                             // unloaded
+    document.fonts.add(f);
+    await f.load();
+    out.dynStatusLoaded = f.status;                                          // loaded
+    out.widthDyn = w('b');                                                   // 80 once the added face applies (needs a relayout)
+    out.status = document.fonts.status;                                      // loaded
+    const bad = new FontFace('Broken', 'url(nonexistent.woff2)');
+    let err = null; try { await bad.load(); } catch (e) { err = e.name; }
+    out.badLoad = err + ':' + bad.status;                                    // NetworkError:error
+    await document.fonts.ready;
+  } catch (e) { out.error = String(e); }
+  const want = { setSizeAtStart: 1, cssFaceFamily: 'AhemCss', checkAfterLoad: true, loadResult: '1:loaded', widthCss: 80, dynStatusNew: 'unloaded', dynStatusLoaded: 'loaded', widthDyn: 80, status: 'loaded', badLoad: 'NetworkError:error' };
+  const bad = Object.keys(want).filter((k) => out[k] !== want[k]);
+  window.__repro = { issue: 'font-loading-api', expected: want, actual: out, pass: bad.length === 0, failing: bad };
+})();
+</script>

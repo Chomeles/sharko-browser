@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>what a script sees while the parser is still running</title>
+<!-- Browsers parse incrementally: a parser-blocking script sees only the markup before it. Sharko parses the whole document first, then runs the scripts,
+     so later elements are visible, document.body exists in <head> scripts and document.write text is not merged with the following text.
+     Fix: streaming html5ever parse with script pauses (backlog item 1). Expected values from Chromium. -->
+<script>
+window.__r = {};
+__r.headBodyNull = document.body === null;
+__r.headSeesLater = !!document.getElementById('later');
+__r.headReadyState = document.readyState;
+__r.headDocumentElementChildren = document.documentElement.childNodes.length;
+</script>
+<body>
+<script>
+__r.bodySeesLater = !!document.getElementById('later');
+__r.bodyChildCountAtScript = document.body.childNodes.length;
+__r.nextSibling = document.currentScript.nextSibling ? document.currentScript.nextSibling.nodeName : null;
+__r.scriptsSoFar = document.scripts.length;
+document.write('W');
+</script>
+Tail text<p id="later">later</p>
+<script>
+const b = document.body;
+__r.textNodesAroundWrite = [...b.childNodes].filter((n) => n.nodeType === 3).map((n) => JSON.stringify(n.data.trim())).join(',');
+document.addEventListener('readystatechange', () => (__r.rs = (__r.rs || '') + document.readyState + ','));
+document.addEventListener('DOMContentLoaded', () => { __r.dcl = 1; });
+window.addEventListener('load', () => {
+  __r.rs += '|';
+  window.__out = () => JSON.stringify(__r, null, 1);
+  window.__done = true;
+});
+</script>

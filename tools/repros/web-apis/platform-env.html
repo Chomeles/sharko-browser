@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Locale and time zone consistency, SharedArrayBuffer gating, WebAssembly streaming</title>
+<!-- Chromium: Intl, Date and navigator agree on one locale and one time zone (and the Accept-Language header carries navigator.language);
+     SharedArrayBuffer exists only when the page is cross-origin isolated (COOP + COEP), and WebAssembly.compileStreaming/instantiateStreaming exist.
+     Sharko: the V8 default locale stays en-US whatever navigator.language says (dates and numbers format the US way on German pages), SharedArrayBuffer
+     is always defined (workers run on the page thread, so Atomics.wait code that trusts it deadlocks), and the streaming wasm APIs are missing. -->
+<script src="repro.js"></script>
+<script>
+var WASM_ADD = 'AGFzbQEAAAABBwFgAn9/AX8DAgEABwcBA2FkZAAACgkBBwAgACABags=';
+function tzOffsetViaIntl(tz, d) {
+  var p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(d), o = {};
+  p.forEach(function (x) { o[x.type] = +x.value; });
+  return Math.round((Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute, o.second) - Math.floor(d.getTime() / 1000) * 1000) / -60000);
+}
+addEventListener('load', function () {
+  c('locale', function (done) {
+    var nav = navigator.language, d = new Date(2024, 0, 31, 15, 4, 5);
+    done({
+      intlLocaleIsNavigatorLanguage: new Intl.DateTimeFormat().resolvedOptions().locale === nav,
+      dateStringUsesLocale: d.toLocaleDateString() === d.toLocaleDateString(nav),
+      numberFormatUsesLocale: new Intl.NumberFormat().format(1234567.5) === new Intl.NumberFormat(nav).format(1234567.5),
+      toLocaleStringUsesLocale: d.toLocaleString() === d.toLocaleString(nav),
+      collatorUsesLocale: new Intl.Collator().resolvedOptions().locale === nav,
+      languagesStartWithLanguage: navigator.languages[0] === nav
+    });
+  });
+  c('timeZone', function (done) {
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone, d = new Date(Date.UTC(2024, 6, 1, 12));
+    done({ offsetAgrees: tzOffsetViaIntl(tz, d) === d.getTimezoneOffset(), utcKnown: new Intl.DateTimeFormat('en', { timeZone: 'UTC' }).resolvedOptions().timeZone === 'UTC', berlinSummerOffset: tzOffsetViaIntl('Europe/Berlin', d) });
+  });
+  c('acceptLanguageHeader', function (done) {
+    fetch('/api/cors?mode=none&t=al').then(function () { return fetch('/api/log'); }).then(function (r) { return r.json(); }).then(function (log) {
+      var e = log.filter(function (x) { return x.url.indexOf('t=al') >= 0; })[0];
+      done(!!e && !!e.acceptLanguage && e.acceptLanguage.split(',')[0].split(';')[0] === navigator.languages[0]);
+    }, function () { done('rejected'); });
+  });
+  c('sharedArrayBufferGated', function (done) {
+    done({ crossOriginIsolated: crossOriginIsolated, sharedArrayBuffer: typeof SharedArrayBuffer, atomicsWait: typeof Atomics.wait });
+  });
+  c('wasmStreaming', function (done) {
+    var bytes = Uint8Array.from(atob(WASM_ADD), function (ch) { return ch.charCodeAt(0); }), r = [typeof WebAssembly.compileStreaming, typeof WebAssembly.instantiateStreaming];
+    WebAssembly.instantiateStreaming(fetch('/api/wasm-add')).then(function (x) { return x.instance.exports.add(2, 3); }, function (e) { return 'rejected ' + e.name; })
+      .then(function (v) { r.push(v); return WebAssembly.instantiate(bytes); })
+      .then(function (x) { r.push(x.instance.exports.add(4, 5)); r.push(WebAssembly.validate(bytes)); done(r.join()); }, function (e) { done(r.join() + ' ' + e.name); });
+  });
+  c('wasmWrongMimeRejected', function (done) {
+    if (typeof WebAssembly.instantiateStreaming !== 'function') return done('absent');
+    WebAssembly.instantiateStreaming(new Response(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]), { headers: { 'content-type': 'text/plain' } })).then(function () { done('resolved'); }, function (e) { done(e.name); });
+  });
+  finish('platform-env', {
+    locale: { intlLocaleIsNavigatorLanguage: true, dateStringUsesLocale: true, numberFormatUsesLocale: true, toLocaleStringUsesLocale: true, collatorUsesLocale: true, languagesStartWithLanguage: true },
+    timeZone: { offsetAgrees: true, utcKnown: true, berlinSummerOffset: -120 }, acceptLanguageHeader: true,
+    sharedArrayBufferGated: { crossOriginIsolated: false, sharedArrayBuffer: 'undefined', atomicsWait: 'function' },
+    wasmStreaming: 'function,function,5,9,true', wasmWrongMimeRejected: 'TypeError'
+  });
+});
+</script>

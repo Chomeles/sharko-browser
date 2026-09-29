@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fetch metadata of subresource requests</title>
+<!-- Sec-Fetch-Dest/Mode/Site, Origin and Referer that the cross-site server C (http://127.0.0.1:18943) sees for requests started by this page
+     (http://localhost:18941). Chromium 140: a classic <script src> is dest script / mode no-cors without Origin; a crossorigin classic script and every module
+     script are mode cors with Origin; css/img are style/image with no-cors; fetch() is dest empty with cors (Origin) or no-cors (no Origin).
+     Sharko: classic scripts go out as dest empty / mode cors + Origin, modules as no-cors without Origin, css/img/fonts carry no Sec-Fetch-Site and no Referer. -->
+<link rel="stylesheet" href="http://127.0.0.1:18943/s.css?k=css">
+<script src="http://127.0.0.1:18943/s.js?k=classic"></script>
+<script src="http://127.0.0.1:18943/s.js?k=classicCors" crossorigin></script>
+<script type="module" src="http://127.0.0.1:18943/s.js?k=module"></script>
+<script>
+function canon(v) { return JSON.stringify(v, function (k, x) { if (x && typeof x === 'object' && !Array.isArray(x)) { var o = {}; Object.keys(x).sort().forEach(function (y) { o[y] = x[y]; }); return o; } return x; }); }
+addEventListener('load', function () {
+  var C = 'http://127.0.0.1:18943', img = new Image();
+  img.src = C + '/i.png?k=img';
+  Promise.all([fetch(C + '/json?k=fetchCors').catch(function () {}), fetch(C + '/json?k=fetchNoCors', { mode: 'no-cors' }).catch(function () {})]).then(function () {
+    setTimeout(function () { fetch('http://localhost:18941/log').then(function (r) { return r.json(); }).then(function (log) {
+      var R = {};
+      log.forEach(function (e) { var m = /[?&]k=(\w+)/.exec(e.path); if (m && e.port === 18943 && e.method === 'GET') { var h = e.headers;
+        R[m[1]] = [h['sec-fetch-dest'], h['sec-fetch-mode'], h['sec-fetch-site'], h.origin ? 'origin' : 'no-origin', h.referer || 'no-referer'].join(' '); } });
+      var A = 'http://localhost:18941/';
+      var expected = {
+        css: 'style no-cors cross-site no-origin ' + A, classic: 'script no-cors cross-site no-origin ' + A, classicCors: 'script cors cross-site origin ' + A,
+        module: 'script cors cross-site origin ' + A, img: 'image no-cors cross-site no-origin ' + A,
+        fetchCors: 'empty cors cross-site origin ' + A, fetchNoCors: 'empty no-cors cross-site no-origin ' + A };
+      window.__repro = { issue: 'network-security/fetch-metadata', expected: expected, actual: R, pass: canon(expected) === canon(R) };
+    }); }, 500);
+  });
+});
+</script>

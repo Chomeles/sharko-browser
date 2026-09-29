@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cookie Store API</title>
+<!-- Chromium: cookieStore reads and writes the same jar as document.cookie, fires `change` events, exposes CookieStoreManager on registrations.
+     Sharko: `cookieStore` / CookieStore / CookieChangeEvent are not defined (dm.de calls cookieStore.get() unguarded and throws). Needs natives on the
+     cookie jar of the network process: the JS layer reads document.cookie through N.cookieGet/N.cookieSet (see NATIVE_API.md). -->
+<script src="repro.js"></script>
+<script>
+addEventListener('load', function () {
+  c('api', function (done) { done([typeof self.cookieStore, typeof self.CookieStore, typeof self.CookieChangeEvent].join()); });
+  c('sequence', async function (done) {
+    try {
+      var out = [];
+      await cookieStore.set('wa1', 'v1'); out.push(document.cookie.indexOf('wa1=v1') >= 0);
+      var ck = await cookieStore.get('wa1'); out.push(ck.name + '=' + ck.value + ';' + ck.path + ';' + ck.sameSite);
+      await cookieStore.set({ name: 'wa2', value: 'v2', path: '/', expires: Date.now() + 86400000 });
+      out.push((await cookieStore.getAll()).map(function (x) { return x.name; }).filter(function (n) { return /^wa/.test(n); }).sort().join());
+      document.cookie = 'wa3=v3; path=/'; ck = await cookieStore.get('wa3'); out.push(ck && ck.value);
+      await Promise.all([cookieStore.delete('wa1'), cookieStore.delete('wa2'), cookieStore.delete('wa3')]); out.push(String(await cookieStore.get('wa1')));
+      var ev = new Promise(function (r) { cookieStore.addEventListener('change', function h(e) { cookieStore.removeEventListener('change', h); r(e.changed.map(function (x) { return x.name + '=' + x.value; }).join() + '|' + e.deleted.length); }); });
+      await cookieStore.set('wa4', 'v4'); out.push(await ev); await cookieStore.delete('wa4');
+      done(out.join(' '));
+    } catch (e) { done('rejected ' + (e && e.name)); }
+  });
+  finish('cookie-store', { api: 'object,function,function', sequence: 'true wa1=v1;/;strict wa1,wa2 v3 null wa4=v4|0' });
+});
+</script>

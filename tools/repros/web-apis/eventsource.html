@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>EventSource (Server-Sent Events)</title>
+<!-- Chromium: EventSource connects, parses text/event-stream (default and named events, ids, retry) and works cross-origin with CORS.
+     Sharko: `EventSource` is not defined (the WPT eventsource directory fails as a whole). Needs a streaming response path (see streams.html). -->
+<script src="repro.js"></script>
+<script>
+function sse(k, url, count) { c(k, function (done) { if (typeof EventSource !== 'function') return done('absent'); var es = new EventSource(url), got = [], opened = false;
+  es.onopen = function () { opened = true; }; es.onmessage = function (e) { got.push(e.data + '#' + e.lastEventId); if (got.length + named.length === count) fin(); };
+  var named = []; es.addEventListener('named', function (e) { named.push(e.data); if (got.length + named.length === count) fin(); });
+  function fin() { es.close(); done({ opened: opened, messages: got.join(), named: named.join(), state: es.readyState, url: es.url.replace(location.origin, '') }); }
+  es.onerror = function () { if (es.readyState === 2) done('closed by error'); }; }, 5000); }
+addEventListener('load', function () {
+  sse('sameOrigin', '/api/sse', 3);
+  sse('crossOrigin', 'http://127.0.0.1:18932/api/sse', 3);
+  c('constructorChecks', function (done) { if (typeof EventSource !== 'function') return done('absent'); var r = [EventSource.CONNECTING, EventSource.OPEN, EventSource.CLOSED].join(); try { new EventSource('http://[bad'); r += '|no throw'; } catch (e) { r += '|' + e.name; } var es = new EventSource('/api/sse', { withCredentials: true }); r += '|' + es.withCredentials + '|' + es.readyState; es.close(); done(r + '|' + es.readyState); });
+  finish('eventsource', {
+    sameOrigin: { opened: true, messages: 'msg0#0,msg2#2', named: 'msg1', state: 2, url: '/api/sse' },
+    crossOrigin: { opened: true, messages: 'msg0#0,msg2#2', named: 'msg1', state: 2, url: 'http://127.0.0.1:18932/api/sse'.replace(location.origin, '') },
+    constructorChecks: '0,1,2|SyntaxError|true|0|2'
+  });
+});
+</script>

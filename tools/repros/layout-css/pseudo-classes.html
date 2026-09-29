@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<html lang="de">
+<title>Pseudo-classes that never match</title>
+<!-- window.report() -> 1 if the rule matched (red text or a solid outline), else 0. Chromium: 1 for every key except
+     lang2 (:lang(en) on a German page). Sharko (vendor/blitz-dom/src/stylo.rs, the NonTSPseudoClass match around
+     line 485-530 returns false for them): a, tg, req, opt, ro, rw, cb, num, num2, lang, def, det and dirt are 0. -->
+<style>
+#a:focus-within{color:rgb(255,0,0)} #tg:target{color:rgb(255,0,0)}
+#req:required{color:rgb(255,0,0)} #opt:optional{color:rgb(255,0,0)} #ro:read-only{color:rgb(255,0,0)} #rw:read-write{color:rgb(255,0,0)}
+#cb:indeterminate{outline:3px solid rgb(255,0,0)} #num:in-range{color:rgb(255,0,0)} #num2:out-of-range{color:rgb(255,0,0)}
+#lang:lang(de){color:rgb(255,0,0)} #lang2:lang(en){color:rgb(255,0,0)} #chk:checked{color:rgb(255,0,0)} #dis:disabled{color:rgb(255,0,0)}
+#def:default{outline:3px solid rgb(255,0,0)} #dirt:dir(rtl){color:rgb(255,0,0)} #det:open{outline:3px solid rgb(255,0,0)}
+#pl:placeholder-shown{color:rgb(255,0,0)} #usr:user-invalid{color:rgb(255,0,0)}
+</style>
+<div id="a"><input id="i"></div><p id="tg">t</p><input id="req" required><input id="opt"><input id="ro" readonly><input id="rw">
+<input type="checkbox" id="cb"><input type="number" id="num" min="0" max="10" value="5"><input type="number" id="num2" min="0" max="10" value="50">
+<p id="lang">lang</p><p id="lang2">lang2</p><input type="checkbox" id="chk" checked><input id="dis" disabled>
+<form><input type="submit" id="def"></form><details id="det" open><summary>s</summary></details><div dir="rtl"><p id="dirt">d</p></div>
+<input id="pl" placeholder="x"><input id="usr" required>
+<script>
+window.report = function () {
+  var o = {}, hit = function (id) { var cs = getComputedStyle(document.getElementById(id)); return (cs.color === 'rgb(255, 0, 0)' || cs.outlineStyle === 'solid') ? 1 : 0; };
+  document.getElementById('cb').indeterminate = true; location.hash = 'tg'; document.getElementById('i').focus();
+  ['a','tg','req','opt','ro','rw','cb','num','num2','lang','lang2','chk','dis','def','det','dirt','pl','usr'].forEach(function (id) { o[id] = hit(id); });
+  return JSON.stringify(o);
+};
+
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+function __reproDone(issue, expected, actual) { window.__repro = { issue: issue, expected: expected, actual: actual, pass: JSON.stringify(expected) === JSON.stringify(actual) }; }
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report()), e = {};
+  for (var k in r) e[k] = k === 'lang2' ? 0 : 1;
+  __reproDone('layout-css/pseudo-classes', e, r);
+}, 50); });
+</script>

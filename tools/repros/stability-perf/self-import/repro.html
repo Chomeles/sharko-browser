@@ -1,0 +1,14 @@
+<!doctype html>
+<title>self import repro</title>
+<body>
+<pre id="log"></pre>
+<script>
+  window.__results = [];
+  window.log = (m) => { window.__results.push(m); document.getElementById('log').textContent += m + '\n'; };
+</script>
+<!-- A module whose top level import()s a module that is still evaluating (itself).
+     Chromium: resolves after evaluation. Sharko: V8 fatal (kEvaluating). -->
+<script type="module">
+  import('./self.js').then((ns) => log('outer ok x=' + ns.x), (e) => log('outer err ' + e))
+    .then(() => { log('done'); window.__done = true; });
+</script>

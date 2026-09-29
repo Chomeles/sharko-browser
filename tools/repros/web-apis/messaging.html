@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Messaging: SharedWorker, BroadcastChannel, transfer, structured clone</title>
+<!-- Chromium: SharedWorker instances of one URL share one worker; BroadcastChannel reaches other frames and workers of the origin; transferred
+     ArrayBuffers are detached in the sender; structuredClone handles nested Blob/File/DOMRect/ImageData and honours `transfer`.
+     Sharko: no SharedWorker; BroadcastChannel only within one realm; buffers are copied, not detached; platform objects nested in a value are lost. -->
+<script src="repro.js"></script>
+<script>
+addEventListener('load', function () {
+  c('sharedWorker', function (done) { if (typeof SharedWorker !== 'function') return done('absent'); var a = new SharedWorker('shared-worker.js'), b = new SharedWorker('shared-worker.js'), got = [];
+    a.port.onmessage = function (e) { got.push('a:' + e.data); }; b.port.onmessage = function (e) { got.push('b:' + e.data); if (e.data === 'connections:2') { b.port.postMessage('x'); } if (e.data === 'echo:x') done(got.join()); }; a.port.start(); b.port.start(); });
+  c('broadcastToFrame', function (done) { var f = document.createElement('iframe'); f.srcdoc = '<script>var ch = new BroadcastChannel("bc1"); ch.onmessage = function (e) { parent.postMessage("frame-got:" + e.data, "*"); }; parent.postMessage("frame-ready", "*");<\/script>';
+    addEventListener('message', function h(e) { if (e.data === 'frame-ready') new BroadcastChannel('bc1').postMessage('hello'); else if (/^frame-got/.test(e.data)) { removeEventListener('message', h); done(e.data); } }); document.body.appendChild(f); });
+  c('broadcastToWorker', function (done) { var w = new Worker(blobURL('var ch = new BroadcastChannel("bc2"); ch.onmessage = function (e) { ch.postMessage("worker-got:" + e.data); }; postMessage("ready");')), main = new BroadcastChannel('bc2');
+    main.onmessage = function (e) { if (/^worker-got/.test(e.data)) { done(e.data); w.terminate(); } }; w.onmessage = function () { new BroadcastChannel('bc2').postMessage('hi'); }; });
+  c('transferDetachesInSender', function (done) { var b = new ArrayBuffer(16), w = new Worker(blobURL('onmessage = function (e) { postMessage(e.data.byteLength); }')); w.onmessage = function (e) { done(e.data + ':' + b.byteLength); w.terminate(); }; w.postMessage(b, [b]); });
+  c('structuredCloneTransferDetaches', function (done) { var b = new ArrayBuffer(8), copy = structuredClone(b, { transfer: [b] }); done(b.byteLength + ':' + copy.byteLength); });
+  c('messageChannelTransferDetaches', function (done) { var mc = new MessageChannel(), b = new ArrayBuffer(4); mc.port1.onmessage = function (e) { done(e.data.byteLength + ':' + b.byteLength); }; mc.port2.postMessage(b, [b]); });
+  c('nestedBlobAndFile', function (done) { var o = structuredClone({ b: new Blob(['abc'], { type: 'text/x' }), f: [new File(['d'], 'n.txt', { lastModified: 7 })] }); done((o.b instanceof Blob) + ':' + o.b.size + ':' + o.b.type + ':' + (o.f[0] instanceof File) + ':' + o.f[0].name + ':' + o.f[0].lastModified); });
+  c('domRectAndImageData', function (done) { var r = structuredClone(new DOMRect(1, 2, 3, 4)), i = structuredClone(new ImageData(new Uint8ClampedArray([1, 2, 3, 4]), 1, 1)); done(r.width + ':' + (r instanceof DOMRect) + ':' + i.data[2] + ':' + (i instanceof ImageData)); });
+  c('cloneThroughPostMessageToWorker', function (done) { var w = new Worker(blobURL('onmessage = function (e) { e.data.b.text().then(function (t) { postMessage(t + ":" + (e.data.m instanceof Map)); }); }')); w.onmessage = function (e) { done(e.data); w.terminate(); }; w.postMessage({ b: new Blob(['blob-in-worker']), m: new Map([[1, 2]]) }); });
+  finish('messaging', {
+    sharedWorker: 'a:connections:1,b:connections:2,b:echo:x', broadcastToFrame: 'frame-got:hello', broadcastToWorker: 'worker-got:hi', transferDetachesInSender: '16:0', structuredCloneTransferDetaches: '0:8',
+    messageChannelTransferDetaches: '4:0', nestedBlobAndFile: 'true:3:text/x:true:n.txt:7', domRectAndImageData: '3:true:3:true', cloneThroughPostMessageToWorker: 'blob-in-worker:true'
+  });
+});
+</script>

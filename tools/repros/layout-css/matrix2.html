@@ -1,0 +1,92 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Layout matrix 2</title>
+<!-- Cases on top of features.html: window.report() -> {id: {measure: value}}.
+     Run: browser --headless --eval='window.report()' file:///.../matrix2.html ; same in Chromium; diff the JSON. -->
+<style>
+body{margin:0;font:16px/normal Arial,sans-serif}
+.c{position:relative;width:400px;margin:0 0 10px 0}
+#tr1{translate:30px 0;scale:2;width:20px;height:20px}
+#tr2{rotate:90deg;translate:10px 0;width:40px;height:20px}
+#tr3{transform:translate(10px,0) scale(2);translate:5px 0;width:20px;height:20px}
+#lc{width:200px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#sc{width:200px;overflow:auto;height:50px}#sc>div{width:600px;height:20px;position:relative}#sc>div>i{position:sticky;left:0;display:block;width:50px;height:10px;background:red}
+#ibl span{display:inline-block;height:50px;width:20px}
+#ifl{display:inline-flex;height:30px;align-items:center}
+#fb{display:flex;align-items:baseline;width:300px}#fb>*:nth-child(1){font-size:40px}#fb>*:nth-child(2){font-size:12px}
+#gb{display:grid;grid-template-columns:100px 100px;align-items:baseline;width:300px}#gb>*:nth-child(1){font-size:40px}#gb>*:nth-child(2){font-size:12px}
+#zoom{zoom:2;width:50px;height:10px}
+#ls{letter-spacing:2px;display:inline-block;white-space:nowrap}
+#wba{width:20px;word-break:break-all}
+#owa{display:inline-block;overflow-wrap:anywhere;width:min-content}
+#tt{text-transform:uppercase;display:inline-block;white-space:nowrap}
+#sm{font-variant:small-caps;display:inline-block;white-space:nowrap}
+#tab{white-space:pre;tab-size:4;display:inline-block}
+#vam img{vertical-align:middle}
+#lh40{line-height:40px}
+.tb{border-collapse:separate}
+#t1{width:400px}#t1 td:nth-child(1){width:25%}#t1 td:nth-child(2){width:75%}
+#t2{table-layout:fixed;width:300px}#t2 col:nth-child(1){width:50px}
+#t3{border-collapse:collapse}#t3 td{border:4px solid #000;padding:0}
+#t4 td{padding:0}
+#t5 td{height:60px;padding:0;vertical-align:middle}
+#t6 caption{caption-side:top}
+#t7{display:table;width:300px}#t7>div{display:table-cell;width:100px}
+#t8{float:left}
+#t9 td{white-space:nowrap}
+</style>
+<body>
+<div id="host">
+<div class="c"><div id="tr1" data-p="rect"></div></div>
+<div class="c"><div id="tr2" data-p="rect"></div></div>
+<div class="c"><div id="tr3" data-p="rect"></div></div>
+<div class="c"><div id="lc" data-p="height">Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua Ut enim ad minim veniam quis nostrud</div></div>
+<div class="c"><div id="sc" data-p="scrollLeft"><div><i id="stk" data-p="rectleft"></i></div></div></div>
+<div class="c" id="lh40"><span id="inl" data-p="height">inline text</span></div>
+<div class="c"><fieldset id="fs" style="width:300px"><legend id="lg" data-p="width,height">Legend</legend>x</fieldset></div>
+<div class="c" id="ibl"><span></span>text<span></span></div>
+<div class="c"><span id="ifl"><b>a</b></span> text</div>
+<div class="c"><div id="fb"><div id="fb1" data-p="top">Big</div><div id="fb2" data-p="top">small</div></div></div>
+<div class="c"><div id="gb"><div id="gb1" data-p="top">Big</div><div id="gb2" data-p="top">small</div></div></div>
+<div class="c"><div id="zoom" data-p="width,height"></div></div>
+<div class="c"><span id="ls" data-p="width">0123456789</span></div>
+<div class="c"><div id="wba" data-p="height">abcdefghijklmnopqrstuvwxyz</div></div>
+<div class="c"><span id="owa" data-p="width">abcdefghijklmnopqrstuvwxyz</span></div>
+<div class="c"><span id="tt" data-p="width">mixed Case Text</span><br><span id="sm" data-p="width">mixed Case Text</span></div>
+<div class="c"><pre id="tab" data-p="width">a	b</pre></div>
+<div class="c" id="vam"><img id="vam_i" data-p="top" width="20" height="40" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='40'%3E%3C/svg%3E">middle</div>
+<div class="c"><div id="svgdef" data-p="width,height"><svg id="svg_vb" viewBox="0 0 24 24" data-p="width,height"></svg></div></div>
+<div class="c"><span id="inl_svg"><svg id="svg_none" data-p="width,height"></svg></span></div>
+<div class="c"><table id="t1"><tr><td id="t1a" data-p="width">a</td><td id="t1b" data-p="width">b</td></tr></table></div>
+<div class="c"><table id="t2"><col><col><tr><td id="t2a" data-p="width">a</td><td id="t2b" data-p="width">b</td></tr></table></div>
+<div class="c"><table id="t3"><tr><td id="t3a" data-p="width,height">a</td><td>b</td></tr></table></div>
+<div class="c"><table id="t4" style="border-spacing:0"><tr><td id="t4a" rowspan="2" data-p="height" style="height:10px">a</td><td id="t4b" data-p="height">b</td></tr><tr><td id="t4c" data-p="height">c<br>c</td></tr></table></div>
+<div class="c"><table id="t5" style="border-spacing:0"><tr><td id="t5a" data-p="height">a</td></tr></table></div>
+<div class="c"><table id="t6"><caption id="cap" data-p="height,width">cap</caption><tr><td id="t6a" data-p="top,width">a</td></tr></table></div>
+<div class="c"><div id="t7"><div id="t7a" data-p="width">a</div><div id="t7b" data-p="width">b</div></div></div>
+<div class="c" style="height:60px"><div id="t8" data-p="width"><table id="t8t"><tr><td id="t8a" data-p="width">short text that wraps somewhere in a floated table cell because it is long enough</td></tr></table></div></div>
+<div class="c"><table id="t9" style="width:100%"><tr><td id="t9a" data-p="width">nowrap a</td><td id="t9b" data-p="width">b</td><td id="t9c" data-p="width">c</td></tr></table></div>
+<div class="c"><table id="t10" style="width:300px"><tr><td id="t10a" colspan="2" data-p="width">span two</td></tr><tr><td id="t10b" data-p="width">x</td><td id="t10c" data-p="width">yy</td></tr></table></div>
+</div>
+<script>
+window.report = function(){
+  var out = {};
+  document.querySelectorAll('[data-p]').forEach(function(el){
+    var r = el.getBoundingClientRect(); var p = el.getAttribute('data-p').split(','); var v = {};
+    var par = el.parentElement.getBoundingClientRect();
+    p.forEach(function(k){
+      if (k==='rect') v.rect=[r.left,r.top,r.width,r.height].map(function(x){return Math.round(x*10)/10;});
+      else if (k==='rectleft') v.rectleft = Math.round((r.left-el.parentElement.getBoundingClientRect().left)*10)/10;
+      else if (k==='width') v.width = Math.round(r.width*10)/10;
+      else if (k==='height') v.height = Math.round(r.height*10)/10;
+      else if (k==='top') v.top = Math.round((r.top-par.top)*10)/10;
+      else if (k==='scrollLeft') v.scrollLeft = el.scrollLeft;
+    });
+    out[el.id] = v;
+  });
+  var sc = document.getElementById('sc'); sc.scrollLeft = 100; var stk = document.getElementById('stk');
+  out.sticky_after = {left: Math.round((stk.getBoundingClientRect().left - sc.getBoundingClientRect().left)*10)/10, scrollLeft: sc.scrollLeft};
+  out.docH = document.documentElement.scrollHeight;
+  return JSON.stringify(out);
+};
+</script>

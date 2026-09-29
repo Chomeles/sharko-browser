@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Transforms and the scrollable overflow area</title>
+<!-- window.report() -> [documentElement.scrollWidth, body.scrollWidth] per case. The boxes below end inside the 1280px
+     viewport once their transform is applied (getBoundingClientRect agrees in both browsers), so nothing scrolls in
+     Chromium (1280). Sharko counts the untransformed border box: 1920 for the first, second and fourth case
+     (github.com's hero has exactly this: left:50%; width:100%; transform:translateX(-50%)).
+     Case 3 (margin-left:-50%, no transform) is 1280 in both. -->
+<body style="margin:0">
+<div class="c" style="position:relative;height:20px"><div style="position:absolute;left:50%;width:100%;height:10px;transform:translateX(-50%)"></div></div>
+<div class="c" style="position:relative;height:20px"><div style="position:absolute;left:50%;width:100%;height:10px;translate:-50% 0"></div></div>
+<div class="c" style="position:relative;height:20px"><div style="position:absolute;left:50%;width:100%;height:10px;margin-left:-50%"></div></div>
+<div class="c" style="height:20px"><div style="width:100%;height:10px;transform:translateX(-640px);margin-left:640px"></div></div>
+<script>
+window.report = function () {
+  // each case alone: hide the others, read the scroll width
+  var cs = [].slice.call(document.querySelectorAll('.c')), o = [];
+  cs.forEach(function (c, i) {
+    cs.forEach(function (d) { d.style.display = d === c ? '' : 'none'; });
+    o.push([document.documentElement.scrollWidth, document.body.scrollWidth]);
+  });
+  cs.forEach(function (d) { d.style.display = ''; });
+  return JSON.stringify(o);
+};
+
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+function __reproDone(issue, expected, actual) { window.__repro = { issue: issue, expected: expected, actual: actual, pass: JSON.stringify(expected) === JSON.stringify(actual) }; }
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report()), w = innerWidth;   // nothing may scroll: every box ends inside the viewport once transformed
+  __reproDone('layout-css/transform-overflow', [[w, w], [w, w], [w, w], [w, w]], r);
+}, 50); });
+</script>

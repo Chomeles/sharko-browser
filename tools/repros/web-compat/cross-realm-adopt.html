@@ -1,0 +1,26 @@
+<!doctype html><html><head><title>t</title></head><body>
+<script>
+var out = {};
+function name(n) { return n === null ? 'null' : n === undefined ? 'undef' : n.nodeName; }
+var ifr = document.createElement('iframe'); document.body.appendChild(ifr);
+var d = ifr.contentDocument, b = d.body;
+var ph = document.createElement('div');            // created by the OUTER document, inserted into the iframe's document
+var ret = b.appendChild(ph);
+out.ret_is_ph = ret === ph;
+out.parent_is_ibody = ph.parentNode === b;
+out.parentName = name(ph.parentNode);
+out.ownerIsIframeDoc = ph.ownerDocument === d;
+out.ibodyFirst_is_ph = b.firstChild === ph;
+out.connected = ph.isConnected;
+out.sameNodeInList = b.lastChild === ph;
+// what the challenge does next: template content imported, then ph.parentNode.replaceChild(imported, ph)
+var tpl = document.createElement('template'); tpl.content.appendChild(document.createElement('span'));
+var imp = document.importNode(tpl.content, true);
+try { ph.parentNode.replaceChild(imp, ph); out.replace = 'ok'; } catch (e) { out.replace = 'ERR ' + e.message; }
+// second variant: insertBefore/replaceChild directly on the iframe body with the outer-doc node
+var ph2 = document.createElement('p'); b.appendChild(ph2);
+out.ph2Parent = name(ph2.parentNode);
+var ph3 = document.createElement('i'); b.insertBefore(ph3, null); out.ph3Parent = name(ph3.parentNode);
+var ph4 = document.createElement('u'); b.append(ph4); out.ph4Parent = name(ph4.parentNode);
+document.title = JSON.stringify(out);
+</script></body></html>

@@ -1,0 +1,20 @@
+<!doctype html><html><head><title>t</title></head><body>
+<script>
+var out = {};
+var ifr = document.createElement('iframe'); document.body.appendChild(ifr);
+var w = ifr.contentWindow, d = ifr.contentDocument;
+out.sameNode = w.Node === Node; out.sameObject = w.Object === Object; out.sameFunction = w.Function === Function;
+out.sameDocProto = Object.getPrototypeOf(d) === Object.getPrototypeOf(document);
+out.evalRealm = w.eval('Object') === Object;
+out.docNodeProto = Object.getPrototypeOf(Object.getPrototypeOf(d.body)) === Object.getPrototypeOf(Object.getPrototypeOf(document.body));
+var ph = d.createElement('div'); d.body.appendChild(ph);
+out.instanceofNode = ph instanceof Node; out.instanceofWNode = ph instanceof w.Node;
+out.body_parent = ph.parentNode === d.body;
+var tpl = document.createElement('template'); tpl.content.appendChild(document.createElement('div'));
+var imp = document.importNode(tpl.content, true);
+try { ph.parentNode.replaceChild(imp, ph); out.replace = 'ok'; } catch (e) { out.replace = e.message; }
+out.readyState = d.readyState + '/' + w.document.readyState;
+out.loc = String(w.location.href);
+out.bb = (function(){ var s = d.createElementNS('http://www.w3.org/2000/svg','svg'); var t = d.createElementNS('http://www.w3.org/2000/svg','text'); t.textContent = 'Hello world'; t.setAttribute('x','32'); t.setAttribute('y','32'); s.appendChild(t); d.body.appendChild(s); var b = t.getBBox(); return JSON.stringify([b.x,b.y,b.width,b.height, t.getComputedTextLength(), t.getNumberOfChars(), (function(){ try { var e=t.getExtentOfChar(0); return [e.width,e.height]; } catch(er){ return 'ERR '+er.message; } })()]); })();
+document.title = JSON.stringify(out);
+</script></body></html>

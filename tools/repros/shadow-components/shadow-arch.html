@@ -1,0 +1,143 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>shadow DOM architecture acceptance probe</title>
+<!-- Acceptance page for the native shadow tree work (see docs/lanes/shadow-components.md).
+     Every probe returns a JSON value; run in Chromium for the expected values.
+     stage tags: S3 = DOM tree + slots (native bridge), S2 = style/layout, S4 = events, S5 = focus/hit-testing,
+     S6 = declarative parsing/serialization -->
+<style>
+  /* light-tree rules that must NOT reach into shadow trees and must reach slotted/light nodes */
+  p { color: rgb(255, 0, 0); }
+  x-card > p { font-weight: 700; }
+  x-card .lightonly { text-decoration: underline; }
+  #lay { position: absolute; left: 10px; top: 300px; width: 200px; }
+</style>
+<body>
+<!-- S6: declarative shadow root at parse time, with comment anchors in the light tree -->
+<x-card id="dsd">
+  <template shadowrootmode="open">
+    <style>:host { display: block; border: 1px solid #999; } .wrap { background: #eee; } p { color: rgb(0, 0, 255); } ::slotted(i) { color: rgb(0, 128, 0); }</style>
+    <div class="wrap"><p id="sp">in shadow</p><slot></slot></div>
+  </template>
+  <!--[--><i id="dsdi">slotted</i><!--]-->
+</x-card>
+<div id="host1"><div id="pre">pre</div><!--c-->text</div>
+<div id="lay"><div id="layhost"><span id="layslotted" style="display:block;width:50px;height:20px;background:#ccc">S</span><span id="layunslotted">U</span></div></div>
+<script>
+const out = {};
+const errs = [];
+const T = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR:' + (e && e.name); } };
+const tag = (n) => n === null ? null : n === document ? '#document' : n.nodeType === 11 ? '#fragment' : n.nodeType === 3 ? '#text' : n.nodeType === 8 ? '#comment' : n.localName + (n.id ? '#' + n.id : '');
+const kids = (n) => Array.from(n.childNodes, tag).join(' ');
+
+// ---- S3: light tree stays intact when a shadow root is attached -------------------------------
+const h1 = document.getElementById('host1');
+const pre = document.getElementById('pre');
+const before = kids(h1);
+const sr1 = h1.attachShadow({ mode: 'open' });
+sr1.innerHTML = '<style>b{color:rgb(0,0,255)}</style><b id="sb">shadow</b><slot id="s1"></slot><slot name="n" id="s2"><em id="fb">fallback</em></slot>';
+const late = document.createElement('div'); late.id = 'late'; h1.appendChild(late);
+const named = document.createElement('div'); named.id = 'named'; named.setAttribute('slot', 'n'); h1.appendChild(named);
+T('s3.light.before', () => before);
+T('s3.light.after', () => kids(h1));
+T('s3.light.parent', () => [tag(pre.parentNode), pre.isConnected, tag(document.getElementById('pre')), tag(late.parentNode), late.isConnected, tag(document.getElementById('late'))]);
+T('s3.light.qs', () => [document.querySelectorAll('#pre, #late, #named').length, document.querySelectorAll('slot').length, document.querySelectorAll('#sb').length, h1.querySelectorAll('*').length]);
+T('s3.shadow.tree', () => [kids(sr1), tag(sr1.querySelector('#sb').parentNode), sr1.querySelector('#sb').isConnected, tag(sr1.parentNode), tag(sr1.host), sr1.mode]);
+T('s3.roots', () => [tag(sr1.querySelector('#sb').getRootNode()) , sr1.querySelector('#sb').getRootNode() === sr1, sr1.querySelector('#sb').getRootNode({ composed: true }) === document, pre.getRootNode() === document]);
+T('s3.position', () => [h1.contains(sr1.querySelector('#sb')), h1.compareDocumentPosition(sr1.querySelector('#sb')), sr1.contains(pre), document.contains(sr1.querySelector('#sb'))]);
+T('s3.assign', () => [tag(pre.assignedSlot), tag(late.assignedSlot), tag(named.assignedSlot), Array.from(sr1.querySelector('#s1').assignedNodes(), tag).join(' '), Array.from(sr1.querySelector('#s2').assignedNodes(), tag).join(' '), Array.from(sr1.querySelector('#s2').assignedNodes({ flatten: true }), tag).join(' ')]);
+T('s3.slot.parent', () => [tag(late.parentElement), tag(sr1.querySelector('#s1').parentNode), kids(sr1.querySelector('#s2'))]);
+T('s3.counts', () => [document.getElementsByTagName('slot').length, document.getElementsByTagName('*').length > 0, document.styleSheets.length, sr1.styleSheets.length]);
+T('s3.html', () => [h1.innerHTML.replace(/\s+/g, ' '), sr1.innerHTML.replace(/\s+/g, ' ')]);
+// S3: slotchange delivered as a microtask-checkpoint task
+const sc = document.createElement('div'); document.body.appendChild(sc);
+const scr = sc.attachShadow({ mode: 'open' }); scr.innerHTML = '<slot></slot>';
+let slotchanges = 0; scr.addEventListener('slotchange', (e) => { slotchanges++; out['s3.slotchange.evt'] = [e.bubbles, e.composed, tag(e.target)]; });
+const sk = document.createElement('span'); sc.appendChild(sk);
+out['s3.slotchange.sync'] = slotchanges;
+// S3: manual slot assignment
+const mh = document.createElement('div'); document.body.appendChild(mh);
+const msr = mh.attachShadow({ mode: 'open', slotAssignment: 'manual' }); msr.innerHTML = '<slot id="ms"></slot>';
+const mk = document.createElement('span'); mh.appendChild(mk);
+T('s3.manual', () => { const before = tag(mk.assignedSlot); msr.querySelector('#ms').assign(mk); return [before, tag(mk.assignedSlot), msr.slotAssignment]; });
+// S3: attachShadow rules, clone, custom element in shadow, MutationObserver
+T('s3.attach.rules', () => { const r = []; for (const n of ['a', 'input', 'x-y', 'div', 'section']) { try { document.createElement(n).attachShadow({ mode: 'open' }); r.push(n + ':ok'); } catch (e) { r.push(n + ':' + e.name); } } return r.join(','); });
+T('s3.attach.twice', () => { const d = document.createElement('div'); d.attachShadow({ mode: 'open' }); try { d.attachShadow({ mode: 'open' }); return 'no-throw'; } catch (e) { return e.name; } });
+T('s3.clone', () => { const d = document.createElement('div'); d.attachShadow({ mode: 'open', clonable: true }).innerHTML = '<p>c</p>'; d.appendChild(document.createElement('i')); const c = d.cloneNode(true); return [c.shadowRoot ? c.shadowRoot.innerHTML : null, kids(c)]; });
+let moRecords = 0;
+const moHost = document.createElement('div'); document.body.appendChild(moHost);
+const moSr = moHost.attachShadow({ mode: 'open' });
+const mo = new MutationObserver((r) => { moRecords += r.length; }); mo.observe(moHost, { childList: true, subtree: true });
+moSr.appendChild(document.createElement('p')); moHost.appendChild(document.createElement('i'));
+let ceLog = [];
+customElements.define('sh-ce', class extends HTMLElement { connectedCallback() { ceLog.push('connected'); } });
+const ceHost = document.createElement('div'); ceHost.attachShadow({ mode: 'open' }).innerHTML = '<sh-ce></sh-ce>'; document.body.appendChild(ceHost);
+T('s3.ce.inshadow', () => ceLog.join(','));
+
+// ---- S2: style and layout across the flat tree -------------------------------------------------
+const dsd = document.getElementById('dsd');
+const cs = (el, p) => getComputedStyle(el)[p];
+T('s2.dsd.dom', () => [kids(dsd).replace(/(#text )+/g, '#text ').trim(), tag(dsd.shadowRoot && dsd.shadowRoot.host), document.querySelectorAll('template').length]);
+T('s2.style.scoping', () => [cs(dsd.shadowRoot.getElementById('sp'), 'color'), cs(document.getElementById('dsdi'), 'color'), cs(document.getElementById('dsdi'), 'fontWeight'), cs(dsd, 'display'), cs(dsd, 'borderTopWidth')]);
+T('s2.style.shadow.b', () => [cs(sr1.querySelector('#sb'), 'color'), cs(pre, 'color')]);
+const layHost = document.getElementById('layhost'), layS = document.getElementById('layslotted'), layU = document.getElementById('layunslotted');
+const lr = (e) => { const b = e.getBoundingClientRect(); return Math.round(b.width) + 'x' + Math.round(b.height) + '@' + Math.round(b.left) + ',' + Math.round(b.top); };
+const layBefore = [lr(layS), lr(layU)];
+const laySr = layHost.attachShadow({ mode: 'open' });
+laySr.innerHTML = '<div id="box" style="border:5px solid #000;padding:3px;width:100px"><slot name="x"></slot></div>';
+T('s2.unassigned', () => [layBefore.join(' '), lr(layS), lr(layU), layU.getClientRects().length, layU.offsetParent === null, cs(layU, 'display')]);
+layS.setAttribute('slot', 'x');
+T('s2.layout', () => [lr(layS), lr(laySr.getElementById('box')), lr(layHost), cs(layHost, 'display'), cs(laySr.querySelector('slot'), 'display')]);
+T('s2.hit', () => { const b = layS.getBoundingClientRect(); const x = b.left + 5, y = b.top + 5; return [tag(document.elementFromPoint(x, y)), tag(laySr.elementFromPoint(x, y)), document.elementsFromPoint(x, y).slice(0, 3).map(tag).join(','), laySr.elementsFromPoint(x, y).slice(0, 3).map(tag).join(',')]; });
+T('s2.hit.shadowbox', () => { const b = laySr.getElementById('box').getBoundingClientRect(); const x = b.left + 2, y = b.top + 2; return [tag(document.elementFromPoint(x, y)), tag(laySr.elementFromPoint(x, y))]; });
+T('s2.hostcontext', () => { const d = document.createElement('div'); d.className = 'dark'; document.body.appendChild(d); const h = document.createElement('div'); d.appendChild(h); const s = h.attachShadow({ mode: 'open' }); s.innerHTML = '<style>:host-context(.dark) p { color: rgb(1, 2, 3) }</style><p>x</p>'; return cs(s.querySelector('p'), 'color'); });
+T('s2.part', () => { const h = document.createElement('div'); document.body.appendChild(h); const s = h.attachShadow({ mode: 'open' }); s.innerHTML = '<p part="lbl">x</p>'; const st = document.createElement('style'); st.textContent = 'div::part(lbl) { color: rgb(9, 9, 9) }'; document.head.appendChild(st); const c = cs(s.querySelector('p'), 'color'); st.remove(); return c; });
+T('s2.adopted', () => { const h = document.createElement('div'); document.body.appendChild(h); const s = h.attachShadow({ mode: 'open' }); s.innerHTML = '<p>x</p>'; const sh = new CSSStyleSheet(); sh.replaceSync('p { color: rgb(7, 7, 7) }'); s.adoptedStyleSheets = [sh]; return [cs(s.querySelector('p'), 'color'), cs(document.getElementById('dsdi'), 'color')]; });
+T('s2.text', () => [document.getElementById('dsd').innerText.replace(/\s+/g, ' ').trim(), document.getElementById('dsd').textContent.replace(/\s+/g, ' ').trim()]);
+
+// ---- S4: event path, retargeting, composed --------------------------------------------------
+T('s4.events', () => {
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const sr = host.attachShadow({ mode: 'open' }); sr.innerHTML = '<div id="in"><button id="btn">b</button></div><slot></slot>';
+  const light = document.createElement('u'); host.appendChild(light);
+  const log = [];
+  const rec = (n) => (e) => log.push(n + ':' + tag(e.target) + ':' + (e.composedPath().map(tag).length));
+  host.addEventListener('click', rec('host')); sr.addEventListener('click', rec('sr')); document.addEventListener('click', rec('doc'));
+  sr.getElementById('btn').dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+  light.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+  const nc = []; host.addEventListener('foo', () => nc.push('host')); sr.addEventListener('foo', () => nc.push('sr'));
+  sr.getElementById('btn').dispatchEvent(new Event('foo', { bubbles: true }));
+  const closed = document.createElement('div'); document.body.appendChild(closed); const csr = closed.attachShadow({ mode: 'closed' }); csr.innerHTML = '<i id="ci"></i>';
+  let cp = null; closed.addEventListener('x', (e) => { cp = e.composedPath().map(tag).join(','); }); csr.getElementById('ci').dispatchEvent(new Event('x', { bubbles: true, composed: true }));
+  return [log.join(' | '), nc.join(','), cp];
+});
+T('s4.related', () => { const host = document.createElement('div'); document.body.appendChild(host); const sr = host.attachShadow({ mode: 'open' }); sr.innerHTML = '<i id="a"></i>'; const other = document.createElement('b'); document.body.appendChild(other); let seen = null; host.addEventListener('mouseover', (e) => { seen = tag(e.relatedTarget); }); host.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, composed: true, relatedTarget: sr.getElementById('a') })); let seen2 = null; other.addEventListener('mouseover', (e) => { seen2 = tag(e.relatedTarget); }); other.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, composed: true, relatedTarget: sr.getElementById('a') })); return [seen, seen2]; });
+
+// ---- S5: focus and hit testing -----------------------------------------------------------
+T('s5.focus', () => {
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const sr = host.attachShadow({ mode: 'open' }); sr.innerHTML = '<button id="fb">b</button>';
+  sr.getElementById('fb').focus();
+  return [tag(document.activeElement), tag(sr.activeElement), host.matches(':focus'), sr.getElementById('fb').matches(':focus'), tag(host.shadowRoot.activeElement)];
+});
+T('s5.offsetParent', () => [tag(layS.offsetParent), tag(laySr.getElementById('box').offsetParent)]);
+
+// ---- S6: serialization ---------------------------------------------------------------------
+T('s6.gethtml', () => { const d = document.createElement('div'); d.attachShadow({ mode: 'open', serializable: true }).innerHTML = '<b>x</b>'; return [d.getHTML(), d.getHTML({ serializableShadowRoots: true })]; });
+T('s6.setHTMLUnsafe', () => { const d = document.createElement('div'); d.setHTMLUnsafe('<p><template shadowrootmode="open"><b>s</b></template>l</p>'); const p = d.firstChild; return [!!p.shadowRoot, p.shadowRoot ? p.shadowRoot.innerHTML : null, p.childNodes.length]; });
+T('s6.innerHTML.noDSD', () => { const d = document.createElement('div'); d.innerHTML = '<p><template shadowrootmode="open"><b>s</b></template></p>'; return [!d.firstChild.shadowRoot, d.firstChild.firstChild && d.firstChild.firstChild.localName]; });
+
+// Turnstile shape: attach a closed root to <body>, then append/query light children
+const bodyKids = document.body.childNodes.length;
+const bsr = document.body.attachShadow({ mode: 'closed' });
+const nul = document.body.appendChild(document.createElement('null'));
+nul.insertAdjacentHTML('beforeend', '<div id="crERV20" class="EBOl60">x</div>');
+T('s3.body.light', () => [document.body.childNodes.length === bodyKids + 1, nul.isConnected, tag(nul.parentNode), document.querySelectorAll('#crERV20').length, tag(document.getElementById('crERV20')), document.body.shadowRoot === null, tag(bsr.host)]);
+
+Promise.resolve().then(() => new Promise((r) => setTimeout(r, 50))).then(() => {
+  out['s3.slotchange.async'] = [slotchanges, moRecords];
+  window.__done = true;
+});
+window.__out = () => JSON.stringify(out, null, 1);
+</script>
+</body>

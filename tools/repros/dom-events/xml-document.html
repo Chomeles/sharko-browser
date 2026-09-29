@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>XML and XHTML documents</title>
+<!-- Covers the JS XML parser (XHR responseXML, DOMParser, createDocument). Documents NAVIGATED to as application/xml or application/xhtml+xml (iframe or top level)
+     are not covered here (data: frames are cross-origin, so the page cannot read them; needs an http server): Sharko parses them with the HTML parser, giving an
+     HTMLDocument whose root text ends in "\n" (WPT dom/nodes/Document-createElement.html and createElementNS "XML document didn't load", 400+ subtests) - reproduce with
+     /common/dummy.xml and /common/dummy.xhtml from the WPT server. Expected values from Chromium. -->
+<body>
+<script>
+const out = {};
+const t = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name + ': ' + e.message.slice(0, 60); } };
+const describe = (d) => {
+  const r = {};
+  r.contentType = d.contentType;
+  r.ctor = d.constructor.name;
+  r.root = d.documentElement ? d.documentElement.localName + '|' + d.documentElement.namespaceURI + '|' + d.documentElement.constructor.name : null;
+  r.rootText = d.documentElement ? JSON.stringify(d.documentElement.textContent).slice(0, 60) : null;
+  r.compat = d.compatMode;
+  const p = d.getElementById && d.getElementById('a');
+  r.tag = p ? p.tagName + '|' + p.localName : null;
+  r.serialized = d.documentElement ? new XMLSerializer().serializeToString(d.documentElement).slice(0, 120) : null;
+  return r;
+};
+// XHR with responseType "document" parses application/xml and application/xhtml+xml bodies with the XML parser and text/html with the HTML parser.
+const xhr = (url) => { const x = new XMLHttpRequest(); x.open('GET', url, false); x.overrideMimeType && 0; x.send(); return x; };
+const dataXhr = (mime, body) => new Promise((res) => { const x = new XMLHttpRequest(); x.open('GET', 'data:' + mime + ',' + encodeURIComponent(body)); x.responseType = 'document'; x.onload = () => res(x.responseXML || x.response); x.onerror = () => res(null); x.send(); });
+(async () => {
+  const cases = {
+    xml: ['application/xml', '<foo>Dummy XML document</foo>\n'],
+    xhtml: ['application/xhtml+xml', '<!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Dummy XHTML</title></head><body><P id="a">Case</P><br/></body></html>'],
+    malformed: ['application/xml', '<a><b></a>'],
+    html: ['text/html', '<foo>x</foo>\n'],
+  };
+  for (const [k, [mime, body]] of Object.entries(cases)) { const d = await dataXhr(mime, body); out['xhr-' + k] = d ? describe(d) : 'null'; }
+  const dp = new DOMParser();
+  t('domparser', () => { const good = dp.parseFromString('<r xmlns="urn:q"><c a="1">t</c><![CDATA[x<y]]></r>', 'application/xml'); return good.documentElement.localName + '|' + good.documentElement.namespaceURI + '|' + good.documentElement.textContent + '|' + good.contentType + '|' + good.constructor.name; });
+  t('domparserError', () => { const bad = dp.parseFromString('<a><b></a>', 'application/xml'); return bad.documentElement.localName + '|' + bad.documentElement.namespaceURI + '|' + bad.getElementsByTagName('parsererror').length; });
+  t('domparserXhtml', () => { const xh = dp.parseFromString('<html xmlns="http://www.w3.org/1999/xhtml"><body><P>x</P></body></html>', 'application/xhtml+xml'); return xh.contentType + '|' + xh.body.firstChild.localName + '|' + xh.body.firstChild.tagName; });
+  t('createDocumentType', () => { const d = document.implementation.createDocument(null, 'x'); return d.contentType + '|' + d.constructor.name + '|' + d.compatMode; });
+  window.__out = () => JSON.stringify(out, null, 1);
+  window.__done = true;
+})();
+</script>

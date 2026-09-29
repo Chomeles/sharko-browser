@@ -1,0 +1,15 @@
+<!doctype html><html><head><title>t</title></head><body><script>
+window.__log=[];
+(function(a){var e="http://127.0.0.1:8765/",t="addEventListener";
+ var i,_,o,r=document.createElement("iframe");
+ if(a[t])a[t]("load",function(){},!1);
+ var USE=(location.search.indexOf('js')>=0);
+ if(USE) r.src="javascript:void(0)";
+ r.title="",r.role="presentation",(r.frameElement||r).style.cssText="width:0;height:0;border:0;display:none;",o=document.getElementsByTagName("script")[0],o.parentNode.insertBefore(r,o);
+ try{_=r.contentWindow.document}catch(O){i=document.domain,r.src="javascript:var d=document.open();d.domain='"+i+"';void(0);",_=r.contentWindow.document}
+ try{
+ _.open()._l=function(){var a=this.createElement("script");if(i)this.domain=i;a.id="boomr-if-as",a.src=e+"c1.js",this.body.appendChild(a); window.__log.push('_l ran')},_.write("<bo"+'dy onload="document._l();">'),_.close();
+ }catch(err){window.__log.push('ERR '+err)}
+})(window);
+setTimeout(function(){document.title=JSON.stringify({log:window.__log,c1:window.c1})},1500);
+</script></body></html>

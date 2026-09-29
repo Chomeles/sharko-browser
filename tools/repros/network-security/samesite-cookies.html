@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SameSite cookies</title>
+<!-- Cookies for host localhost are set from a same-site request (this page -> B, Set-Cookie accepted). A same-site fetch sends all of them; the same fetch
+     made from an iframe on 127.0.0.1 (cross-site) must send none of Strict/Lax/default(Lax). Sharko sends every cookie in every context (cookies.rs: SameSite
+     is not enforced). Needs serve.py; A = http://localhost:18941. -->
+<script>
+function canon(v) { return JSON.stringify(v, function (k, x) { if (x && typeof x === 'object' && !Array.isArray(x)) { var o = {}; Object.keys(x).sort().forEach(function (y) { o[y] = x[y]; }); return o; } return x; }); }
+var A = 'http://localhost:18941', B = 'http://localhost:18942';
+function names(j) { return j.cookie.split('; ').filter(Boolean).map(function (s) { return s.split('=')[0]; }).sort().join(','); }
+var q = location.search;
+if (q.indexOf('phase=read') >= 0) {                       // runs inside the cross-site iframe (http://127.0.0.1:18943)
+  fetch(A + '/cookie-echo', { credentials: 'include' }).then(function (r) { return r.json(); }).then(function (j) { parent.postMessage({ crossSite: names(j) }, '*'); },
+    function (e) { parent.postMessage({ crossSite: e.name }, '*'); });
+} else {
+  var R = {};
+  function set(n, attrs) { return fetch(B + '/cookie-set?name=' + n + '&attrs=' + encodeURIComponent(attrs), { credentials: 'include' }); }
+  Promise.all([set('strict', 'SameSite=Strict'), set('lax', 'SameSite=Lax'), set('dflt', '')]).then(function () {
+    return fetch(B + '/cookie-echo', { credentials: 'include' }).then(function (r) { return r.json(); });
+  }).then(function (j) {
+    R.sameSite = names(j);
+    addEventListener('message', function (e) {
+      R.crossSite = e.data.crossSite;
+      var expected = { sameSite: 'dflt,lax,strict', crossSite: '' };
+      window.__repro = { issue: 'network-security/samesite', expected: expected, actual: R, pass: canon(expected) === canon(R) };
+    });
+    var f = document.createElement('iframe'); f.src = 'http://127.0.0.1:18943/samesite-cookies.html?phase=read'; document.body.appendChild(f);
+  });
+}
+</script>

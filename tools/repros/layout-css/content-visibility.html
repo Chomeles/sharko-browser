@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- window.report(): Chromium skips off-screen content-visibility:auto and content-visibility:hidden subtrees (innerText false for W_CV_AUTO_OFFSCREEN, W_CV_HIDDEN, and CSS.supports true); Sharko: all true, supports false. -->
+<html><head><meta charset="utf-8"><title>content-visibility vs innerText</title>
+<style>
+.cva { content-visibility: auto; contain-intrinsic-size: 0 100px; }
+.cvh { content-visibility: hidden; }
+.spacer { height: 3000px; background: #eee; }
+</style></head>
+<body>
+<p>Top of page.</p>
+<section class="cva"><p>W_CV_AUTO_ONSCREEN</p></section>
+<div class="spacer">spacer</div>
+<section class="cva"><p>W_CV_AUTO_OFFSCREEN</p></section>
+<section class="cvh"><p>W_CV_HIDDEN</p></section>
+<div hidden="until-found"><p>W_UNTIL_FOUND</p></div>
+<section style="content-visibility: auto; contain-intrinsic-size: 0 100px"><article><h2>W_CV_AUTO_INLINE_STYLE</h2></article></section>
+<script>
+window.report = () => {
+  const t = document.body.innerText;
+  const words = ['W_CV_AUTO_ONSCREEN', 'W_CV_AUTO_OFFSCREEN', 'W_CV_HIDDEN', 'W_UNTIL_FOUND', 'W_CV_AUTO_INLINE_STYLE'];
+  const rows = {};
+  for (const w of words) rows[w] = 'innerText=' + t.includes(w);
+  rows.__supports = 'content-visibility:auto=' + CSS.supports('content-visibility: auto');
+  rows.__scrollHeight = document.documentElement.scrollHeight;
+  return JSON.stringify(rows);
+};
+
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+function __reproDone(issue, expected, actual) { window.__repro = { issue: issue, expected: expected, actual: actual, pass: JSON.stringify(expected) === JSON.stringify(actual) }; }
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report());
+  __reproDone('layout-css/content-visibility', { W_CV_AUTO_ONSCREEN: 'innerText=true', W_CV_AUTO_OFFSCREEN: 'innerText=false', W_CV_HIDDEN: 'innerText=false', W_CV_AUTO_INLINE_STYLE: 'innerText=false' },
+    { W_CV_AUTO_ONSCREEN: r.W_CV_AUTO_ONSCREEN, W_CV_AUTO_OFFSCREEN: r.W_CV_AUTO_OFFSCREEN, W_CV_HIDDEN: r.W_CV_HIDDEN, W_CV_AUTO_INLINE_STYLE: r.W_CV_AUTO_INLINE_STYLE });
+}, 50); });
+</script>
+</body></html>

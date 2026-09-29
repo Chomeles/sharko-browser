@@ -1,0 +1,8 @@
+{
+ "W_LIGHT_TEXT": "innerText=true rendered",
+ "W_DSD_SHADOW_NAV": "innerText=false rendered",
+ "W_DSD_SLOTTED_LIGHT": "innerText=true rendered",
+ "W_IMPERATIVE_SHADOW": "innerText=false rendered",
+ "W_LIGHT_CHILD_OF_EMPTY_SHADOW_HOST": "innerText=false no-box",
+ "__bodyQueryFindsShadowText": 0
+}

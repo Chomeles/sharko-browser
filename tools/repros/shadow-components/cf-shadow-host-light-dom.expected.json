@@ -1,0 +1,18 @@
+{
+ "shadowRootVisible": "null(closed)",
+ "isConnected": true,
+ "parentIsBody": true,
+ "parentName": "BODY",
+ "bodyChildren": "7:div#pre,script,div#lightkid",
+ "gebi": true,
+ "qsa": 1,
+ "bodyLast": true,
+ "rect": "[0,0]",
+ "iahFound": 1,
+ "preFound": "true/true",
+ "cmp": 37,
+ "contains": false,
+ "shadowElRoot": true,
+ "shadowElConnected": true,
+ "shadowElParent": true
+}

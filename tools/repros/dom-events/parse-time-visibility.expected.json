@@ -1,0 +1,13 @@
+{
+ "headBodyNull": true,
+ "headSeesLater": false,
+ "headReadyState": "loading",
+ "headDocumentElementChildren": 1,
+ "bodySeesLater": false,
+ "bodyChildCountAtScript": 2,
+ "nextSibling": null,
+ "scriptsSoFar": 2,
+ "textNodesAroundWrite": "\"\",\"W\\nTail text\",\"\"",
+ "rs": "interactive,complete,|",
+ "dcl": 1
+}

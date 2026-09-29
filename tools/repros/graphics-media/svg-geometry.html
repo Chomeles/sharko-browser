@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>svg geometry api</title>
+<!-- Backlog item 3. Inline SVG children have no layout boxes in Sharko: getBBox/getBoundingClientRect/getCTM/getComputedTextLength are zeros or bogus.
+     Expected values are the SVG 1.1/2 semantics (and what Chromium returns); text numbers depend on the font, so they are checked as relations. -->
+<body style="margin:0">
+<svg id="s" width="300" height="120" viewBox="0 0 300 120">
+  <rect id="r" x="5" y="5" width="40" height="30" transform="translate(10 20)"/>
+  <path id="p" d="M0 0 L100 0 L100 50 Z" transform="translate(150 0)"/>
+  <g id="g"><circle cx="200" cy="80" r="20"/></g>
+  <text id="t" x="10" y="100" font-family="Arial, sans-serif" font-size="20">Hello world</text>
+</svg>
+<script>
+const $ = (id) => document.getElementById(id);
+const box = (b) => [b.x, b.y, b.width, b.height].map((v) => Math.round(v * 100) / 100).join(',');
+window.report = () => {
+  const o = {};
+  const put = (k, f) => { try { o[k] = f(); } catch (e) { o[k] = 'ERR ' + e.message; } };
+  put('rect.getBBox', () => box($('r').getBBox()));                          // 5,5,40,30 (user space of the element, own transform excluded)
+  put('rect.getBoundingClientRect', () => box($('r').getBoundingClientRect())); // 15,25,40,30
+  put('path.getBBox', () => box($('p').getBBox()));                          // 0,0,100,50
+  put('path.getBoundingClientRect', () => box($('p').getBoundingClientRect())); // 150,0,100,50
+  put('g.getBBox', () => box($('g').getBBox()));                             // 180,60,40,40
+  put('svg.getBBox', () => box($('s').getBBox()));                           // union of the children (in the svg's user space)
+  put('rect.getCTM', () => { const m = $('r').getCTM(); return [m.a, m.b, m.c, m.d, m.e, m.f].join(','); });  // 1,0,0,1,10,20
+  put('rect.isPointInFill', () => $('r').isPointInFill(new DOMPoint(20, 20)) + '/' + $('r').isPointInFill(new DOMPoint(60, 20))); // true/false
+  put('path.getPointAtLength', () => { const q = $('p').getPointAtLength(50); return q.x + ',' + q.y; });    // 50,0
+  put('text.chars', () => $('t').getNumberOfChars());                        // 11
+  put('text.len>0', () => $('t').getComputedTextLength() > 50);              // true
+  put('text.bbox~len', () => { const b = $('t').getBBox(); return b.x === 10 && b.height > 10 && Math.abs(b.width - $('t').getComputedTextLength()) < 1; });
+  put('text.extent', () => { const e = $('t').getExtentOfChar(0); return e.width > 5 && e.height > 10 && e.x === 10; });
+  put('text.startpos', () => { const a = $('t').getStartPositionOfChar(0), b = $('t').getStartPositionOfChar(1); return a.x === 10 && b.x > a.x; });
+  return JSON.stringify(o);
+};
+const want = {
+  'rect.getBBox': '5,5,40,30', 'rect.getBoundingClientRect': '15,25,40,30', 'path.getBBox': '0,0,100,50', 'path.getBoundingClientRect': '150,0,100,50',
+  'g.getBBox': '180,60,40,40', 'rect.getCTM': '1,0,0,1,10,20', 'rect.isPointInFill': 'true/false', 'path.getPointAtLength': '50,0', 'text.chars': 11,
+  'text.len>0': true, 'text.bbox~len': true, 'text.extent': true, 'text.startpos': true,
+};
+const got = JSON.parse(window.report());
+const bad = Object.keys(want).filter((k) => got[k] !== want[k]);
+window.__repro = { issue: 'svg-geometry-api', expected: want, actual: got, pass: bad.length === 0, failing: bad };
+</script>

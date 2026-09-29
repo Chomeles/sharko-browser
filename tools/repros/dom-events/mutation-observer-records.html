@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MutationObserver record shapes and timing</title>
+<!-- WPT dom/nodes/MutationObserver-childList.html 9/40 (textContent / replaceChild records, TIMEOUT). Expected values from Chromium. -->
+<body>
+<script>
+const out = {};
+const div = document.createElement('div');
+document.body.appendChild(div);
+const rec = [];
+const desc = (r) => r.type + ':' + [...r.addedNodes].map((n) => n.nodeName).join('+') + '/' + [...r.removedNodes].map((n) => n.nodeName).join('+')
+  + '/prev=' + (r.previousSibling && r.previousSibling.nodeName) + '/next=' + (r.nextSibling && r.nextSibling.nodeName) + (r.attributeName ? '/attr=' + r.attributeName + ',old=' + r.oldValue : '') + (r.type === 'characterData' ? '/old=' + r.oldValue : '');
+const mo = new MutationObserver((records) => { for (const r of records) rec.push(desc(r)); });
+mo.observe(div, { childList: true, subtree: true, attributes: true, attributeOldValue: true, characterData: true, characterDataOldValue: true });
+const step = (name, fn) => { rec.length = 0; fn(); const taken = mo.takeRecords(); out[name] = taken.map(desc).join(' | '); };
+step('textContent-replace', () => { div.textContent = 'a'; div.textContent = 'b'; });
+step('textContent-empty', () => { div.textContent = ''; });
+step('appendChild-fragment', () => { const f = document.createDocumentFragment(); f.append(document.createElement('i'), document.createElement('u')); div.appendChild(f); });
+step('replaceChild-internal', () => { const i = div.firstChild, u = div.lastChild; div.replaceChild(i, u); });
+step('replaceChild-self', () => { const i = div.firstChild; div.replaceChild(i, i); });
+step('insertBefore-move', () => { div.insertBefore(div.lastChild, div.firstChild); });
+step('attr-old', () => { div.setAttribute('x', '1'); div.setAttribute('x', '2'); div.removeAttribute('x'); });
+step('characterData', () => { const t = document.createTextNode('t'); div.appendChild(t); mo.takeRecords(); t.data = 'u'; t.appendData('v'); });
+step('innerHTML', () => { div.innerHTML = '<b>1</b><b>2</b>'; });
+step('normalize', () => { div.textContent = ''; div.append('a', 'b'); mo.takeRecords(); div.normalize(); });
+// timing: records are delivered in a microtask, before a following promise reaction queued later
+const order = [];
+mo.disconnect();
+const mo2 = new MutationObserver(() => order.push('mo'));
+mo2.observe(div, { childList: true });
+div.appendChild(document.createElement('s'));
+Promise.resolve().then(() => order.push('promise'));
+queueMicrotask(() => order.push('qm'));
+setTimeout(() => { out.deliveryOrder = order.join(','); window.__out = () => JSON.stringify(out, null, 1); window.__done = true; }, 50);
+</script>

@@ -1,0 +1,19 @@
+{
+ "c1_childNodes": "#ws #c[ p #c] #ws",
+ "c1_children": "p",
+ "c2_childNodes": "p",
+ "p1_parent": "x-card",
+ "p1_assignedSlot": "slot",
+ "slots_in_document": 0,
+ "matches_child_combinator": true,
+ "p1_color": "rgb(0, 128, 0)",
+ "p1_weight": "700",
+ "p1_rendered_height": 20,
+ "wrap_in_light_query": 0,
+ "icon_before_width": "20px",
+ "comment_anchors_in_c1": 2,
+ "sr_childNodes": "#ws style #ws div #ws",
+ "c3_text_rendered": "Gültig bis: morgen",
+ "c3_tomorrow_in_document": true,
+ "c4_text_rendered": "B"
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>IndexedDB: usage patterns of idb, idb-keyval and raw code (regression guard)</title>
+<!-- Passes since IndexedDB landed (in memory); it fails again when a persistence or sharing change breaks one of the four library patterns. -->
+<body>
+<pre id="out">running…</pre>
+<script>
+// Exercises the four usage patterns found in the cluster:
+//  A. feature detection (aliexpress, localforage/Dexie style)
+//  B. raw indexedDB.open + createObjectStore + put/get/getAll/delete (xham.live, Convert SDK on cloudinary)
+//  C. idb-keyval (bsky.app via @tanstack/query-async-storage-persister) — inlined verbatim from the bsky bundle
+//  D. `idb` (jakearchibald) openDB (tiktok, mastodon) — needs IDBDatabase/IDBObjectStore/IDBIndex/IDBCursor/IDBTransaction/IDBRequest globals and IDBKeyRange
+//  E. inside a dedicated Worker (self.indexedDB)
+const R = { ua: navigator.userAgent.slice(0, 40) };
+const errStr = (e) => (e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : String(e));
+const EXPECTED = {"detect": {"typeofIndexedDB": "object", "inWindow": true, "truthy": true, "IDBKeyRange": "function", "IDBTransaction": "function", "IDBRequest": "function", "IDBDatabase": "function", "IDBObjectStore": "function", "IDBCursor": "function", "prefixed": false}, "raw": {"ok": true, "aIsClone": true, "autoIds": [1, 2], "keys": ["a", "b"], "names": ["auto", "kv"]}, "idbKeyval": {"ok": true, "roundTrip": true}, "idb": {"ok": true, "txIsTransaction": true, "reqIsRequest": true, "proxyable": 5, "advance": true, "indexOrder": ["u2", "u1"], "cursorPrev": ["u2", "u1"], "count": 2}, "worker": {"typeofIndexedDB": "object", "inSelf": true, "IDBKeyRange": "function"}};
+function __canon(v) { return JSON.stringify(v, function (k, x) { if (x && typeof x === 'object' && !Array.isArray(x)) { const o = {}; Object.keys(x).sort().forEach(function (y) { o[y] = x[y]; }); return o; } return x; }); }
+function done() { const actual = Object.assign({}, R); delete actual.ua; window.__repro = { issue: 'web-apis/idb-library-patterns', expected: EXPECTED, actual: actual, pass: __canon(EXPECTED) === __canon(actual) }; document.getElementById('out').textContent = JSON.stringify(actual, null, 1); }
+window.__repro = null;
+
+(async () => {
+  // A. feature detection
+  R.detect = {
+    typeofIndexedDB: typeof indexedDB,
+    inWindow: 'indexedDB' in window,
+    truthy: !!window.indexedDB,
+    IDBKeyRange: typeof IDBKeyRange, IDBTransaction: typeof IDBTransaction, IDBRequest: typeof IDBRequest,
+    IDBDatabase: typeof IDBDatabase, IDBObjectStore: typeof IDBObjectStore, IDBCursor: typeof IDBCursor,
+    prefixed: !!(window.webkitIndexedDB || window.mozIndexedDB || window.msIndexedDB),
+  };
+
+  // B. raw usage (xham.live / Convert SDK pattern)
+  try {
+    const db = await new Promise((res, rej) => {
+      const r = indexedDB.open('repro-raw', 1);
+      r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv'); d.createObjectStore('auto', { keyPath: 'id', autoIncrement: true }); };
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    const tx = db.transaction(['kv', 'auto'], 'readwrite');
+    tx.objectStore('kv').put({ when: new Date(0), list: [1, 2, 3], m: new Map([[1, 2]]) }, 'a');
+    tx.objectStore('kv').put('b-value', 'b');
+    tx.objectStore('auto').add({ v: 'x' }); tx.objectStore('auto').add({ v: 'y' });
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); });
+    const rt = db.transaction('kv', 'readonly').objectStore('kv');
+    const a = await new Promise((res, rej) => { const q = rt.get('a'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    const all = await new Promise((res, rej) => { const q = db.transaction('auto').objectStore('auto').getAll(); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    const keys = await new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').getAllKeys(IDBKeyRange.lowerBound('a')); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    R.raw = { ok: true, aIsClone: a.when instanceof Date && a.m instanceof Map, autoIds: all.map((x) => x.id), keys, names: Array.from(db.objectStoreNames) };
+    db.close();
+  } catch (e) { R.raw = { ok: false, error: errStr(e) }; }
+
+  // C. idb-keyval (as shipped in bsky.app bundle line 2658)
+  try {
+    function t(t){return new Promise((n,u)=>{t.oncomplete=t.onsuccess=()=>n(t.result),t.onabort=t.onerror=()=>u(t.error)})}
+    function createStore(n,u){let o;const c=()=>{if(o)return o;const c=indexedDB.open(n);return c.onupgradeneeded=()=>c.result.createObjectStore(u),o=t(c),o.then(t=>{t.onclose=()=>o=void 0},()=>{}),o};return(t,n)=>c().then(o=>n(o.transaction(u,t).objectStore(u)))}
+    const store = createStore('react-query-cache-repro', 'react-query-cache-repro');
+    const set = (k, v) => store('readwrite', (s) => (s.put(v, k), t(s.transaction)));
+    const get = (k) => store('readonly', (s) => t(s.get(k)));
+    const del = (k) => store('readwrite', (s) => (s.delete(k), t(s.transaction)));
+    await set('REACT_QUERY_OFFLINE_CACHE', JSON.stringify({ timestamp: Date.now(), clientState: {} }));
+    const v = await get('REACT_QUERY_OFFLINE_CACHE');
+    await del('REACT_QUERY_OFFLINE_CACHE');
+    R.idbKeyval = { ok: true, roundTrip: typeof v === 'string' && v.includes('clientState'), afterDelete: await get('REACT_QUERY_OFFLINE_CACHE') };
+  } catch (e) { R.idbKeyval = { ok: false, error: errStr(e) }; }
+
+  // D. `idb` openDB core (instanceof checks + Proxy wrapping + cursor iteration), as in tiktok/mastodon
+  try {
+    const idbProxyableTypes = [IDBDatabase, IDBObjectStore, IDBIndex, IDBCursor, IDBTransaction];
+    const cursorAdvanceMethods = [IDBCursor.prototype.advance, IDBCursor.prototype.continue, IDBCursor.prototype.continuePrimaryKey];
+    const promisifyRequest = (rq) => new Promise((res, rej) => { rq.addEventListener('success', () => res(rq.result)); rq.addEventListener('error', () => rej(rq.error)); });
+    const openReq = indexedDB.open('WebAppRealtimeSignalDB', 1);
+    openReq.addEventListener('upgradeneeded', (e) => { openReq.result.createObjectStore('userSignalData', { keyPath: 'key' }).createIndex('byTime', 'lastAccessed'); });
+    const db = await promisifyRequest(openReq);
+    const tx = db.transaction('userSignalData', 'readwrite');
+    const st = tx.objectStore('userSignalData');
+    await promisifyRequest(st.put({ key: 'u1', lastAccessed: 2 })); await promisifyRequest(st.put({ key: 'u2', lastAccessed: 1 }));
+    const byIdx = await promisifyRequest(st.index('byTime').getAll());
+    const walked = [];
+    await new Promise((res, rej) => { const c = st.openCursor(null, 'prev'); c.onsuccess = () => { const cur = c.result; if (!cur) return res(); walked.push(cur.key); cur.continue(); }; c.onerror = () => rej(c.error); });
+    await new Promise((res) => { tx.oncomplete = res; });
+    R.idb = { ok: true, txIsTransaction: tx instanceof IDBTransaction, reqIsRequest: openReq instanceof IDBRequest, proxyable: idbProxyableTypes.length, advance: cursorAdvanceMethods.every((f) => typeof f === 'function'), indexOrder: byIdx.map((x) => x.key), cursorPrev: walked, count: await promisifyRequest(db.transaction('userSignalData').objectStore('userSignalData').count()) };
+    db.close();
+  } catch (e) { R.idb = { ok: false, error: errStr(e) }; }
+
+  // E. inside a Worker
+  try {
+    const src = 'self.postMessage({typeofIndexedDB: typeof indexedDB, inSelf: "indexedDB" in self, IDBKeyRange: typeof IDBKeyRange});';
+    let url; try { url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' })); } catch (_) { url = 'data:text/javascript,' + encodeURIComponent(src); }
+    R.worker = await new Promise((res) => { const w = new Worker(url); const to = setTimeout(() => res({ error: 'timeout' }), 4000); w.onmessage = (e) => { clearTimeout(to); res(e.data); }; w.onerror = (e) => { clearTimeout(to); res({ error: e.message || 'worker error' }); }; });
+  } catch (e) { R.worker = { error: errStr(e) }; }
+
+  done();
+})().catch((e) => { R.fatal = errStr(e); done(); });
+</script>

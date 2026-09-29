@@ -1,0 +1,9 @@
+# Open issues: each page passes in Chromium (window.__repro.pass === true) and fails in Sharko. Remove a line when its fix lands.
+# The other pages (features, matrix2, ua-defaults, text-metrics) are exploration matrices: window.report(), compare with compare.js.
+stylesheet-disabled.html
+transform-overflow.html
+pseudo-classes.html
+inline-strut.html
+top-layer.html
+content-visibility.html
+abspos-fit-content.html

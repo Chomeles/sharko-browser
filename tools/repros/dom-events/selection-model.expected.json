@@ -1,0 +1,15 @@
+{
+ "initial": "0,None,true",
+ "selectAllChildren": "1|Range|Hello brave new world|p|0|3",
+ "setBaseAndExtent-back": "backward|llo brave new|4|2",
+ "modify-extend-word": "Hello",
+ "modify-move-char": "1|Caret",
+ "textarea-select": "Range|bcd|BODY|1-4",
+ "input-select": "012345|0-6|i",
+ "collapseToEnd": "Caret|P|3",
+ "containsNode": "true,true,false",
+ "getComposedRanges": "1|StaticRange",
+ "range-toString-in-selection": "bra|true",
+ "deleteFromDocument": "Hello  new world",
+ "selectionchangeCount": 3
+}

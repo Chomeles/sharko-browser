@@ -1,0 +1,13 @@
+{
+ "insert-into-createHTMLDocument": "adopted:main>other,connected:other",
+ "adoptNode": "adopted:main>other",
+ "importedIsA": false,
+ "importNode-clone-not-upgraded": "",
+ "template-content": "adopted:main>other",
+ "move-connected-to-other": "connected:main,disconnected,adopted:main>other,connected:other",
+ "move-back": "disconnected,adopted:other>main,connected:main",
+ "otherUpgraded": false,
+ "create-in-other-not-upgraded": "",
+ "tplUpgraded": false,
+ "template-doc-createElement": ""
+}

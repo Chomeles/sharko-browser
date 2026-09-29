@@ -1,0 +1,12 @@
+<!doctype html><html><head><title>t</title></head><body><script>
+var out={};
+var f=document.createElement('iframe'); document.body.appendChild(f);
+var d=f.contentWindow.document;
+d.open();
+d.write('<!DOCTYPE html><html lang="de" class="x"><head><title>T</title><style>p{color:red}</style></head><body class="b" id="bb" onload="parent.__ol=(parent.__ol||0)+1"><p>hi</p></body></html>');
+d.close();
+out.html = d.documentElement.outerHTML;
+out.doctype = d.doctype && d.doctype.name;
+out.rs = d.readyState;
+setTimeout(function(){ out.ol = window.__ol; out.rs2 = d.readyState; document.title=JSON.stringify(out); }, 800);
+</script></body></html>

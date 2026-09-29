@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>svg and canvas default sizes</title>
+<!-- Item 9 (svg-canvas-intrinsic-size): boxes of <svg viewBox> without width/height and of <canvas> in several layout contexts.
+     Sharko values (Sep 29): a 1000x742 b 1000x950 c 1280x950 d 95x95 e 400x320 f 640x320 g 24x24 h 800x800 i 24x24 j 150x150 k 150x150 l 1280x1280 m 0x0.
+     Chromium's values are the ground truth: node tools/repros/layout-css/compare.js tools/repros/graphics-media/svg-canvas-sizes.html 'window.report()' -->
+<body style="margin:0;width:1280px">
+<canvas id="a" width="1280" height="950" style="width:1000px"></canvas>
+<canvas id="b" width="1280" height="950" style="width:1000px;height:950px"></canvas>
+<canvas id="c" width="1280" height="950" style="width:100%;aspect-ratio:auto"></canvas>
+<div style="width:95px"><canvas id="d" width="190" height="190" style="width:100%"></canvas></div>
+<div style="display:flex"><canvas id="e" width="400" height="100"></canvas><canvas id="f" style="width:50%"></canvas></div>
+<div style="position:absolute;left:0;top:0"><svg id="g" viewBox="0 0 24 24" style="width:24px"></svg></div>
+<div style="position:absolute;left:100px;top:0"><svg id="h" viewBox="0 0 24 24"></svg></div>
+<div style="display:inline-block"><svg id="i" viewBox="0 0 24 24" style="height:24px"></svg></div>
+<div style="display:flex;width:200px"><svg id="j" viewBox="0 0 24 24"></svg></div>
+<div style="display:grid;grid-template-columns:auto 1fr;width:300px"><svg id="k" viewBox="0 0 10 10"></svg><span>x</span></div>
+<div style="float:left"><svg id="l" viewBox="0 0 24 24"></svg></div>
+<table><tr><td><svg id="m" viewBox="0 0 24 24" style="width:50%"></svg></td></tr></table>
+<button id="bt" style="position:relative;width:24px;height:24px;padding:0;border:0"><svg id="n" viewBox="0 0 24 24" style="position:absolute;left:0;top:0"></svg></button>
+<script>
+window.report = () => {
+  const o = {};
+  for (const id of 'abcdefghijklmn') {
+    const r = document.getElementById(id).getBoundingClientRect();
+    o[id] = Math.round(r.width) + 'x' + Math.round(r.height);
+  }
+  return JSON.stringify(o);
+};
+</script>
