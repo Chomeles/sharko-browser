@@ -196,6 +196,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.framePath()` | This document's frame path: the `<iframe>` node ids from the page down (each in its parent's document); `[]` for the page |
 | `N.framePost(path, message, targetOrigin)` | `postMessage` to the window of the frame at `path`; `targetOrigin` is `*` or a serialized origin. Serializes the message (throws `DataCloneError`) and hands it to the host |
 | `N.frameList(path)` | The frames of the document at `path` in tree order as `[id, name]` pairs (`parent.frames[name]`, `top.length`), or `null` if unknown |
+| `N.frameNavigate(path, url, replace)` | Optional. Navigate the frame at `path` (`[]`: the page) to the absolute `url`, replacing its history entry if `replace`: `top.location = url`, `parent.location.replace(url)` where that window is not scriptable from here. `javascript:` URLs are never passed. Without it those calls do nothing |
 | `N.realmGlobal(path)` | The real `window` (global object) of the frame at `path` if it is same-origin and part of this page (its realm is created on demand, running that document's scripts), else `null` |
 | `N.frameGlobal(id)`, `N.parentGlobal()`, `N.topGlobal()` | `realmGlobal` for this document's `<iframe id>`, the parent frame and the page |
 | `N.frameElement()` | The `<iframe>` element (a node wrapper of the parent realm) this document is in, if the parent is same-origin, else `null` |
