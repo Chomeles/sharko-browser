@@ -303,3 +303,9 @@ Patches so far:
     `content: "\e902" / ""` (CSS Generated Content 3 §2.1) parses instead of invalidating
     the declaration (icon-font `::before` of stern.de). Layout already lays out only the
     items before the slash (`pe_content_text`).
+82. `stylo/servo/media_features.rs`, `stylo_atoms/static_atoms.txt`: the media features
+    `prefers-reduced-motion`, `prefers-contrast`, `forced-colors`, `scripting`, `update`,
+    `color-gamut` and `display-mode` (servo's table lacked them, so every query naming one
+    was invalid). Fixed values of a desktop browser without user preferences (as Chromium
+    reports): no reduced motion, scripting enabled, forced colors none, no contrast
+    preference, update fast, sRGB, browser display mode; boolean forms follow the spec.
