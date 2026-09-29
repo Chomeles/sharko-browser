@@ -247,7 +247,16 @@ After `onDocumentParsed`:
    goes `"loading"` → `"interactive"` (before DOMContentLoaded) → `"complete"` (before load).
 6. `document.write()`/`writeln()` while a parser-inserted script is running: parse the
    HTML and insert the resulting nodes right after the current script element (approximation).
-   After load, `document.write` replaces the document body content.
+   After load, `document.write` replaces the document body content (an implicit
+   `document.open()`, which also drops written scripts that have not run yet).
+   The scripts of written markup are parser-inserted, in every case: an inline classic one
+   runs at once unless an earlier written external script is still pending; an external one
+   without `async`/`defer` blocks the scripts written after it (also by later `write` calls
+   and from timers), so a `<script src>` followed by an inline script that needs it works
+   in an iframe that was written to after load just like during parsing. Scripts written
+   by a written script run before the rest of the outer chunk. After load, `defer` and
+   module scripts wait for `document.close()`. Documents without a browsing context
+   (`createHTMLDocument`) never run written scripts.
 7. Scripts inserted later by JS (`appendChild` of a `<script>` element, or of a subtree
    containing scripts, that becomes connected) execute exactly once: inline ones
    immediately (synchronously during the insertion call), external ones asynchronously
