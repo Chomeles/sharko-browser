@@ -8,6 +8,7 @@ a `// PATCH:` comment so it can be upstreamed or re-applied on upgrades.
 * `anyrender_vello` 0.14.0 — Vello GPU backend (DioxusLabs/anyrender).
 * `parley` 0.11.1 — text layout (linebender/parley).
 * `taffy` 0.14.0 — box layout: block/flex/grid (DioxusLabs/taffy).
+* `stylo` 0.21.0 — style engine (servo/stylo); only the container-query enablement, see patch 80.
 * `stylo_taffy` 0.3.0-beta.2 — Stylo→Taffy style conversion (DioxusLabs/blitz), unmodified
   except for its dependency on Stylo 0.21.
 
@@ -258,3 +259,57 @@ Patches so far:
     duration of a script entry; a frame removed during that entry (a script removing an
     `<iframe>` and then using its document's objects, or an iframe removing itself) must
     not free the document under a realm that is still running.
+76. `blitz-dom/src/document.rs`: `set_sub_document` moves the sub-document it replaces
+    to the same detached list (freed by `drop_detached_sub_documents()`). A script that
+    took `iframe.contentWindow` and then set `srcdoc` in the same entry keeps using the
+    old realm, whose raw document pointer would otherwise dangle.
+77. `blitz-dom/src/viewport_overflow.rs`, `resolve.rs`, `layout/damage.rs`, `scrolling.rs`,
+    `node/{node,scrollbar}.rs`, `blitz-paint/src/{render,text}.rs`: `overflow` propagation to
+    the viewport (CSS Overflow 3 §3.3). The `overflow` of the root element, or, when that is
+    `visible` on an `<html>` root, of its first `<body>` (unless either has containment),
+    belongs to the viewport (`visible` counts as `auto`, `clip` as `hidden`): the element it
+    was taken from is flagged (`OVERFLOW_PROPAGATED_TO_VIEWPORT`, resolved after styling,
+    with damage when the source changes) and has a used `overflow` of `visible` in layout,
+    paint (no clip, no scrollbar) and scrolling. Before, a `<body>` with a definite height
+    and `overflow: hidden|auto|scroll` (an app shell, a consent banner's scroll lock) was a
+    scroll container of its own, so `documentElement.scrollHeight`, `scrollTo`, the wheel and
+    full-page captures saw a page as tall as the window, and a locked `<html>` could still be
+    scrolled by the user. User scrolling along a `hidden` viewport axis is blocked (an offset
+    that scripts set stays), programmatic scrolling is not.
+78. `blitz-dom/src/scrolling.rs`: `scroll_into_view` stops at the first box that is
+    `position: fixed` with the viewport as its containing block (the target or a scroller
+    around it) and does not scroll the viewport for it; the focused dialog of a consent
+    banner, still below the fold, used to scroll wetter.com to its bottom.
+79. `blitz-dom/src/svg_sprite.rs` (new), `layout/construct.rs`, `net.rs`, `document.rs`: inline
+    `<svg>` `<use href="sprite.svg#icon">` (and `xlink:href`, also as script sets it: one
+    local name `xlink:href`) with an external document (SVG 2 §5.6.2; the icons of
+    mydealz.de, zdf.de and otto.de). The document is fetched once per URL,
+    same-origin only (Blink's `same-origin` request mode, Gecko's
+    `SEC_REQUIRE_SAME_ORIGIN_INHERITS_SEC_CONTEXT`),
+    indexed by `id` off the main thread, and the referenced elements (with what they refer to
+    and the sprite's `<style>`) are copied under prefixed ids into the `<defs>` of every
+    `<svg>` that uses them; the waiting `<svg>` elements are rebuilt when it arrives. The
+    markup handed to usvg also declares `xmlns:xlink` when it carries `xlink:` attributes:
+    HTML parsing leaves the prefix unbound, usvg's XML parser rejected the whole `<svg>`, so
+    `<use xlink:href="#icon">` drew nothing even for sprites inside the page.
+80. `blitz-dom/src/node/node.rs`: `text_input_v_centering_offset` centers a single-line input's
+    empty content by the height of its placeholder (else of the caret): an empty parley layout
+    has no height, so the placeholder and the caret were centered as a zero-height line, half
+    a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
+    `line-height` as tall as the box the placeholder was pushed out of it).
+81. `blitz-dom/src/net.rs` (`stamped_request`, `StylesheetLoader::referrer`, `fetch_font_face`),
+    `document.rs`, `iframe.rs`, `image_source.rs`, `svg_sprite.rs`, `mutator.rs`,
+    `layout/damage.rs`: every parser-initiated request (stylesheet, `@import`, image, CSS
+    `url()`, `@font-face`, `<iframe>`, preload) carries `Referer` (the document, or the
+    stylesheet for `@import`/fonts) and a `Sec-Fetch-Dest` marker with its Fetch destination,
+    which the network provider turns into the destination and strips. Without them the
+    requests had no `Referer`/`Sec-Fetch-Site`, fonts no `Origin`, and an iframe went out as a
+    generic request instead of `Sec-Fetch-Dest: iframe`.
+82. Container queries (`container-type`, `container`, `@container`, `cq*` units): `vendor/stylo`
+    (new, Stylo 0.21.0 from crates.io, patched via `[patch.crates-io]`) parses `@container`,
+    the `container` shorthand and the `cqw`…`cqmax` units for the servo engine too (they were
+    `gecko`-only), behind `layout.container-queries.enabled`; `blitz-dom/src/container_query.rs`
+    (new), `stylo.rs`, `resolve.rs`, `document.rs`, `node/node.rs`: `query_container_size`
+    answers with the container's last laid-out content-box size and records it on the node;
+    `resolve` loops style → layout (at most 4 extra passes, for nested containers) and restyles
+    the descendants of every container whose size changed since style queried it.

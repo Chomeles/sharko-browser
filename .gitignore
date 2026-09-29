@@ -1,9 +1,10 @@
 /target
 /target-*
 /dist
-node_modules/
+node_modules
 *.png
 !resources/**/*.png
 update-signing.key
 /resources/icudtl.dat
 /tools/api-inventory/out/
+/tools/sitediff/out/

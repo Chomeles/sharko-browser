@@ -595,10 +595,13 @@ fn scrollport_content_box(doc: &BaseDocument, id: NodeId) -> Option<PageRect> {
         if Some(a) == root {
             return None;
         }
-        if n.primary_styles().is_some_and(|s| {
-            let b = s.get_box();
-            b.overflow_x.is_scrollable() || b.overflow_y.is_scrollable()
-        }) {
+        // (the element whose `overflow` the viewport took over is not a scroll container)
+        if !n.flags.propagates_overflow_to_viewport()
+            && n.primary_styles().is_some_and(|s| {
+                let b = s.get_box();
+                b.overflow_x.is_scrollable() || b.overflow_y.is_scrollable()
+            })
+        {
             let r = page_border_box(doc, a)?;
             let l = n.final_layout();
             let (b, p) = (l.border, l.padding);

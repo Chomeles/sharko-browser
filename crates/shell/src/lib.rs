@@ -128,6 +128,8 @@ struct App {
     active: Option<TabId>,
     size: PhysicalSize<u32>,
     scale: f64,
+    /// The OS colour theme is dark (`prefers-color-scheme`).
+    dark: bool,
     mouse: PhysicalPosition<f64>,
     buttons: u8,
     mods: Modifiers,
@@ -163,14 +165,14 @@ struct App {
     paint_stats: (Instant, u64, u32),
 }
 
-fn content_viewport(size: PhysicalSize<u32>, scale: f64, zoom: f32) -> ViewportInfo {
+fn content_viewport(size: PhysicalSize<u32>, scale: f64, zoom: f32, dark: bool) -> ViewportInfo {
     let chrome_px = (CHROME_HEIGHT as f64 * scale).ceil() as u32;
     ViewportInfo {
         width: size.width.max(1),
         height: size.height.saturating_sub(chrome_px).max(1),
         scale: scale as f32,
         zoom,
-        dark_mode: false,
+        dark_mode: dark,
     }
 }
 
@@ -215,7 +217,7 @@ impl App {
     }
 
     fn open_tab(&mut self, url: &str) {
-        let vp = content_viewport(self.size, self.scale, 1.0);
+        let vp = content_viewport(self.size, self.scale, 1.0, self.dark);
         match self.browser.new_tab("", vp) {
             Ok(id) => {
                 self.active = Some(id);
@@ -257,7 +259,7 @@ impl App {
                 .and_then(|p| remaining.get(p).or_else(|| remaining.last()))
                 .copied();
             if let Some(a) = self.active {
-                let vp = content_viewport(self.size, self.scale, self.zoom_of(a));
+                let vp = content_viewport(self.size, self.scale, self.zoom_of(a), self.dark);
                 self.browser.resize(a, vp);
             }
         }
@@ -270,7 +272,7 @@ impl App {
     fn select_tab(&mut self, id: TabId) {
         if self.browser.tab(id).is_some() && self.active != Some(id) {
             self.active = Some(id);
-            let vp = content_viewport(self.size, self.scale, self.zoom_of(id));
+            let vp = content_viewport(self.size, self.scale, self.zoom_of(id), self.dark);
             self.browser.resize(id, vp);
             if let Some(c) = self.chrome.as_mut() {
                 c.blur();
@@ -283,7 +285,7 @@ impl App {
         if let Some(a) = self.active {
             let z = zoom.clamp(0.25, 5.0);
             self.zoom.insert(a, z);
-            let vp = content_viewport(self.size, self.scale, z);
+            let vp = content_viewport(self.size, self.scale, z, self.dark);
             self.browser.resize(a, vp);
             self.sync_chrome();
         }
@@ -786,6 +788,7 @@ impl ApplicationHandler<UserEvent> for App {
         };
         self.size = window.inner_size();
         self.scale = window.scale_factor();
+        self.dark = window.theme() == Some(winit::window::Theme::Dark);
         self.window = Some(window.clone());
         common::trace::mark("ui: window created (hidden)");
 
@@ -947,10 +950,17 @@ impl ApplicationHandler<UserEvent> for App {
                     c.resize(size.width, self.scale as f32);
                 }
                 if let Some(a) = self.active {
-                    let vp = content_viewport(size, self.scale, self.zoom_of(a));
+                    let vp = content_viewport(size, self.scale, self.zoom_of(a), self.dark);
                     self.browser.resize(a, vp);
                 }
                 self.request_redraw();
+            }
+            WindowEvent::ThemeChanged(theme) => {
+                self.dark = theme == winit::window::Theme::Dark;
+                if let Some(a) = self.active {
+                    let vp = content_viewport(self.size, self.scale, self.zoom_of(a), self.dark);
+                    self.browser.resize(a, vp);
+                }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale = scale_factor;
@@ -958,7 +968,7 @@ impl ApplicationHandler<UserEvent> for App {
                     c.resize(self.size.width, scale_factor as f32);
                 }
                 if let Some(a) = self.active {
-                    let vp = content_viewport(self.size, self.scale, self.zoom_of(a));
+                    let vp = content_viewport(self.size, self.scale, self.zoom_of(a), self.dark);
                     self.browser.resize(a, vp);
                 }
             }
@@ -1343,6 +1353,7 @@ pub fn run(opts: BrowserOptions, start_urls: Vec<String>) -> Result<(), String> 
         active: None,
         size: PhysicalSize::new(1280, 860),
         scale: 1.0,
+        dark: false,
         mouse: PhysicalPosition::new(0.0, 0.0),
         buttons: 0,
         mods: Modifiers::default(),

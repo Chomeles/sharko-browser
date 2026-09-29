@@ -253,6 +253,25 @@ window.addEventListener('load', () => log.push('load:' + document.readyState));<
     );
 }
 
+/// Microtasks queued by a classic script run before `document.currentScript` is reset
+/// (HTML "clean up after running script"); Next.js reads it from an `await` continuation.
+#[test]
+fn js_layer_current_script_in_microtasks() {
+    let page = r#"<!DOCTYPE html><html><body>
+<script id="s1">window.seen = [];
+Promise.resolve().then(() => seen.push('then:' + (document.currentScript && document.currentScript.id)));
+(async () => { await null; seen.push('await:' + (document.currentScript && document.currentScript.id)); })();
+seen.push('sync:' + document.currentScript.id);</script>
+<script>setTimeout(() => seen.push('timer:' + document.currentScript), 0);</script>
+</body></html>"#;
+    let mut e = js_env(page);
+    let doc = &mut e.doc;
+    e.rt.document_parsed(doc);
+    run_timers_for(&mut e, Duration::from_millis(50));
+    assert!(e.host.errors().is_empty(), "{:#?}", e.host.errors());
+    assert_eq!(e.eval("seen"), r#"["sync:s1","then:s1","await:s1","timer:null"]"#);
+}
+
 /// A broader tour of Web APIs implemented by the JS layer over the natives.
 #[test]
 fn js_layer_web_apis() {
@@ -567,6 +586,23 @@ fn js_layer_web_crypto() {
     );
 }
 
+/// A frame's document replaced (`srcdoc`) within the script entry that took its window:
+/// the old realm still runs against the old document, which must stay alive until the
+/// entry ends (a use-after-free crashed the renderer on bot-detection scripts).
+#[test]
+fn js_layer_frame_replaced_in_same_entry() {
+    let mut page = js_env(r#"<!DOCTYPE html><html><body></body></html>"#);
+    assert_eq!(
+        page.eval(
+            "const j = document.createElement('iframe'); document.body.append(j); \
+             const wj = j.contentWindow; j.srcdoc = '<p>x</p>'; \
+             [typeof wj.foo, 'chrome' in wj, wj.document.querySelector('p') === null, j.contentDocument.querySelector('p') !== null]"
+        ),
+        r#"["undefined",true,true,true]"#
+    );
+    drop(page);
+}
+
 /// Same-origin iframes share the page's isolate with a V8 context (realm) each:
 /// `contentWindow`/`contentDocument` are the frame's real globals (created on demand),
 /// `parent`/`top`/`frameElement` cross realms, functions of one realm run against the
@@ -588,7 +624,7 @@ fn js_layer_frame_realms() {
               String(w), w.Array !== Array, w.document.body.ownerDocument === w.document, \
               window.length, frames[0] === w, w.location.href, f.contentWindow === w]"
         ),
-        r#"[true,true,"child",true,true,true,true,"[object Window]",true,true,1,true,"https://example.com/dir/page.html",true]"#
+        r#"[true,true,"child",true,true,true,true,"[object Window]",true,true,1,true,"about:srcdoc",true]"#
     );
     assert!(page.rt.has_frame(&[iframe], None));
     assert_eq!(page.rt.frames(), vec![vec![iframe]]);

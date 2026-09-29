@@ -157,7 +157,10 @@
   };
   L.isDocument = function (w) { return docState.has(w); };
 
-  // Document URL (cached; refreshed by the bootstrap on navigation-related hooks)
+  // Document URL (cached; refreshed by the bootstrap on navigation-related hooks). This is the
+  // URL the host reports: for an about:blank / srcdoc frame it is the parent's (the origin, the
+  // secure-context state, cookies and referrer of such a frame are inherited from there). What
+  // the page sees as the document's URL is L.exposedURL().
   let docURL = null;
   L.documentURL = function () {
     if (docURL === null) docURL = N.location();
@@ -165,12 +168,69 @@
   };
   L.invalidateDocumentURL = function () { docURL = null; baseCache.epoch = -1; };
 
+  // What kind of document a frame shows: 'blank' (no src, or src="about:blank" / a javascript: URL:
+  // the initial about:blank document), 'srcdoc', or 'url' (the page itself and frames with a
+  // document of their own). The host gives both kinds the parent's URL, so they are recognized by
+  // that URL and the <iframe>'s attributes in the parent; a frame that was navigated without
+  // touching `src` (link or form with `target`) has a URL of its own. Pinned when the document is
+  // parsed (before any script runs), so a later `src` change cannot turn it into a URL document.
+  let frameKind = null;
+  let frameFirstURL = '';
+  const noHash = (u) => { const i = u.indexOf('#'); return i < 0 ? u : u.slice(0, i); };
+  L.frameKind = function () {
+    if (frameKind !== null) return frameKind;
+    frameKind = 'url';
+    frameFirstURL = L.documentURL();
+    if (typeof N.frameElement === 'function') {
+      try {
+        const fe = N.frameElement();
+        if (fe !== null && fe !== undefined) {
+          const parentURL = `${fe.ownerDocument.URL}`;
+          const inherited = parentURL.startsWith('about:') || noHash(parentURL) === noHash(frameFirstURL);
+          if (inherited) {
+            if (fe.hasAttribute('srcdoc')) frameKind = 'srcdoc';
+            else {
+              const src = `${fe.getAttribute('src') || ''}`.trim();
+              if (src === '' || /^about:blank$/i.test(src) || /^javascript:/i.test(src)) frameKind = 'blank';
+            }
+          }
+        }
+      } catch (_) { /* not reachable: keep the host's URL */ }
+    }
+    return frameKind;
+  };
+  // document.open() (or a write() after parsing) gives an about:blank document the URL of the
+  // document that called it, and ends the "initial empty document" state.
+  L.docOpened = false;
+  // Whether this is still the initial, empty about:blank document of a frame.
+  L.isInitialBlank = function () { return !L.docOpened && L.frameKind() === 'blank'; };
+  // The URL of the document as scripts see it (document.URL, location.href).
+  L.exposedURL = function () {
+    const real = L.documentURL();
+    const kind = L.frameKind();
+    if (kind === 'url' || L.docOpened) return real;
+    // A fragment navigation of the frame still works on the host's URL: carry its fragment over.
+    const i = real === frameFirstURL ? -1 : real.indexOf('#');
+    return (kind === 'srcdoc' ? 'about:srcdoc' : 'about:blank') + (i < 0 ? '' : real.slice(i));
+  };
+  // The URL relative references resolve against when the document has no <base>: the document's
+  // URL, or for about:blank/srcdoc documents the base URL of the parent (their "fallback base URL").
+  function fallbackBase() {
+    const real = L.documentURL();
+    if (L.frameKind() === 'url' || L.docOpened) return real;
+    try {
+      const b = N.frameElement().ownerDocument.baseURI;
+      if (typeof b === 'string' && b !== '') return b;
+    } catch (_) { /* parent not reachable */ }
+    return real;
+  }
+
   // Base URL: first <base href> in the document, resolved against the document URL.
   const baseCache = { epoch: -1, url: '' };
   L.baseURL = function () {
     const ep = state.tree * 65536 + state.attr;
     if (baseCache.epoch === ep) return baseCache.url;
-    const du = L.documentURL();
+    const du = fallbackBase();
     let url = du;
     const b = N.querySelector(mainDocId, 'base[href]');
     if (b !== 0) {
@@ -258,6 +318,10 @@
     shadowOfHost.set(host, sr);
     // Stylesheets inside the host are scoped to it from now on (native style scoping).
     if (typeof N.setShadowHost === 'function') N.setShadowHost(idOf(host), true);
+    // The shadow root shares the host's node id, so its children ARE the host's until the
+    // light children are moved away: a new shadow root must be empty right away (Lit reads
+    // `shadowRoot.firstChild` as its render anchor before the first insertion).
+    shadowPrepare(sr);
     return sr;
   }
   // Remove the shadow content of `sr` (slotted light nodes go back to the light fragment).
@@ -293,14 +357,14 @@
       const ln = lnOf(host);
       if (nsOf(host) !== HTML || !(L.isValidCEName(ln) || SHADOW_HOSTS.has(ln)) || shadowOfHost.has(host)) continue;
       const content = L.templateInfo !== null ? L.templateInfo(wrap(tid)) : tid;
+      // Out of the host first, or attaching would sweep the template into the light DOM.
+      N.removeChild(pid, tid);
       const sr = attachShadowImpl(host, mode, {
         declarative: true,
         delegatesFocus: N.getAttr(tid, 'shadowrootdelegatesfocus') !== null,
         clonable: N.getAttr(tid, 'shadowrootclonable') !== null,
         serializable: N.getAttr(tid, 'shadowrootserializable') !== null,
       });
-      N.removeChild(pid, tid);
-      shadowPrepare(sr);
       for (const c of N.childIds(content)) N.appendChild(pid, c);
       shadowDistribute(sr);
       treeChanged();
@@ -453,9 +517,21 @@
       }
     }
   }
+  // Template contents belong to an inert document without a browsing context: "look up a
+  // custom element definition" returns null there (HTML spec; Ladybird
+  // Document::lookup_custom_element_definition), so nothing in them is upgraded until it is
+  // imported/adopted into the main document. Otherwise constructors run on the template's
+  // own nodes and can mutate the prototype every later clone is made from.
+  const templateRoots = new Set(); // ids of template content fragments (registered by 30_html.js)
+  L.templateRoots = templateRoots;
+  function inTemplateContents(id) {
+    if (templateRoots.size === 0) return false;
+    for (let p = N.parent(id); p !== 0; p = N.parent(id)) id = p;
+    return templateRoots.has(id);
+  }
   // Upgrade elements in a (possibly detached) subtree without connected callbacks.
   function ceUpgradeSubtree(rootId, includeRoot) {
-    if (!ceActive()) return;
+    if (!ceActive() || inTemplateContents(rootId)) return;
     for (const id of collectCE(rootId, includeRoot)) {
       const w = wrap(id);
       if (!ceState.has(w)) upgradeElement(w);
@@ -516,6 +592,8 @@
         L.scriptChildrenChanged(pid);
       } else if (ln === 'title' && titleIds.has(pid)) {
         titleChanged();
+      } else if ((ln === 'video' || ln === 'audio') && L.mediaChildrenChanged !== null) {
+        L.mediaChildrenChanged(w);
       }
     }
   }
@@ -662,6 +740,7 @@
   }
 
   L.optionsInserted = null; // installed by 30_html.js (select selectedness on option insertion)
+  L.mediaChildrenChanged = null; // installed by 30_html.js (a media element's <track> children changed)
   function afterInsertion(pid, parentW, insertedIds) {
     if (L.pendingScripts.size !== 0 && L.checkPendingScripts !== null) L.checkPendingScripts();
     if (L.optionsInserted !== null) {
@@ -1243,11 +1322,14 @@
     },
     lookupNamespaceURI(prefix) {
       const p = prefix === null || prefix === undefined || prefix === '' ? null : `${prefix}`;
-      if (p === 'xml') return L.NS.XML;
-      if (p === 'xmlns') return L.NS.XMLNS;
+      // "Locate a namespace" starts at an element; a node without one (a fragment, a
+      // doctype, an empty document, a detached text node) has no namespaces, not even xml.
       let w = this;
       if (typeOf(w) === 9) w = w.documentElement;
       else if (typeOf(w) !== 1) w = w.parentElement;
+      if (w === null || w === undefined) return null;
+      if (p === 'xml') return L.NS.XML;
+      if (p === 'xmlns') return L.NS.XMLNS;
       for (; w !== null && w !== undefined; w = w.parentElement) {
         const id = idOf(w);
         if (p === null && N.hasAttr(id, 'xmlns')) return N.getAttr(id, 'xmlns') || null;
@@ -1332,12 +1414,13 @@
     if (t === 9) return cloneDocument(w, deep);
     if (t === 2) return w.cloneNode(deep);
     const id = idOf(w);
+    const inert = ceActive() && inTemplateContents(id); // clones of template contents stay inert
     const cid = nativeCall(() => N.cloneNode(id, deep));
     if (t === 1 || t === 11) mirrorForeignWrappers(id, cid, deep);
     else if (t === 4 || t === 7 || t === 10) mirrorTypedLeaf(w, cid);
     const cw = wrap(cid);
     for (const h of L.cloneHooks) h(w, cw, deep);
-    if (ceActive()) ceUpgradeSubtree(cid, true);
+    if (ceActive() && !inert) ceUpgradeSubtree(cid, true);
     return cw;
   }
   // Elements of XML documents carry their namespace/case only in the JS stamp; give their
@@ -1566,7 +1649,14 @@
     const compute = () => {
       const ids = N.querySelectorAll(scopeId, l === '*' ? '*' : L.cssEscape(l));
       if (nsv === '*') return ids;
-      return ids.filter((id) => (N.namespaceURI(id) || null) === nsv || (nsv === L.NS.HTML && N.namespaceURI(id) === ''));
+      return ids.filter((id) => {
+        // "No namespace" and HTML are the same natively: elements of XML documents that have none say so in their stamp.
+        if (foreignWrappers !== 0) {
+          const w = cache.get(id);
+          if (w !== undefined && nsOf(w) === NONE) return nsv === null;
+        }
+        return (N.namespaceURI(id) || null) === nsv || (nsv === L.NS.HTML && N.namespaceURI(id) === '');
+      });
     };
     return L.makeHTMLCollection({ kind: 3, compute }, false);
   }
@@ -1816,6 +1906,7 @@
     get baseURI() { return L.baseURL(); }
     hasChildNodes() { return false; }
     getRootNode() { return this; }
+    lookupNamespaceURI(prefix) { return this.#owner === null ? null : this.#owner.lookupNamespaceURI(prefix); }
     cloneNode() { return new Attr(INTERNAL, null, this.#name, this.value, this.#ns, this.#prefix, this.#local); }
     isEqualNode(o) { return L.isAttr(o) && o.name === this.name && o.value === this.value; }
     contains(o) { return o === this; }
@@ -1841,6 +1932,7 @@
     }
     return a;
   }
+  L.attrNode = attrNode;
   function detachAttr(el, name, value) {
     const m = attrNodeCache.get(el);
     const a = m !== undefined ? m.get(name) : undefined;
@@ -2803,11 +2895,12 @@
       let m = docCollections.get(this);
       return docCollection(this, 'impl', () => new DOMImplementation(INTERNAL, this));
     },
-    get URL() { const i = docInfo(this); return i.main ? L.documentURL() : i.url || 'about:blank'; },
-    get documentURI() { const i = docInfo(this); return i.main ? L.documentURL() : i.url || 'about:blank'; },
+    get URL() { const i = docInfo(this); return i.main ? L.exposedURL() : i.url || 'about:blank'; },
+    get documentURI() { const i = docInfo(this); return i.main ? L.exposedURL() : i.url || 'about:blank'; },
     get compatMode() {
       for (let c = N.firstChild(idOf(this)); c !== 0; c = N.nextSibling(c)) if (N.nodeType(c) === 10) return 'CSS1Compat';
-      return docInfo(this).main && !L.quirksMode ? 'CSS1Compat' : 'BackCompat';
+      // the initial about:blank document has no doctype: quirks mode
+      return docInfo(this).main && !L.quirksMode && !L.isInitialBlank() ? 'CSS1Compat' : 'BackCompat';
     },
     get characterSet() { return 'UTF-8'; },
     get charset() { return 'UTF-8'; },
@@ -2900,7 +2993,10 @@
       if (!isNode(node) && !L.isAttr(node)) throw new TypeError("Failed to execute 'importNode' on 'Document': parameter 1 is not of type 'Node'.");
       if (L.isAttr(node)) return node.cloneNode();
       if (typeOf(node) === 9 || isShadowRoot(node)) throw new DOMException("Failed to execute 'importNode' on 'Document': The node provided is a document, which may not be imported.", 'NotSupportedError');
-      return ownDoc(this, cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep));
+      const inertSrc = ceActive() && inTemplateContents(idOf(node));
+      const clone = cloneNodeImpl(node, typeof deep === 'object' && deep !== null ? !deep.selfOnly : !!deep);
+      if (inertSrc) ceUpgradeSubtree(idOf(clone), true); // now owned by a document with a registry
+      return ownDoc(this, clone);
     },
     adoptNode(node) {
       if (L.isAttr(node)) { if (L.attrOwner(node)) L.attrOwner(node).removeAttributeNode(node); return node; }
@@ -3051,7 +3147,8 @@
       const p = (n) => String(n).padStart(2, '0');
       return `${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
     },
-    get readyState() { return this === document ? L.readyState : 'complete'; },
+    // The initial about:blank document of a frame is complete as soon as it exists.
+    get readyState() { return this === document ? (L.isInitialBlank() ? 'complete' : L.readyState) : 'complete'; },
     get currentScript() { return this === document ? L.currentScript : null; },
     get location() { return this === document ? L.location : null; },
     set location(v) { if (this === document) L.location.href = v; },
@@ -3804,7 +3901,7 @@
     if (!d.linked || d.href === null) return;
     const p = N.urlParse(d.href, null);
     const origin = p === null ? null : p[10];
-    if (origin !== null && origin !== 'null' && origin === L.location.origin) return;
+    if (origin !== null && origin !== 'null' && origin === L.docOrigin()) return;
     throw new DOMException(`Failed to ${what === 'cssRules' ? "read the 'cssRules' property from" : `execute '${what}' on`} 'CSSStyleSheet': Cannot access rules`, 'SecurityError');
   }
   function flushSheet(s) {

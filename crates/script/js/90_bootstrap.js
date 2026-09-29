@@ -73,6 +73,72 @@
     },
   });
   Object.setPrototypeOf(Window.prototype, WindowProperties);
+
+  // DocumentProperties: named access on Document (`document.loginForm`), see
+  // https://html.spec.whatwg.org/multipage/dom.html#dom-document-nameditem. The names come
+  // from the `name` of embed/form/iframe/img/object elements, the `id` of objects, and the
+  // `id` of images that also have a non-empty `name`. Unlike the spec's
+  // [LegacyOverrideBuiltIns], real properties win (`<img name=body>` must not replace
+  // `document.body`, and the layer itself reads `document.*`), so like the window's this only
+  // runs for names nothing else defines. As WebIDL's named properties object does, it sits
+  // between Document.prototype and Node.prototype, so every kind of document gets it.
+  const DOC_NAMED_SEL_CACHE = new Map();
+  const DOC_NAMED_COLLECTIONS = new Map();
+  function docNamedSelector(name) {
+    let sel = DOC_NAMED_SEL_CACHE.get(name);
+    if (sel === undefined) {
+      const v = L.cssString(name);
+      sel = ['embed', 'form', 'iframe', 'img', 'object'].map((t) => `${t}[name=${v}]`).join(',') +
+        `,object[id=${v}],img[id=${v}][name]:not([name=""])`;
+      if (DOC_NAMED_SEL_CACHE.size > 500) DOC_NAMED_SEL_CACHE.clear();
+      DOC_NAMED_SEL_CACHE.set(name, sel);
+    }
+    return sel;
+  }
+  function namedDocumentProp(doc, name) {
+    if (name === '' || name.length > 256) return undefined;
+    const did = idOf(doc);
+    const sel = docNamedSelector(name);
+    let ids;
+    try { ids = N.querySelectorAll(did, sel); } catch (_) { return undefined; }
+    if (ids.length === 0) return undefined;
+    // The selector engine ignores namespaces; only HTML elements are named elements.
+    ids = ids.filter((id) => L.nsOf(wrap(id)) === L.NS_HTML && (doc !== document || !notYetParsed(id)));
+    if (ids.length === 0) return undefined;
+    if (ids.length === 1) {
+      const el = wrap(ids[0]);
+      // An iframe with a browsing context stands for its window.
+      if (L.lnOf(el) === 'iframe') {
+        const w = el.contentWindow;
+        if (w !== null && w !== undefined) return w;
+      }
+      return el;
+    }
+    // Several named elements: one live collection per name, the same one each time.
+    const key = `${did}\u0000${name}`;
+    let c = DOC_NAMED_COLLECTIONS.get(key);
+    if (c === undefined) {
+      c = L.queryCollection(did, sel, true);
+      if (DOC_NAMED_COLLECTIONS.size > 500) DOC_NAMED_COLLECTIONS.clear();
+      DOC_NAMED_COLLECTIONS.set(key, c);
+    }
+    return c;
+  }
+  const DocumentProperties = new Proxy(Object.create(L.Node.prototype), {
+    get(t, p, r) {
+      if (typeof p === 'string' && !(p in t) && L.isDocument(r)) {
+        const v = namedDocumentProp(r, p);
+        if (v !== undefined) return v;
+      }
+      return Reflect.get(t, p, r);
+    },
+    // `in` has no receiver: it answers for the main document.
+    has(t, p) {
+      if (Reflect.has(t, p)) return true;
+      return typeof p === 'string' && namedDocumentProp(document, p) !== undefined;
+    },
+  });
+  Object.setPrototypeOf(L.Document.prototype, DocumentProperties);
   let protoOK = true;
   try { Object.setPrototypeOf(g, Window.prototype); } catch (_) { protoOK = false; }
   if (!protoOK || Object.getPrototypeOf(g) !== Window.prototype) {
@@ -119,18 +185,16 @@
   defGetter('customElements', () => L.customElements);
   defGetter('localStorage', () => L.localStorage);
   defGetter('sessionStorage', () => L.sessionStorage);
+  defGetter('indexedDB', () => L.indexedDB);
   defGetter('performance', () => L.performance, { replaceable: true });
   defGetter('crypto', () => L.crypto);
+  defGetter('cookieStore', () => (g.isSecureContext === false ? undefined : L.cookieStore));
   defGetter('visualViewport', () => L.visualViewport, { replaceable: true });
   defGetter('event', () => L.currentEvent, { replaceable: true });
-  defGetter('origin', () => L.location.origin, { replaceable: true });
-  defGetter('isSecureContext', () => {
-    const p = N.urlParse(L.documentURL(), null);
-    if (p === null) return false;
-    if (p[1] === 'https:' || p[1] === 'wss:' || p[1] === 'file:') return true;
-    const h = p[5];
-    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost');
-  });
+  defGetter('origin', () => L.docOrigin(), { replaceable: true });
+  defGetter('isSecureContext', () => L.isSecureContext());
+  // `chrome` is a plain writable data property that cannot be deleted (as in Chrome).
+  Object.defineProperty(g, 'chrome', { value: L.chrome, writable: true, enumerable: true, configurable: false });
   defGetter('crossOriginIsolated', () => false);
   defGetter('originAgentCluster', () => false);
   defGetter('closed', () => false);
@@ -351,7 +415,7 @@
     const co = N.getAttr(rec.id, 'crossorigin');
     // no-cors classic scripts and crossorigin=use-credentials send credentials; anonymous CORS is same-origin only
     const credentials = co === null || co.toLowerCase() === 'use-credentials' ? 'include' : 'same-origin';
-    L.startNativeFetch('GET', rec.url, [], null, co !== null ? 'cors' : 'no-cors', (status, statusText, finalUrl, flat, body, error) => {
+    L.startNativeFetch('GET', rec.url, [], null, co !== null || rec.type === 'module' ? 'cors' : 'no-cors', (status, statusText, finalUrl, flat, body, error) => {
       if ((error !== null && error !== undefined) || !(status >= 200 && status < 300)) {
         rec.state = 'error';
       } else {
@@ -359,7 +423,7 @@
         rec.state = 'ready';
       }
       done(rec);
-    }, credentials);
+    }, credentials, undefined, undefined, undefined, undefined, 'script');
   }
   function makeRecord(id, parser) {
     const type = scriptType(id);
@@ -384,6 +448,8 @@
   let inNonBlockingScript = 0;     // depth of async/defer script execution
   let parserQueue = [];            // parser-blocking scripts in order
   const deferQueue = [];           // defer classic + non-async module scripts
+  const endQueue = [];             // the same, written after parsing: they run when document.close() ends the parser
+  let endRunning = false;
   let asyncPending = 0;            // scripts delaying the load event
   let parsingFinished = false, deferredDone = false, dclFired = false, loadQueued = false;
   let inlineModuleCounter = 0;
@@ -424,6 +490,9 @@
     } catch (e) {
       L.reportScriptError(e);
     } finally {
+      // "Clean up after running script": the microtask checkpoint still sees this script
+      // as document.currentScript (promise reactions, await, MutationObserver).
+      if (typeof N.cleanupAfterScript === 'function') N.cleanupAfterScript();
       L.currentScript = prevScript;
       if (mode === 'parser') { inParserScript = prevParser; lastParserAnchor = writeState.anchor; writeState = prevWrite; }
       if (ignoresWrites) inNonBlockingScript--;
@@ -456,11 +525,12 @@
     }
   }
   // Parser-blocking scripts written (document.write) during the current parser step,
-  // already queued ahead of the rest: later writes queue behind them (two written
-  // `<script src>`s ran in reverse order when the second one arrived first).
+  // already queued ahead of the rest: later writes queue behind them, inline scripts
+  // included (two written `<script src>`s ran in reverse order when the second one
+  // arrived first).
   let writtenQueued = 0;
   function pumpParser() {
-    if (parserQueue.length === 0) { finishParsing(); return; }
+    if (parserQueue.length === 0) { finishParsing(); parserIdle(); return; }
     const rec = parserQueue[0];
     if (rec.state === 'pending') return;
     parserQueue.shift();
@@ -501,6 +571,29 @@
     if (rec.state === 'error') { fireScriptEvent(rec.el, 'error'); return; }
     execClassic(rec, 'nonblocking');
   }
+  // "The end" of a script-created parser: after document.close(), and once no written
+  // script is left to wait for, the deferred and module scripts written into it run in order.
+  function runEndQueue() {
+    if (endRunning || reopened || parserQueue.length !== 0) return;
+    while (endQueue.length) {
+      const rec = endQueue[0];
+      if (rec.type === 'module') {
+        endQueue.shift();
+        endRunning = true;
+        runModuleRecord(rec).then(() => { endRunning = false; runEndQueue(); });
+        return;
+      }
+      if (rec.state === 'pending') return;
+      endQueue.shift();
+      if (rec.state === 'error') fireScriptEvent(rec.el, 'error');
+      else execClassic(rec, 'nonblocking');
+    }
+  }
+  // The parser has no script left to wait for.
+  function parserIdle() {
+    runEndQueue();
+    maybeFireLoad();
+  }
   function fireDOMContentLoaded() {
     if (dclFired) return;
     dclFired = true;
@@ -517,6 +610,7 @@
   function maybeFireLoad() {
     if (loadQueued || !dclFired) return;
     if (asyncPending > 0) return;
+    if (parserQueue.length > 0) return; // scripts written after parsing that the parser still waits for
     let pending = 0;
     try { pending = N.pendingResourceCount(); } catch (_) { pending = 0; }
     if (pending > 0) return;
@@ -535,6 +629,7 @@
   function onScriptFetched(rec) {
     if (parserQueue.length && parserQueue[0] === rec) pumpParser();
     else if (parsingFinished && deferQueue.length && deferQueue[0] === rec) runDeferred();
+    else if (endQueue.length && endQueue[0] === rec) runEndQueue();
   }
   function scheduleParserRecord(rec) {
     // classify a parser-inserted script (initial document or document.write)
@@ -557,7 +652,7 @@
         return 'async';
       }
       if (rec.external && rec.defer) {
-        deferQueue.push(rec);
+        (parsingFinished ? endQueue : deferQueue).push(rec);
         startScriptFetch(rec, onScriptFetched);
         return 'defer';
       }
@@ -570,10 +665,26 @@
       runModuleRecord(rec).then(() => { asyncPending--; maybeFireLoad(); });
       return 'async';
     }
-    deferQueue.push(rec);
+    (parsingFinished ? endQueue : deferQueue).push(rec);
     return 'defer';
   }
+  // [SecureContext] members of Navigator do not exist in an insecure document (plain http):
+  // `'clipboard' in navigator` is false there, as in Chrome. The URL is only known now (the layer
+  // is snapshotted before the page is loaded), which is before any page script runs.
+  const SECURE_NAVIGATOR_MEMBERS = ['clipboard', 'mediaDevices', 'storage', 'deviceMemory', 'userAgentData', 'locks', 'getBattery',
+    'getUserMedia', 'webkitGetUserMedia'];
+  let secureApplied = false;
+  function applySecureContext() {
+    if (secureApplied) return;
+    secureApplied = true;
+    if (L.isSecureContext()) return;
+    const proto = Object.getPrototypeOf(L.navigator);
+    for (const k of SECURE_NAVIGATOR_MEMBERS) Reflect.deleteProperty(proto, k);
+    Reflect.deleteProperty(g, 'MediaDevices');
+  }
   function onDocumentParsed() {
+    applySecureContext();
+    L.frameKind(); // pin what kind of document this frame shows before scripts can change its <iframe>
     L.milestones.responseEnd = N.now();
     L.extractTemplates(docId); // parsed template contents leave the document tree
     L.attachDeclarativeShadowRoots(docId);
@@ -691,21 +802,24 @@
     if (kids.length) L.insertCore(parentId, ctx, wrap(frag), frag, refId);
     return { kids, scripts };
   }
-  function runWrittenScripts(ids) {
-    let blocked = false;
-    const queued = [];
+  // The scripts of written markup are parser-inserted. An inline classic one runs at once
+  // unless a written blocking script is still pending; an external one blocks the scripts
+  // after it, also those of later writes and of the rest of an outer chunk. `atEnd`: the
+  // write came from outside any script, after parsing, so its scripts go behind what the
+  // parser already waits for; otherwise the insertion point is right after the running
+  // script and they go in front of the rest.
+  function runWrittenScripts(ids, atEnd) {
     for (const id of ids) {
       L.pendingScripts.delete(id);
       const rec = makeRecord(id, true);
       if (rec === null) continue;
+      rec.written = true;
       if (rec.state === 'error' && rec.external) { L.postTask(() => fireScriptEvent(rec.el, 'error')); continue; }
+      const blocked = atEnd ? parserQueue.length !== 0 : writtenQueued !== 0;
       if (!blocked && !rec.external && rec.type === 'classic') { execClassic(rec, 'parser'); continue; }
-      const kind = scheduleParserRecord(rec);
-      if (kind === 'blocking') { queued.push(rec); blocked = true; }
-    }
-    if (queued.length) {
-      parserQueue.splice(Math.min(writtenQueued, parserQueue.length), 0, ...queued);
-      writtenQueued += queued.length;
+      if (scheduleParserRecord(rec) !== 'blocking') continue;
+      if (atEnd) parserQueue.push(rec);
+      else parserQueue.splice(Math.min(writtenQueued++, parserQueue.length), 0, rec);
     }
   }
   function writeAtInsertionPoint(ws, html) {
@@ -742,11 +856,25 @@
     }
     if (scripts.length) runWrittenScripts(scripts);
   }
+  // "Document open steps" of a document that is past parsing (the body stands in for the whole
+  // document). Written scripts that have not run yet are dropped, as in browsers, then a
+  // script-created parser starts with an empty body.
+  function openWrittenParser() {
+    L.docOpened = true; // an about:blank document now has the URL of its opener (see L.exposedURL)
+    parserQueue = parserQueue.filter((r) => !r.written);
+    writtenQueued = 0;
+    endQueue.length = 0;
+    const bid = L.bodyId();
+    if (bid !== 0) L.replaceAllCore(bid, wrap(bid), () => N.setTextContent(bid, ''));
+    reopened = true;
+    maybeFireLoad(); // the dropped scripts may have been all the load event waited for
+  }
   function docWrite(doc, args, newline) {
     let html = '';
     for (const a of args) html += `${a}`;
     if (newline) html += '\n';
     if (doc !== document) {
+      // no browsing context (createHTMLDocument, DOMParser): the markup is inserted but its scripts never run
       const b = doc.body;
       if (b !== null) writeInto(idOf(b), 0, html);
       return;
@@ -763,16 +891,14 @@
       if (b !== 0) { const r = writeInto(b, 0, html); if (r.scripts.length) runWrittenScripts(r.scripts); }
       return;
     }
-    // After parsing: implicit document.open() replaces the body content
+    // After parsing: the implicit document.open() replaces the body content and starts a
+    // script-created parser, whose scripts are parser-inserted like those of the initial one
+    // (not "dynamically inserted": an external one blocks the inline script written after it).
     const b = L.bodyId();
     if (b === 0) return;
-    if (!reopened) {
-      reopened = true;
-      L.replaceAllCore(b, wrap(b), () => N.setTextContent(b, ''));
-    }
+    if (!reopened) openWrittenParser();
     const r = writeInto(b, 0, html);
-    for (const id of r.scripts) L.pendingScripts.add(id);
-    if (r.scripts.length) L.checkPendingScripts();
+    if (r.scripts.length) runWrittenScripts(r.scripts, true);
   }
   L.mixin(L.Document.prototype, {
     write(...text) { docWrite(this, text, false); },
@@ -781,14 +907,16 @@
       if (arguments.length >= 3) return g.open(a, b, c);
       if (this !== document) return this;
       if (inParserScript !== null) return this;
-      if (parsingFinished || L.readyState !== 'loading') {
-        const bid = L.bodyId();
-        if (bid !== 0) L.replaceAllCore(bid, wrap(bid), () => N.setTextContent(bid, ''));
-        reopened = true;
-      }
+      if (parsingFinished || L.readyState !== 'loading') openWrittenParser();
       return this;
     },
-    close() { if (this === document) reopened = false; },
+    close() {
+      if (this !== document) return;
+      reopened = false;
+      // the parser ends after the script that closes it, not inside it
+      if (inParserScript !== null || inNonBlockingScript > 0) L.internalTimeout(runEndQueue, 0);
+      else runEndQueue();
+    },
   });
 
   // =======================================================================================
@@ -1001,9 +1129,20 @@
   for (const [name, C] of interfaces) {
     if (typeof C !== 'function') continue;
     nativeFns.add(C);
+    // Static operations and attributes of an interface are enumerable (WebIDL), unlike class statics.
+    for (const k of Object.getOwnPropertyNames(C)) {
+      if (k === 'length' || k === 'name' || k === 'prototype') continue;
+      const d = Object.getOwnPropertyDescriptor(C, k);
+      if (d !== undefined && d.configurable && !d.enumerable) { d.enumerable = true; Object.defineProperty(C, k, d); }
+    }
     markFns(C, seen);
     const P = C.prototype;
     if (P === null || typeof P !== 'object') continue;
+    // Blink lists `constructor` behind the members of an interface (see L.orderKeys).
+    if (!L.orderedProtos.has(P)) {
+      const cd = Reflect.getOwnPropertyDescriptor(P, 'constructor');
+      if (cd !== undefined && cd.configurable && Reflect.deleteProperty(P, 'constructor')) Reflect.defineProperty(P, 'constructor', cd);
+    }
     if (!Object.prototype.hasOwnProperty.call(P, Symbol.toStringTag) && C !== L.DOMException) {
       Object.defineProperty(P, Symbol.toStringTag, { value: name, configurable: true });
     }
@@ -1017,7 +1156,7 @@
     markFns(P, seen);
   }
   markFns(g, seen);
-  for (const o of [L.console, L.CSS, L.location, L.history, L.navigator, L.screen, L.performance, L.crypto, L.document, L.customElements]) markFns(o, seen);
+  for (const o of [L.console, L.CSS, L.location, L.history, L.navigator, L.screen, L.performance, L.crypto, L.document, L.customElements, L.chrome, L.chrome.app]) markFns(o, seen);
   const origToString = L.nativeFunctionToString;
   const patchedToString = {
     toString() {

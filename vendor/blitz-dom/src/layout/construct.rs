@@ -484,11 +484,14 @@ fn collect_layout_children_with_wrap(
                     outer_html.replace("<svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"");
             }
 
+            // PATCH: `<use href="sprite.svg#icon">`: the elements of the external document.
+            let outer_html = inline_sprite_refs(doc, container_node_id, outer_html);
             // PATCH: `<use href="#icon">` / `url(#gradient)` pointing outside this `<svg>`
             // (icon sprites elsewhere in the page).
             let outer_html = inline_external_svg_refs(doc, outer_html);
             // PATCH: paint inherited through CSS (`.icon { fill: currentColor }`, `color`).
             let outer_html = add_svg_root_paint(doc, container_node_id, outer_html);
+            let outer_html = declare_xlink_namespace(outer_html);
 
             // Remove contruction damage from subtree
             doc.iter_subtree_mut(container_node_id, |id: NodeId, doc: &mut BaseDocument| {
@@ -1158,6 +1161,96 @@ fn inline_external_svg_refs(doc: &BaseDocument, mut svg: String) -> String {
                 svg.insert_str(end + 1, &format!("<defs>{defs}</defs>"));
             }
         }
+    }
+    svg
+}
+
+/// PATCH: `<use href="sprite.svg#icon">` (and `xlink:href`) of the inline `<svg>` `svg_id`
+/// refer to an element of another document: copy that element, and the ones it refers to, into
+/// a `<defs>` and point the `<use>` at the copy. A document that is still loading rebuilds the
+/// `<svg>` when it arrives. `<use href="https://this.page/url#icon">` is an ordinary
+/// same-document reference.
+#[cfg(feature = "svg")]
+fn inline_sprite_refs(doc: &mut BaseDocument, svg_id: NodeId, mut svg: String) -> String {
+    use crate::svg_sprite::UseTarget;
+    const MAX_ELEMENTS: usize = 64;
+    const MAX_BYTES: usize = 512 * 1024;
+
+    let mut hrefs = Vec::new();
+    collect_use_hrefs(doc, svg_id, &mut hrefs);
+    hrefs.sort();
+    hrefs.dedup();
+    let mut defs = String::new();
+    let mut copied = std::collections::HashSet::new();
+    for raw in hrefs {
+        let target = match doc.resolve_svg_use(svg_id, &raw) {
+            UseTarget::SameDocument(id) => id,
+            UseTarget::Sprite(sprite, id) => {
+                let Some(host_id) = sprite.host_id(&id) else {
+                    continue;
+                };
+                if copied.len() < MAX_ELEMENTS && defs.len() < MAX_BYTES {
+                    sprite.copy_element(&id, &mut copied, &mut defs);
+                }
+                host_id
+            }
+            UseTarget::Unavailable => continue,
+        };
+        let attr = |value: &str| {
+            format!(
+                "=\"{}\"",
+                html_escape::encode_double_quoted_attribute(value)
+            )
+        };
+        svg = svg.replace(&attr(&raw), &attr(&format!("#{target}")));
+    }
+    if !defs.is_empty() {
+        if let Some(end) = svg.find('>') {
+            if !svg[..end].ends_with('/') {
+                svg.insert_str(end + 1, &format!("<defs>{defs}</defs>"));
+            }
+        }
+    }
+    svg
+}
+
+/// The `href` (else `xlink:href`) of every `<use>` in the subtree of `node_id`.
+#[cfg(feature = "svg")]
+fn collect_use_hrefs(doc: &BaseDocument, node_id: NodeId, out: &mut Vec<String>) {
+    let node = &doc.nodes[node_id];
+    if let Some(el) = node.element_data() {
+        if &*el.name.local == "use" && el.name.ns == markup5ever::ns!(svg) {
+            // Scripts (`setAttributeNS`) store `xlink:href` as one local name, the parser as
+            // prefix and local name.
+            let plain = |a: &&crate::Attribute| &*a.name.local == "href" && a.name.prefix.is_none();
+            let xlink = |a: &&crate::Attribute| {
+                &*a.name.local == "xlink:href"
+                    || (&*a.name.local == "href" && a.name.prefix.is_some())
+            };
+            let href = el
+                .attrs
+                .iter()
+                .find(plain)
+                .or_else(|| el.attrs.iter().find(xlink));
+            if let Some(attr) = href {
+                out.push(attr.value.to_string());
+            }
+        }
+    }
+    for &child in node.children.iter() {
+        collect_use_hrefs(doc, child, out);
+    }
+}
+
+/// PATCH: HTML parsing leaves `xlink:href` without an `xmlns:xlink` declaration; usvg's XML
+/// parser rejects the unbound prefix and the whole `<svg>` (icons with `<use xlink:href>`,
+/// `<image xlink:href>`) rendered nothing.
+#[cfg(feature = "svg")]
+fn declare_xlink_namespace(mut svg: String) -> String {
+    const DECLARATION: &str = " xmlns:xlink=\"http://www.w3.org/1999/xlink\"";
+    let Some(end) = svg.find('>') else { return svg };
+    if svg.starts_with("<svg") && svg.contains("xlink:") && !svg[..end].contains("xmlns:xlink") {
+        svg.insert_str("<svg".len(), DECLARATION);
     }
     svg
 }

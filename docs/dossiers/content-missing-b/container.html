@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>container query repro</title>
+<style>
+  .box { width: 250px; border: 1px solid #999; }
+  .c1 { container-type: inline-size; }
+  .c2 { container: search / inline-size; }
+  span { display: block; height: 20px; }
+  /* open.spotify.com: @container (width<360px){.kbd{display:none}} on an inline-size container */
+  @container (width < 360px) { .r1 { display: none; } }
+  @container (max-width: 360px) { .r2 { display: none; } }
+  @container search (max-width: 360px) { .r3 { display: none; } }
+  @container (min-width: 100px) { .r4 { color: rgb(0, 128, 0); } }
+  @container (width < 360px) { .n1 { display: none; } }    /* no container ancestor: must not apply */
+</style>
+<div class="box c1"><span class="r1">r1</span><span class="r2">r2</span><span class="r4">r4</span></div>
+<div class="box c2"><span class="r3">r3</span></div>
+<div class="box"><span class="n1">n1</span></div>
+<script>
+window.__out = {};
+for (const el of document.querySelectorAll('span')) window.__out[el.className] = getComputedStyle(el).display + '/' + getComputedStyle(el).color;
+window.__out.supports_range = CSS.supports('container-type', 'inline-size');
+window.__out.containerType = getComputedStyle(document.querySelector('.c1')).containerType;
+</script>

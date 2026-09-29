@@ -428,7 +428,7 @@ impl BaseDocument {
             .insert(url.clone(), vec![(img, ImageType::Image)]);
         self.net_provider.fetch(
             self.id(),
-            self.build_request(parsed),
+            self.build_request(parsed, "image"),
             ResourceHandler::boxed(
                 self.tx.clone(),
                 self.id(),

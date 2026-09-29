@@ -86,6 +86,10 @@ bitflags! {
         const FLUSHED_AS_ITEM = 1 << 15;
         /// PATCH: the unrounded layout of this node itself changed since the last rounding.
         const LAYOUT_SELF_CHANGED = 1 << 16;
+        /// PATCH: the element's `overflow` is applied to the viewport (CSS Overflow 3 §3.3):
+        /// the root element, or the `<body>` of an `<html>` root with `overflow: visible`.
+        /// Its used `overflow` is `visible`: it is not a scroll container and does not clip.
+        const OVERFLOW_PROPAGATED_TO_VIEWPORT = 1 << 17;
     }
 }
 
@@ -103,6 +107,11 @@ impl NodeFlags {
     #[inline(always)]
     pub fn is_in_document(&self) -> bool {
         self.contains(Self::IS_IN_DOCUMENT)
+    }
+
+    #[inline(always)]
+    pub fn propagates_overflow_to_viewport(&self) -> bool {
+        self.contains(Self::OVERFLOW_PROPAGATED_TO_VIEWPORT)
     }
 
     #[inline(always)]
@@ -139,6 +148,9 @@ pub struct Node {
     pub sticky_offset: Cell<(f32, f32)>,
     /// PATCH: the parent's absolute position used when this node's layout was last rounded.
     pub round_origin: Cell<(f32, f32)>,
+    /// PATCH 80 (container queries): content-box size (packed `Au` pair, see
+    /// `container_query.rs`) that style last saw when it queried this node as a container.
+    pub cq_used: std::sync::atomic::AtomicU64,
     /// PATCH: last known index in the parent's `children` (validated on use), so sibling
     /// lookups during selector matching are O(1) instead of a scan of the child list.
     child_idx_hint: std::sync::atomic::AtomicUsize,
@@ -331,6 +343,7 @@ impl Node {
             stacking_context: None,
             sticky_offset: Cell::new((0.0, 0.0)),
             round_origin: Cell::new((f32::NAN, f32::NAN)),
+            cq_used: std::sync::atomic::AtomicU64::new(crate::container_query::NEVER_QUERIED),
             child_idx_hint: std::sync::atomic::AtomicUsize::new(0),
 
             flags: NodeFlags::empty(),
@@ -715,7 +728,19 @@ impl Node {
         {
             if !input_data.is_multiline {
                 let content_box_height = self.final_layout().content_box_height();
-                let input_height = input_data.editor.try_layout().unwrap().height() / scale as f32;
+                let mut layout_height = input_data.editor.try_layout().unwrap().height();
+                // PATCH: an empty layout has no height (its only line is the empty last one),
+                // but what shows there, the placeholder or the caret, is a line tall.
+                if layout_height == 0.0 && input_data.editor.raw_text().is_empty() {
+                    layout_height = match &input_data.placeholder {
+                        Some(placeholder) => placeholder.height(),
+                        None => input_data
+                            .editor
+                            .cursor_geometry(1.5)
+                            .map_or(0.0, |caret| (caret.y1 - caret.y0) as f32),
+                    };
+                }
+                let input_height = layout_height / scale as f32;
                 let y_offset = ((content_box_height - input_height) / 2.0).max(0.0);
 
                 return y_offset as f64;
@@ -895,7 +920,8 @@ impl Node {
         for (i, node) in chain.iter().enumerate().rev() {
             let layout = node.final_layout();
             let (bx, by) = (ox + layout.location.x, oy + layout.location.y);
-            if i >= first_clip {
+            // (the element whose `overflow` the viewport took over does not clip)
+            if i >= first_clip && !node.flags.propagates_overflow_to_viewport() {
                 if let Some(styles) = node.primary_styles() {
                     use style::values::computed::Overflow;
                     let clips_x = styles.get_box().overflow_x != Overflow::Visible;

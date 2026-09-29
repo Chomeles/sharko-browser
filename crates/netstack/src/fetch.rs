@@ -15,7 +15,7 @@
 use bytes::Bytes;
 use common::protocol::{CacheMode, Destination, NetRequest};
 use http::header::{
-    ALT_SVC, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_LOCATION, COOKIE, LOCATION, PRAGMA, RANGE,
+    ALT_SVC, AUTHORIZATION, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_LOCATION, LOCATION, PRAGMA, RANGE,
 };
 use http::{HeaderMap, HeaderValue, Method, Version};
 use std::sync::Arc;
@@ -318,9 +318,7 @@ impl NetworkCore {
             && let Some(cookie) = self.cookies.request_header(&hop.url)
         {
             match HeaderValue::from_str(&cookie) {
-                Ok(v) => {
-                    headers.insert(COOKIE, v);
-                }
+                Ok(v) => headers::insert_cookie(&mut headers, v),
                 Err(_) => log::debug!("cookie header for {} is not a valid header value", hop.url),
             }
         }

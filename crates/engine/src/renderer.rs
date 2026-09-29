@@ -497,9 +497,20 @@ impl Renderer {
                     let (cw, ch) = document_content_size(&page.doc);
                     let max_x = (cw as f64 - css_w).max(0.0);
                     let max_y = (ch as f64 - css_h).max(0.0);
+                    // A viewport whose `overflow` is hidden keeps its offset on that axis.
+                    let (user_x, user_y) = page.doc.viewport_overflow().user_scrollable();
+                    let current = page.doc.viewport_scroll();
                     page.doc.set_viewport_scroll(blitz_dom::Point {
-                        x: x.clamp(0.0, max_x),
-                        y: y.clamp(0.0, max_y),
+                        x: if user_x {
+                            x.clamp(0.0, max_x)
+                        } else {
+                            current.x
+                        },
+                        y: if user_y {
+                            y.clamp(0.0, max_y)
+                        } else {
+                            current.y
+                        },
                     });
                     let s = page.doc.viewport_scroll();
                     if (s.x, s.y) != page.last_scroll {
@@ -1408,6 +1419,11 @@ impl Renderer {
             }
             None => (vp.width, vp.height),
         };
+        // The compositor draws a scrollbar for what the user can scroll: nothing along an axis
+        // the viewport's `overflow` hides (a full-page capture above still has the whole page).
+        let (user_x, user_y) = page.doc.viewport_overflow().user_scrollable();
+        let content_width = if user_x { content_width } else { css_w };
+        let content_height = if user_y { content_height } else { css_h };
         let saved_scroll = page.doc.viewport_scroll();
         if capture.is_some() {
             let mut v = page.doc.viewport().clone();

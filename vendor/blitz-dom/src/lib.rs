@@ -34,6 +34,7 @@ pub const BULLET_FONT: &[u8] = include_bytes!("../assets/moz-bullet-font.otf");
 /// The DOM implementation.
 ///
 /// This is the primary entry point for this crate.
+mod container_query;
 mod document;
 
 /// The nodes themsleves, and their data.
@@ -57,6 +58,9 @@ mod query_selector;
 mod resolve;
 /// Scrolling of nodes and the viewport, and scroll animations.
 mod scrolling;
+/// External SVG documents (icon sprites) that inline `<svg>` elements `<use>`.
+#[cfg(feature = "svg")]
+mod svg_sprite;
 pub mod shadow_css;
 mod font_defaults;
 pub use font_defaults::apply_web_font_defaults;
@@ -69,6 +73,8 @@ mod stylo_to_parley;
 mod traversal;
 /// Versioned storage for the nodes of the DOM tree.
 mod tree;
+/// Propagation of the root element's or body's `overflow` to the viewport.
+mod viewport_overflow;
 
 mod url;
 
@@ -98,6 +104,7 @@ pub use mutator::DocumentMutator;
 pub use node::{Attribute, DocumentData, ElementData, Node, NodeData, TextNodeData};
 pub use parley::FontContext;
 pub use scrolling::{ScrollBehavior, ScrollLogicalPosition};
+pub use viewport_overflow::ViewportOverflow;
 pub use tree::NodeTree;
 
 /// Convert a Blitz [`NodeId`] into a [`taffy::NodeId`] (which wraps a `u64`).

@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>overflow propagation repro</title>
+<style>
+html, body { margin: 0; }
+body { overflow-x: auto; overflow-y: scroll; min-height: 100%; }
+#root { display: flex; min-height: 100%; }
+#tall { height: 3000px; width: 100px; background: #ccc; }
+</style></head>
+<body>
+<div id="root"><div id="tall"></div></div>
+<script>
+window.report = function(){
+  var de = document.documentElement, b = document.body;
+  var before = { deScrollH: de.scrollHeight, deClientH: de.clientHeight, bodyScrollH: b.scrollHeight, bodyClientH: b.clientHeight, bodyRectH: Math.round(b.getBoundingClientRect().height), htmlRectH: Math.round(de.getBoundingClientRect().height), bodyOverflowY: getComputedStyle(b).overflowY, htmlOverflowY: getComputedStyle(de).overflowY, scrollingEl: document.scrollingElement === de ? 'html' : 'body' };
+  window.scrollTo(0, 500);
+  var after = { scrollY: window.scrollY, deScrollTop: de.scrollTop, bodyScrollTop: b.scrollTop, tallTop: Math.round(document.getElementById('tall').getBoundingClientRect().top) };
+  b.scrollTop = 700;
+  var after2 = { scrollY: window.scrollY, deScrollTop: de.scrollTop, bodyScrollTop: b.scrollTop };
+  var gl = null, gl2 = null; try { gl = !!document.createElement('canvas').getContext('webgl'); gl2 = !!document.createElement('canvas').getContext('webgl2'); } catch (e) { gl = 'err:' + e.message; }
+  return JSON.stringify({ before: before, afterWindowScroll: after, afterBodyScrollTop: after2, webgl: gl, webgl2: gl2, has2d: !!document.createElement('canvas').getContext('2d') });
+};
+</script>
+</body></html>

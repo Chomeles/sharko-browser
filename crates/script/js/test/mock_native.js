@@ -22,7 +22,7 @@ const BLOCK = new Set(['html', 'body', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5',
   'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'blockquote', 'pre', 'address', 'figure',
   'figcaption', 'fieldset', 'hr', 'details', 'summary', 'dialog', 'legend', 'center', 'menu', 'search', 'hgroup']);
 const HIDDEN_TAGS = new Set(['head', 'script', 'style', 'title', 'meta', 'link', 'template', 'base', 'noscript', 'datalist', 'param']);
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 class MockNative {
   constructor(opts = {}) {
@@ -47,6 +47,8 @@ class MockNative {
     this.scrollIntoViewArgs = [];
     this.ws = [];
     this.opened = [];
+    this.framePosts = []; // N.framePost calls: {path, message, targetOrigin}
+    this.frameNavigations = []; // N.frameNavigate calls: {path, url, replace}
     this.storage = [new Map(), new Map()];
     this.cookies = new Map();
     this.vp = { w: 1280, h: 720, dpr: 1, sx: 0, sy: 0, sw: 1920, sh: 1080 };
@@ -60,6 +62,10 @@ class MockNative {
     this.pendingResources = 0;
     this.blobURLs = new Map();
     this.ctx = vm.createContext({});
+    this.global = vm.runInContext('globalThis', this.ctx); // what `frames` hand to each other
+    this.frame = opts.frame || null; // { path, group }, see harness.js frameGroup
+    this.posted = []; // what N.framePost handed to another frame
+    if (this.frame) this.frame.group.set(Array.from(this.frame.path).join(','), this);
     this.R = vm.runInContext('({Array, ArrayBuffer, Uint8Array, Error, TypeError, RangeError, Promise, Object})', this.ctx);
     this.cloneInRealm = vm.runInContext(CLONE_SRC, this.ctx);
     this.templateContents = new Map();
@@ -393,6 +399,34 @@ class MockNative {
     return [px('left') || 0, px('top') || 0, w || 0, h || 0];
   }
 
+  // ------------------------------------------------------------------ frames
+  // Several mocks (one per document of a page) share a `group` (path key -> MockNative), like the
+  // realms of one isolate. Messages between them are queued on the receiver like the host does.
+  get originString() { return new URL(this.url).origin; }
+  frameNatives() {
+    const M = this, F = this.frame;
+    const key = (p) => Array.from(p).join(',');
+    const same = (p) => { const o = F.group.get(key(p)); return o && o !== M && o.originString === M.originString ? o : null; };
+    return {
+      framePath: () => M.arr(F.path),
+      framePost: (path, message, targetOrigin) => {
+        const to = F.group.get(key(path));
+        // the message is serialized in the sender (it may throw) and read in the receiver's realm
+        const data = (to || M).cloneInRealm(message);
+        if (!to || key(path) === key(F.path)) return;
+        if (targetOrigin !== '*' && targetOrigin !== to.originString) return;
+        M.posted.push({ path: Array.from(path), message: data, targetOrigin });
+        to.schedule(to.clock, 'hook', { name: 'onMessage', args: [to.arr(F.path), M.originString, data] });
+      },
+      frameList: () => null,
+      // The <iframe> element (a wrapper of the parent's realm) of this document, for a same-origin parent.
+      frameElement: () => { const P = same(F.path.slice(0, -1)); return P && F.path.length ? P.hooks.wrapNode(F.path[F.path.length - 1]) : null; },
+      realmGlobal: (path) => { const o = same(path); return o ? o.global : null; },
+      parentGlobal: () => { const o = same(F.path.slice(0, -1)); return F.path.length && o ? o.global : null; },
+      topGlobal: () => { const o = same([]); return F.path.length && o ? o.global : null; },
+    };
+  }
+
   // ------------------------------------------------------------------ events for the harness
   schedule(due, kind, data) {
     const e = Object.assign({ due, seq: this.seq++, kind }, data);
@@ -507,9 +541,20 @@ class MockNative {
       templateContent: (id) => (M.isTemplate(M.n(id)) ? M.templateContentOf(id) : 0),
       setShadowHost: (id, on) => { M.n(id); if (on) M.shadowHosts.add(id); else M.shadowHosts.delete(id); },
       foreignNodeType: () => 0,
+      // Frames: opts.framePath is this document's path, opts.frameLists[pathKey] the frames of other documents.
+      // Other realms and cross-origin windows don't exist here (no N.realmGlobal): every frame is a stand-in.
+      framePath: () => M.arr(M.opts.framePath || []),
+      framePost: (path, message, targetOrigin) => { M.framePosts.push({ path: Array.from(path), message, targetOrigin }); },
+      frameList: (path) => {
+        const list = (M.opts.frameLists || {})[Array.from(path).join(',')];
+        return list === undefined ? null : M.arr(list.map((e) => M.arr(e)));
+      },
+      frameNavigate: (path, url, replace) => { M.frameNavigations.push({ path: Array.from(path), url, replace }); },
       windowPostMessage: function (message, targetOrigin, transfer) {
         if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-        return M.hooks.windowPostMessage(message, targetOrigin, transfer, null);
+        // Like V8's incumbent realm: the window whose script is running, if it is another one
+        const active = M.frame ? M.frame.group.active : null;
+        return M.hooks.windowPostMessage(message, targetOrigin, transfer, active && active !== M.global ? active : null);
       },
       setAdoptedSheets: (hostId, sources, bases) => { if (hostId !== 0) M.n(hostId); M.adoptedSheets.set(hostId, sources.map((s, i) => [s, bases[i]])); },
       setDefined: (id) => { M.n(id); M.definedIds.add(id); },
@@ -804,7 +849,7 @@ class MockNative {
         try { dec = new TextDecoder(String(label), { fatal: !!fatal, ignoreBOM: true }); } catch (e) { throw M.err('RangeError', `unknown encoding ${label}`); }
         try { return dec.decode(buf); } catch (e) { throw new M.R.TypeError('The encoded data was not valid.'); }
       },
-      userAgent: () => UA,
+      userAgent: () => M.opts.userAgent || UA,
       structuredClone: (v) => M.cloneInRealm(v),
       pendingResourceCount: () => M.pendingResources,
       setHooks: (h) => { M.hooks = h; },
@@ -828,6 +873,7 @@ class MockNative {
         return M.arr([r.status, r.statusText, r.finalUrl, M.arr(r.flat), r.body === null ? null : M.ab(r.body), r.error]);
       },
     };
+    if (this.frame) Object.assign(nat, this.frameNatives());
     if (this.opts.noTemplateSupport) delete nat.templateContent;
     for (const k of this.opts.disable || []) delete nat[k];
     return nat;
@@ -934,9 +980,18 @@ class MockNative {
         p = p.trim();
         if (p === 'all' || p === 'screen') continue;
         if (p === 'print') { ok = false; continue; }
+        // range syntax on the viewport width (the layer uses `(width >= 0px)` / `(width < 0px)` as constants)
+        const rm = /^\(\s*(width|height)\s*(>=|<=|<|>|=)\s*(-?[\d.]+)px\s*\)$/.exec(p);
+        if (rm) {
+          const dim = rm[1] === 'width' ? this.vp.w : this.vp.h, n = parseFloat(rm[3]);
+          ok = ok && ({ '>=': dim >= n, '<=': dim <= n, '<': dim < n, '>': dim > n, '=': dim === n })[rm[2]];
+          continue;
+        }
         const m = /^\(\s*([a-z-]+)\s*(?::\s*([^)]+))?\)$/.exec(p);
         if (!m) { ok = false; continue; }
         const f = m[1], v = (m[2] || '').trim();
+        // option noReducedMotion: an engine that does not know the feature yet
+        if (f === 'prefers-reduced-motion' && this.opts.noReducedMotion) { ok = false; continue; }
         const px = parseFloat(v);
         switch (f) {
           case 'min-width': ok = ok && this.vp.w >= px; break;
@@ -973,7 +1028,7 @@ const CLONE_SRC = `(function () {
     switch (tag) {
       case '[object Date]': out = new Date(v.getTime()); break;
       case '[object RegExp]': out = new RegExp(v.source, v.flags); break;
-      case '[object ArrayBuffer]': out = v.slice(0); break;
+      case '[object ArrayBuffer]': out = new ArrayBuffer(v.byteLength); new Uint8Array(out).set(new Uint8Array(v)); break; // of this realm
       case '[object Boolean]': out = new Boolean(v.valueOf()); break;
       case '[object Number]': out = new Number(v.valueOf()); break;
       case '[object String]': out = new String(v.valueOf()); break;
@@ -981,6 +1036,7 @@ const CLONE_SRC = `(function () {
       case '[object Set]': out = new Set(); memo.set(v, out); for (const x of v) out.add(clone(x, memo)); return out;
       case '[object Error]': out = new Error(v.message); out.name = v.name; break;
       case '[object Array]': out = new Array(v.length); memo.set(v, out); for (let i = 0; i < v.length; i++) if (i in v) out[i] = clone(v[i], memo); return out;
+      case '[object MessagePort]': out = {}; break; // like V8: a class instance with private state only
       case '[object Object]': out = {}; memo.set(v, out); for (const k of Object.keys(v)) out[k] = clone(v[k], memo); return out;
       default:
         if (ArrayBuffer.isView(v)) { out = new v.constructor(v); break; }

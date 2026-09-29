@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>overflow propagation 2</title>
+<style>
+html, body { margin: 0; height: 100%; }
+body { overflow-y: auto; }
+#tall { height: 3000px; width: 100px; background: #ccc; }
+</style></head>
+<body>
+<div id="tall"></div>
+<script>
+window.report = function(){
+  var de = document.documentElement, b = document.body;
+  var before = { deScrollH: de.scrollHeight, deClientH: de.clientHeight, bodyScrollH: b.scrollHeight, bodyClientH: b.clientHeight, bodyRectH: Math.round(b.getBoundingClientRect().height), htmlRectH: Math.round(de.getBoundingClientRect().height), scrollingEl: document.scrollingElement === de ? 'html' : 'body', innerH: innerHeight };
+  window.scrollTo(0, 500);
+  var after = { scrollY: window.scrollY, deScrollTop: de.scrollTop, bodyScrollTop: b.scrollTop, tallTop: Math.round(document.getElementById('tall').getBoundingClientRect().top) };
+  return JSON.stringify({ before: before, afterWindowScroll: after });
+};
+</script>
+</body></html>

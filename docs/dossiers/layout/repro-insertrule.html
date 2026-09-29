@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>insertRule repro</title>
+<style id="s1"></style>
+<style id="s2">.pre{display:flex}</style>
+</head>
+<body>
+<div id="a" data-p="display">plain rule via insertRule</div>
+<div id="b" data-p="display">@media rule via insertRule</div>
+<div id="c" data-p="display">@supports rule via insertRule</div>
+<div id="d" data-p="display">@media in sheet that has text</div>
+<div id="e" data-p="display">@media via appended text node</div>
+<div id="f" data-p="display">@media via new style element textContent</div>
+<div id="g" data-p="display">@layer via insertRule</div>
+<div id="h" data-p="display">@media(min-width:0px) via insertRule</div>
+<div id="i" data-p="display">nested media inside media via insertRule</div>
+<div id="j" data-p="display">plain rule inserted after media rules</div>
+<div id="k" data-p="display">@media via insertRule at index 0 after others</div>
+<div id="m" data-p="display">reduced-motion no-preference (sheet)</div>
+<div id="n" data-p="display">reduced-motion reduce (sheet)</div>
+<style>
+@media (prefers-reduced-motion: no-preference){#m{display:grid}}
+@media (prefers-reduced-motion: reduce){#n{display:grid}}
+</style>
+<script>
+var s1 = document.getElementById('s1').sheet;
+s1.insertRule('#a{display:grid}', s1.cssRules.length);
+s1.insertRule('@media (min-width: 100px){#b{display:grid}}', s1.cssRules.length);
+s1.insertRule('@supports (display:grid){#c{display:grid}}', s1.cssRules.length);
+s1.insertRule('@layer x{#g{display:grid}}', s1.cssRules.length);
+s1.insertRule('@media (min-width:0px){#h{display:grid}}', s1.cssRules.length);
+s1.insertRule('@media screen{@media (min-width:100px){#i{display:grid}}}', s1.cssRules.length);
+s1.insertRule('#j{display:grid}', s1.cssRules.length);
+s1.insertRule('@media (min-width: 100px){#k{display:grid}}', 0);
+var s2 = document.getElementById('s2').sheet;
+s2.insertRule('@media (min-width: 100px){#d{display:grid}}', s2.cssRules.length);
+var st = document.createElement('style'); document.head.appendChild(st);
+st.appendChild(document.createTextNode('@media (min-width: 100px){#e{display:grid}}'));
+var st2 = document.createElement('style'); st2.textContent = '@media (min-width: 100px){#f{display:grid}}'; document.head.appendChild(st2);
+window.report = function(){
+  var out = {};
+  var els = document.querySelectorAll('[data-p]');
+  for (var i=0;i<els.length;i++){ out[els[i].id] = getComputedStyle(els[i]).display; }
+  out.__s1rules = s1.cssRules.length; out.__s1types = Array.prototype.map.call(s1.cssRules, function(r){return r.type + ':' + (r.cssText||'').slice(0,60)});
+  out.__prm = { reduce: matchMedia('(prefers-reduced-motion: reduce)').matches, nopref: matchMedia('(prefers-reduced-motion: no-preference)').matches, any: matchMedia('(prefers-reduced-motion)').matches };
+  out.__hover = { hover: matchMedia('(hover: hover)').matches, pointerFine: matchMedia('(pointer: fine)').matches };
+  out.__cq = { supportsCQ: CSS.supports('container-type: inline-size'), cqStyle: CSS.supports('container-type', 'size') };
+  return JSON.stringify(out);
+};
+</script>
+</body></html>

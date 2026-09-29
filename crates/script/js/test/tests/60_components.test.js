@@ -262,3 +262,33 @@ test('custom elements report :defined to the native side on upgrade and construc
   assert.ok(e.mock.definedIds.has(e.id('#a2')));
   assert.strictEqual(e.mock.definedIds.size, 3); // a1, a2 and the constructed one (not the template's)
 });
+
+test('a new shadow root is empty even when the host has light children (Lit render anchor)', async () => {
+  const e = await createEnv();
+  e.run(`
+    document.body.insertAdjacentHTML('beforeend', '<x-lit id="lit"> <span>light</span></x-lit>');
+    var host = document.getElementById('lit');
+    var sr = host.attachShadow({ mode: 'open' });
+    var anchor = sr.firstChild;
+    sr.insertBefore(document.createComment('m'), anchor);
+  `);
+  assert.strictEqual(e.run("sr.childNodes.length + ':' + (anchor === null) + ':' + sr.innerHTML"), '1:true:<!--m-->');
+});
+
+test('custom elements: template contents stay inert (innerHTML, cloneNode) and upgrade on importNode', async () => {
+  const e = await createEnv({ html: '<!DOCTYPE html><html><head></head><body></body></html>' });
+  e.run(`
+    window.__ce = [];
+    class XR extends HTMLElement { constructor() { super(); __ce.push('ctor'); this.textContent = ''; } }
+    customElements.define('x-r', XR);
+    const t = document.createElement('template');
+    t.innerHTML = '<div><x-r><b>kid</b></x-r></div>';
+    __ce.push('parsed:' + __ce.filter((x) => x === 'ctor').length);
+    const c = t.content.cloneNode(true);
+    __ce.push('cloned:' + __ce.filter((x) => x === 'ctor').length + ':' + (c.querySelector('x-r') instanceof XR));
+    const i = document.importNode(t.content, true);
+    __ce.push('imported:' + __ce.filter((x) => x === 'ctor').length + ':' + (i.querySelector('x-r') instanceof XR));
+    __ce.push('src:' + t.content.querySelector('x-r').childNodes.length);
+  `);
+  assert.strictEqual(JSON.stringify(e.run('__ce')), JSON.stringify(['parsed:0', 'cloned:0:false', 'ctor', 'imported:1:true', 'src:1']));
+});

@@ -359,9 +359,9 @@ test('performance, console formatting, navigator, screen, misc window props', as
   assert.deepStrictEqual(logs[12], ['log', "{name: 'c', me: [Circular *]}"]);
   assert.ok(logs[13][1].includes('│ (index) │ a │ b │'), logs[13][1]);
   assert.deepStrictEqual(logs[14], ['log', '{x: 1}']);
-  assert.strictEqual(e.run("'serviceWorker' in navigator || 'mediaDevices' in navigator"), false);
-  assert.strictEqual(e.run(`[navigator.language, navigator.languages.join(), navigator.platform, navigator.vendor, navigator.onLine, navigator.cookieEnabled, navigator.hardwareConcurrency, navigator.deviceMemory, navigator.maxTouchPoints, navigator.webdriver, navigator.mediaDevices, navigator.serviceWorker, navigator.plugins.length, navigator.mimeTypes[0].type, navigator.userAgentData.brands.length, navigator.appVersion.startsWith('5.0'), typeof navigator.clipboard.writeText].join('|')`),
-    'de-DE|de-DE,de,en-US,en|Win32|Google Inc.|true|true|8|8|0|false|||5|application/pdf|3|true|function');
+  assert.strictEqual(e.run("'serviceWorker' in navigator || 'oscpu' in navigator"), false);
+  assert.strictEqual(e.run(`[navigator.language, navigator.languages.join(), navigator.platform, navigator.vendor, navigator.onLine, navigator.cookieEnabled, navigator.hardwareConcurrency, navigator.deviceMemory, navigator.maxTouchPoints, navigator.webdriver, typeof navigator.mediaDevices, navigator.serviceWorker, navigator.plugins.length, navigator.mimeTypes[0].type, navigator.userAgentData.brands.length, navigator.appVersion.startsWith('5.0'), typeof navigator.clipboard.writeText].join('|')`),
+    'de-DE|de-DE,de,en-US,en|Win32|Google Inc.|true|true|8|8|0|false|object||5|application/pdf|3|true|function');
   const r2 = await settle(e, `
     const p = await navigator.permissions.query({ name: 'geolocation' });
     const hi = await navigator.userAgentData.getHighEntropyValues(['platformVersion']);
@@ -521,4 +521,21 @@ test('TextEncoderStream / TextDecoderStream and resource timing for fetch', asyn
     return [bytes.join(','), text, t.initiatorType, t.transferSize > 0, t.responseEnd >= t.startTime, performance.getEntriesByType('resource').length];
   `);
   assert.deepStrictEqual(Array.from(r), ['104,195,169,240,159,152,128,33', 'hé😀!', 'fetch', true, true, 1]);
+});
+
+test('Cookie Store API: set/get/getAll/delete over document.cookie', async () => {
+  const e = await env();
+  const r = await settle(e, `
+    const out = [];
+    out.push(typeof cookieStore, cookieStore instanceof EventTarget, String(await cookieStore.get('a')));
+    await cookieStore.set('a', '1');
+    await cookieStore.set({ name: 'b', value: '2' });
+    out.push(JSON.stringify(await cookieStore.get('a')), (await cookieStore.getAll()).length, document.cookie.includes('b=2'));
+    await cookieStore.delete('a');
+    out.push(String(await cookieStore.get('a')), JSON.stringify((await cookieStore.getAll()).map((c) => c.name)));
+    let err; try { await cookieStore.set('x'); } catch (x) { err = x instanceof TypeError; }
+    out.push(err);
+    return out.join('|');
+  `);
+  assert.strictEqual(String(r), 'object|true|null|{"name":"a","value":"1"}|2|true|null|["b"]|true');
 });

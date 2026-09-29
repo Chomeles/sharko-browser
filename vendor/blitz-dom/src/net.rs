@@ -19,6 +19,7 @@ use style::{
     values::{CssUrl, SourceLocation},
 };
 
+use blitz_traits::net::http::{self, HeaderValue};
 use blitz_traits::net::{AbortSignal, Bytes, NetHandler, NetProvider, Request};
 use blitz_traits::shell::ShellProvider;
 
@@ -26,8 +27,29 @@ use url::Url;
 
 use crate::{document::DocumentEvent, util::ImageType};
 
-pub(crate) fn stamped_request(url: Url, signal: Option<&AbortSignal>) -> Request {
+/// PATCH (80): a request as Chrome's parser-initiated loads: `Referer` is the document (or,
+/// for `@import`/`@font-face`, the stylesheet) that started it, and the netstack derives
+/// `Sec-Fetch-Site`/`Origin` from it. `dest` is the Fetch destination (`style`, `image`,
+/// `font`, `iframe`, ...; `""` when unknown), carried in `Sec-Fetch-Dest` as a marker the
+/// network provider consumes: URL and `Accept` can't tell `/css2?family=X` from a document.
+pub(crate) fn stamped_request(
+    url: Url,
+    signal: Option<&AbortSignal>,
+    referrer: Option<&Url>,
+    dest: &'static str,
+) -> Request {
     let mut req = Request::get(url);
+    if let Some(referrer) = referrer
+        && let Ok(value) = HeaderValue::from_str(referrer.as_str())
+    {
+        req.headers.insert(http::header::REFERER, value);
+    }
+    if !dest.is_empty() {
+        req.headers.insert(
+            http::HeaderName::from_static("sec-fetch-dest"),
+            HeaderValue::from_static(dest),
+        );
+    }
     if let Some(sig) = signal {
         req = req.signal(sig.clone());
     }
@@ -59,6 +81,9 @@ pub enum Resource {
     Image(ImageType, u32, u32, Arc<Vec<u8>>),
     #[cfg(feature = "svg")]
     Svg(ImageType, crate::node::SvgImageData),
+    /// PATCH: the external SVG document of a `<use href="sprite.svg#id">` in an inline `<svg>`.
+    #[cfg(feature = "svg")]
+    SvgSprite(Arc<crate::svg_sprite::SvgSprite>),
     /// PATCH: the stylesheet and its source text (re-parsed when scoped to a shadow tree).
     Css(DocumentStyleSheet, Arc<str>),
     Font(Bytes, FontFaceOverrides),
@@ -167,6 +192,7 @@ impl NetHandler for ResourceHandler<StylesheetHandler> {
                 net_provider: self.data.net_provider.clone(),
                 shell_provider: self.shell_provider.clone(),
                 abort_signal: self.data.abort_signal.clone(),
+                referrer: Some(self.data.source_url.clone()),
             }),
             None, // error_reporter
             QuirksMode::NoQuirks,
@@ -187,6 +213,8 @@ pub(crate) struct StylesheetLoader {
     pub(crate) net_provider: Arc<dyn NetProvider>,
     pub(crate) shell_provider: Arc<dyn ShellProvider>,
     pub(crate) abort_signal: Option<AbortSignal>,
+    /// The stylesheet whose `@import` this loads (the request's `Referer`).
+    pub(crate) referrer: Option<Url>,
 }
 impl ServoStylesheetLoader for StylesheetLoader {
     fn request_stylesheet(
@@ -220,7 +248,12 @@ impl ServoStylesheetLoader for StylesheetLoader {
         let import = ServoArc::new(lock.wrap(import));
         self.net_provider.fetch(
             self.doc_id,
-            stamped_request(url.as_ref().clone(), self.abort_signal.as_ref()),
+            stamped_request(
+                url.as_ref().clone(),
+                self.abort_signal.as_ref(),
+                self.referrer.as_ref(),
+                "style",
+            ),
             ResourceHandler::boxed(
                 self.tx.clone(),
                 self.doc_id,
@@ -369,6 +402,8 @@ pub(crate) fn fetch_font_face(
     read_guard: &SharedRwLockReadGuard,
     abort_signal: Option<&AbortSignal>,
 ) {
+    // The stylesheet is the font request's referrer (Chrome: `Referer: .../style.css`).
+    let sheet_url: Url = sheet.contents(read_guard).url_data.0.as_ref().clone();
     sheet
         .contents(read_guard)
         .rules(read_guard)
@@ -499,7 +534,7 @@ pub(crate) fn fetch_font_face(
             if let Some((url, format)) = preferred_source {
                 network_provider.fetch(
                     doc_id,
-                    stamped_request(url, abort_signal),
+                    stamped_request(url, abort_signal, Some(&sheet_url), "font"),
                     ResourceHandler::boxed(
                         tx.clone(),
                         doc_id,
@@ -552,6 +587,24 @@ impl NetHandler for ResourceHandler<DocumentSrcHandler> {
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let html = String::from_utf8_lossy(&bytes).into_owned();
         self.respond(resolved_url, Ok(Resource::DocumentSrc(html)));
+    }
+}
+
+/// PATCH: parses the external document of an inline `<svg>`'s `<use href="sprite.svg#id">`.
+#[cfg(feature = "svg")]
+pub(crate) struct SvgSpriteHandler {
+    /// The requested URL (without fragment), which keys `BaseDocument::svg_sprites`; the
+    /// response carries the final URL after redirects.
+    pub(crate) url: String,
+}
+
+#[cfg(feature = "svg")]
+impl NetHandler for ResourceHandler<SvgSpriteHandler> {
+    fn bytes(self: Box<Self>, _resolved_url: String, bytes: Bytes) {
+        let url = self.data.url.clone();
+        let result = crate::svg_sprite::SvgSprite::parse(&bytes, &url)
+            .map(|sprite| Resource::SvgSprite(Arc::new(sprite)));
+        self.respond(url, result)
     }
 }
 

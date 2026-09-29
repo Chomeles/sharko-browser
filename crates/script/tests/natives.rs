@@ -412,6 +412,66 @@ fn selectors() {
     assert_eq!(r, r#"["div","p","li","li","li"]"#);
 }
 
+/// CSS Overflow 3 §3.3: a `<body>` with a definite height and its own `overflow` hands it to
+/// the viewport, so the document scrolls (rather than the body).
+#[test]
+fn body_overflow_propagates_to_the_viewport() {
+    for overflow in ["auto", "hidden", "scroll"] {
+        let mut e = Env::new(&format!(
+            r#"<!DOCTYPE html><html style="height:100%"><body style="margin:0;height:100%;overflow:{overflow}">
+            <div style="height:5000px"></div></body></html>"#
+        ));
+        e.eval("globalThis.N = __native; globalThis.html = N.querySelector(N.documentId(), 'html'); globalThis.body = N.querySelector(N.documentId(), 'body'); 1");
+        // documentElement.scrollHeight is the whole page, the viewport is the scroller.
+        assert_eq!(
+            e.eval("N.scrollMetrics(html)"),
+            "[0,0,800,5000]",
+            "{overflow}"
+        );
+        assert_eq!(
+            e.eval("N.clientMetrics(html)"),
+            "[0,0,800,600]",
+            "{overflow}"
+        );
+        assert_eq!(
+            e.eval("N.scrollTo(0, 100000); N.viewport()[4]"),
+            "4400",
+            "{overflow}"
+        );
+        // The body has nothing to scroll: scrollTop stays 0 whatever is written to it.
+        assert_eq!(
+            e.eval("N.setScroll(body, 0, 300); N.scrollMetrics(body).slice(0, 2)"),
+            "[0,0]",
+            "{overflow}"
+        );
+        assert_eq!(e.eval("N.viewport()[4]"), "4400", "{overflow}");
+        assert_eq!(
+            e.eval("N.setScroll(html, 0, 250); [N.scrollMetrics(html)[1], N.viewport()[4]]"),
+            "[250,250]",
+            "{overflow}"
+        );
+        // Programmatic scrolling never depends on the overflow: the viewport of a page with
+        // a scroll lock still scrolls to an element brought into view.
+        assert_eq!(
+            e.eval("N.scrollIntoView(N.querySelector(N.documentId(), 'div'), 'end', 'nearest', 'instant'); [N.viewport()[4], N.scrollMetrics(body)[1]]"),
+            "[4400,0]",
+            "{overflow}"
+        );
+    }
+
+    // The root element's own `overflow` is the viewport's; the body keeps its own.
+    let mut e = Env::new(
+        r#"<!DOCTYPE html><html style="height:100%;overflow:hidden"><body style="margin:0;height:100%;overflow:auto">
+        <div style="height:5000px"></div></body></html>"#,
+    );
+    e.eval("globalThis.N = __native; globalThis.body = N.querySelector(N.documentId(), 'body'); 1");
+    assert_eq!(
+        e.eval("N.setScroll(body, 0, 300); N.scrollMetrics(body).slice(0, 2)"),
+        "[0,300]"
+    );
+    assert_eq!(e.eval("N.viewport()[4]"), "0");
+}
+
 #[test]
 fn layout_metrics() {
     let mut e = Env::new(
@@ -1173,6 +1233,33 @@ fn modules_static_dynamic_and_meta() {
     e.serve_fetches();
     assert!(e.eval("mimeErr").contains("MIME"), "{}", e.eval("mimeErr"));
     assert!(!e.rt.is_busy());
+}
+
+#[test]
+fn module_import_from_module_top_level() {
+    // import() called while a module evaluates re-enters the loader; it must not
+    // evaluate a module that is still evaluating (a V8 fatal error).
+    let mut e = env();
+    e.host.serve(
+        "https://example.com/js/a.js",
+        "text/javascript",
+        "export const x = 1; import('./b.js').then(m => globalThis.bLoaded = m.y);",
+    );
+    e.host.serve(
+        "https://example.com/js/b.js",
+        "text/javascript",
+        "export const y = 2;",
+    );
+    e.host.serve(
+        "https://example.com/js/self.js",
+        "text/javascript",
+        "export const z = 42; import(import.meta.url).then(m => globalThis.selfZ = m.z);",
+    );
+    e.eval("globalThis.r = []; import('/js/a.js').then(m => r.push(m.x)); import('/js/a.js').then(m => r.push(m.x)); import('/js/self.js').then(m => r.push(m.z)); 1");
+    e.serve_fetches();
+    assert_eq!(e.eval("JSON.stringify(r)"), "\"[1,1,42]\"");
+    assert_eq!(e.eval("bLoaded"), "2");
+    assert_eq!(e.eval("selfZ"), "42");
 }
 
 #[test]

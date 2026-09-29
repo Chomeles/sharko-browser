@@ -96,10 +96,18 @@ pub(crate) struct FrameRealms {
     pub(crate) proxies: HashMap<Vec<u64>, v8::Global<v8::Context>>,
 }
 
+// `v8::Context::DetachGlobal()`, which the v8 crate doesn't bind: unhooks the context's
+// global proxy so a new context can take it over. `void`-returning with the receiver as
+// the sole argument, so it's ABI-safe as a plain `extern "C"` call on every target (no
+// return-value convention to get wrong); only the mangled name differs per C++ ABI.
+#[cfg(not(target_os = "windows"))]
 unsafe extern "C" {
-    /// `v8::Context::DetachGlobal()`, which the v8 crate doesn't bind: unhooks the
-    /// context's global proxy so a new context can take it over.
     #[link_name = "_ZN2v87Context12DetachGlobalEv"]
+    fn v8_context_detach_global(context: *const v8::Context);
+}
+#[cfg(target_os = "windows")]
+unsafe extern "C" {
+    #[link_name = "?DetachGlobal@Context@v8@@QEAAXXZ"]
     fn v8_context_detach_global(context: *const v8::Context);
 }
 

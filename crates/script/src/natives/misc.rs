@@ -27,6 +27,17 @@ pub(crate) fn format_number(v: f64) -> String {
 // Scripts & modules
 // ---------------------------------------------------------------------------------
 
+/// `N.cleanupAfterScript()`: HTML "clean up after running script" for a classic script
+/// the JS layer just ran through `N.evalScript`: a microtask checkpoint when no other
+/// script is on the stack (only this native, depth 1, is), so promise reactions run while
+/// `document.currentScript` still points at the script.
+pub(crate) fn n_cleanup_after_script(cx: &mut Cx) -> NResult {
+    if cx.st.native_depth.get() == 1 && !cx.scope.is_execution_terminating() {
+        crate::runtime::end_of_task(cx.scope, cx.st);
+    }
+    Ok(())
+}
+
 /// `N.evalScript(source, url, isInline)`: classic script in the global scope.
 /// Exceptions are reported (console + error event) and re-thrown.
 pub(crate) fn n_eval_script(cx: &mut Cx) -> NResult {
@@ -250,10 +261,31 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
     let redirect = cx.opt_string(8)?.unwrap_or_default();
     // Addition: report upload/download progress (XHR with progress listeners).
     let progress = cx.len() > 9 && cx.arg(9).is_true();
-    let destination = match mode.as_str() {
-        "navigate" => Destination::Document,
+    // Optional 11th argument: the Fetch destination of the request (`"script"` for
+    // `<script src>` and module loads); plain fetch()/XHR leave it out.
+    let dest = cx.opt_string(10)?.unwrap_or_default();
+    let destination = match (mode.as_str(), dest.as_str()) {
+        ("navigate", _) => Destination::Document,
+        (_, "script") => Destination::Script,
+        (_, "style") => Destination::Style,
+        (_, "image") => Destination::Image,
+        (_, "font") => Destination::Font,
+        (_, "video" | "audio") => Destination::Media,
+        (_, "iframe" | "frame") => Destination::Iframe,
         _ => Destination::Fetch,
     };
+    let mut headers = headers;
+    // The request mode has no field of its own on the wire: the network stack takes it from
+    // `Sec-Fetch-Mode` (a forbidden header name, so page headers can't spoof it) and
+    // otherwise derives it from the destination (`cors` for fetch/XHR and fonts).
+    let derived = match destination {
+        Destination::Document | Destination::Iframe => "navigate",
+        Destination::Fetch | Destination::Font => "cors",
+        _ => "no-cors",
+    };
+    if matches!(mode.as_str(), "cors" | "no-cors" | "same-origin") && mode != derived {
+        headers.push(("sec-fetch-mode".to_owned(), mode.clone()));
+    }
     let cache_mode = match cache.as_str() {
         "no-store" => CacheMode::NoStore,
         "reload" => CacheMode::Reload,
@@ -1186,11 +1218,20 @@ pub(crate) fn n_frame_element(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+// `v8::Isolate::GetIncumbentContext()`, which the v8 crate doesn't bind: the context of
+// the most recently entered author function, i.e. the realm whose script called the
+// running native (V8 keeps API functions off that count).
+//
+// Only bound on non-Windows targets: it returns `Local<Context>` (a class with a
+// user-declared constructor) by value, and the two C++ ABIs disagree on how that's
+// passed back. Itanium (Linux/macOS) returns a trivially-sized handle like this in a
+// register, matching the plain pointer-returning `extern "C"` signature below — verified
+// against the actual symbol and at runtime. MSVC x64 instead returns any class with a
+// user-declared constructor through a hidden pointer, whose exact placement relative to
+// the implicit receiver argument for a non-static member function isn't something we can
+// verify without a Windows toolchain; see `incumbent_global`'s Windows fallback below.
+#[cfg(not(target_os = "windows"))]
 unsafe extern "C" {
-    /// `v8::Isolate::GetIncumbentContext()`, which the v8 crate doesn't bind: the context
-    /// of the most recently entered author function, i.e. the realm whose script called
-    /// the running native (V8 keeps API functions off that count). A `Local<Context>` is
-    /// one pointer, returned in a register.
     #[link_name = "_ZN2v87Isolate19GetIncumbentContextEv"]
     fn v8_isolate_get_incumbent_context(isolate: *mut std::ffi::c_void) -> *const v8::Context;
 }
@@ -1198,6 +1239,7 @@ unsafe extern "C" {
 /// The global object of the realm whose script called the running native, when it is a
 /// realm of this page with the callee's origin (the only kind that can call it);
 /// `None` when it is the callee's own realm or unknown.
+#[cfg(not(target_os = "windows"))]
 fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Object>> {
     let isolate: *mut std::ffi::c_void = {
         let i: &mut v8::Isolate = cx.scope;
@@ -1216,6 +1258,17 @@ fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Obj
         return None;
     }
     Some(ctx.global(cx.scope))
+}
+
+/// Windows fallback: verifying the hidden-return-pointer ABI for a member function
+/// without a Windows toolchain isn't something we can get right by inspection, and a
+/// wrong guess here would misread memory rather than just fail to build. `postMessage`'s
+/// `source` on Windows always falls back to the caller's own window (see the JS layer's
+/// `windowPostMessage`) instead of the true calling realm's.
+#[cfg(target_os = "windows")]
+fn incumbent_global<'s>(cx: &mut Cx<'_, 's, '_>) -> Option<v8::Local<'s, v8::Object>> {
+    let _ = cx;
+    None
 }
 
 /// Addition: `window.postMessage` itself (an API function, so V8 can tell which realm

@@ -7,7 +7,7 @@ const vm = require('vm');
 const { MockNative } = require('./mock_native');
 
 const JS_DIR = path.join(__dirname, '..');
-const LAYER_FILES = ['00_prelude.js', '10_events.js', '20_dom.js', '30_html.js', '40_webapi.js', '90_bootstrap.js'];
+const LAYER_FILES = ['00_prelude.js', '10_events.js', '20_dom.js', '25_xpath.js', '30_html.js', '40_webapi.js', '45_indexeddb.js', '90_bootstrap.js'];
 const layerSources = LAYER_FILES.map((f) => [f, fs.readFileSync(path.join(JS_DIR, f), 'utf8')]);
 const compiled = layerSources.map(([f, src]) => [f, new vm.Script(src, { filename: path.join(JS_DIR, f) })]);
 
@@ -25,9 +25,11 @@ class Env {
   get logs() { return this.mock.logs; }
   errors() { return this.mock.logs.filter((l) => l[0] === 'error').map((l) => l[1]); }
   get requests() { return this.mock.requests; }
-  run(code, filename) { return vm.runInContext(code, this.ctx, { filename: filename || 'test.js' }); }
+  // Frames of a page share a group; the window whose code runs is the incumbent of postMessage.
+  active() { if (this.mock.frame) this.mock.frame.group.active = this.window; }
+  run(code, filename) { this.active(); return vm.runInContext(code, this.ctx, { filename: filename || 'test.js' }); }
   script(file, filename) { return this.run(fs.readFileSync(file, 'utf8'), filename || file); }
-  hook(name, ...args) { return this.mock.hooks[name](...args); }
+  hook(name, ...args) { this.active(); return this.mock.hooks[name](...args); }
   node(sel) {
     if (typeof sel === 'number') return this.mock.n(sel);
     const CSSselect = require('css-select');
@@ -46,6 +48,8 @@ class Env {
   async tick() { await tick(); await tick(); }
   async runEvent(e) {
     const M = this.mock;
+    this.active();
+    M.executed = (M.executed || 0) + 1;
     switch (e.kind) {
       case 'timer': M.hooks.onTimer(e.timerId); break;
       case 'fetch': {
@@ -169,4 +173,18 @@ async function createEnv(opts = {}) {
   return env;
 }
 
-module.exports = { createEnv, Env, LAYER_FILES, JS_DIR, tick };
+// Documents of one page (each an Env of its own, see mock_native.js `frame`): pass
+// `frame: { path, group }` to createEnv, with the group of this call. `path` is the <iframe> node ids
+// from the page down ([] for the page).
+function frameGroup() { const g = new Map(); g.active = null; return g; }
+// Runs the event loops of several documents in lock step (their fake clocks advance together, so
+// timers and messages interleave like in one process) until none has an event left or `ms` passed.
+// Messages between documents are events of the receiver.
+async function flushAll(envs, ms = 10000, step = 5) {
+  for (let t = 0; t < ms; t += step) {
+    for (const e of envs) await e.advance(step);
+    if (envs.every((e) => e.mock.events.length === 0)) return;
+  }
+}
+
+module.exports = { createEnv, Env, LAYER_FILES, JS_DIR, tick, frameGroup, flushAll };

@@ -854,7 +854,9 @@ fn text_overflow_ellipsis_limit(doc: &BaseDocument, inline_root_id: NodeId, scal
     if !matches!(styles.get_text().text_overflow.second, TextOverflowSide::Ellipsis) {
         return None;
     }
-    if styles.get_box().overflow_x == style::values::computed::Overflow::Visible {
+    if styles.get_box().overflow_x == style::values::computed::Overflow::Visible
+        || node.flags.propagates_overflow_to_viewport()
+    {
         return None;
     }
     let l = node.final_layout();

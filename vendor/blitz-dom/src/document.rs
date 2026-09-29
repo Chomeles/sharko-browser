@@ -219,6 +219,10 @@ pub struct BaseDocument {
     pub(crate) viewport: Viewport,
     // Scroll within our viewport
     pub(crate) viewport_scroll: crate::Point<f64>,
+    /// PATCH: the `overflow` values that apply to the viewport, and the element they were
+    /// taken from (see `viewport_overflow.rs`).
+    pub(crate) viewport_overflow: crate::ViewportOverflow,
+    pub(crate) viewport_overflow_source: Option<NodeId>,
     /// CSS media type used to evaluate `@media` rules.
     pub(crate) media_type: MediaType,
     /// Strategy for Stylo's style traversal during `resolve`.
@@ -367,6 +371,10 @@ pub struct BaseDocument {
     /// requests for the same URL are queued here instead of starting new fetches.
     /// Value is a list of (node_id, image_type) pairs waiting for the image.
     pub(crate) pending_images: HashMap<String, Vec<(NodeId, ImageType)>>,
+    /// PATCH: the external SVG documents that inline `<svg>` elements reference with
+    /// `<use href="sprite.svg#id">`, keyed by URL without the fragment.
+    #[cfg(feature = "svg")]
+    pub(crate) svg_sprites: HashMap<String, crate::svg_sprite::SpriteState>,
     /// PATCH: elements whose resource finished loading since the last
     /// [`BaseDocument::take_element_load_events`] (`true` = load, `false` = error), for the
     /// `load`/`error` events of `<img>`, `<link rel=stylesheet>` and `<iframe>`.
@@ -472,6 +480,8 @@ impl BaseDocument {
         // PATCH: `:has()` and `:nth-child(An+B of S)` (see has_invalidation.rs).
         style_config::set_pref!("layout.css.has-selector.enabled", true);
         style_config::set_pref!("layout.css.nth-child-of.enabled", true);
+        // PATCH 80: container queries (`container-type`, `@container`, `cq*` units).
+        style_config::set_pref!("layout.container-queries.enabled", true);
         style_config::set_pref!("layout.threads", -1);
 
         let viewport = config.viewport.unwrap_or_default();
@@ -522,6 +532,8 @@ impl BaseDocument {
             subdocument_depth: config.subdocument_depth,
             devtool_settings: DevtoolSettings::default(),
             viewport_scroll: crate::Point::ZERO,
+            viewport_overflow: crate::ViewportOverflow::INITIAL,
+            viewport_overflow_source: None,
             url: base_url,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
@@ -563,6 +575,8 @@ impl BaseDocument {
             deferred_construction_nodes: Vec::new(),
             image_cache: HashMap::new(),
             pending_images: HashMap::new(),
+            #[cfg(feature = "svg")]
+            svg_sprites: HashMap::new(),
             element_load_events: Vec::new(),
             animation_events: Vec::new(),
             parser_done: false,
@@ -658,8 +672,8 @@ impl BaseDocument {
 
     /// Wrapper around [`crate::net::stamped_request`]. Use the free function
     /// when `&self` would conflict with a held `&mut` borrow on a field.
-    pub(crate) fn build_request(&self, url: url::Url) -> Request {
-        crate::net::stamped_request(url, self.abort_signal.as_ref())
+    pub(crate) fn build_request(&self, url: url::Url, dest: &'static str) -> Request {
+        crate::net::stamped_request(url, self.abort_signal.as_ref(), Some(&self.url), dest)
     }
 
     pub fn favicon_url(&self) -> Option<String> {
@@ -836,6 +850,16 @@ impl BaseDocument {
     }
 
     pub fn set_sub_document(&mut self, node_id: NodeId, sub_document: Box<dyn Document>) {
+        // PATCH: a replaced sub-document is kept alive like a removed one (see
+        // `remove_sub_document`): the realm running in it holds a raw pointer to it for
+        // the rest of the current script entry (`iframe.srcdoc = ...` right after taking
+        // `contentWindow`).
+        let el = self.nodes[node_id].element_data_mut().unwrap();
+        if let SpecialElementData::SubDocument(old) =
+            std::mem::replace(&mut el.special_data, SpecialElementData::None)
+        {
+            self.detached_sub_documents.push(old);
+        }
         self.nodes[node_id]
             .element_data_mut()
             .unwrap()
@@ -1190,7 +1214,7 @@ impl BaseDocument {
                         let resolved_href = self.resolve_url(href);
                         self.net_provider.fetch(
                             self.id(),
-                            self.build_request(resolved_href.clone()),
+                            self.build_request(resolved_href.clone(), "style"),
                             ResourceHandler::boxed(
                                 self.tx.clone(),
                                 self.id,
@@ -1480,7 +1504,7 @@ impl BaseDocument {
     ) -> DocumentStyleSheet {
         let data = Stylesheet::from_str(
             css.as_ref(),
-            url_data,
+            url_data.clone(),
             origin,
             ServoArc::new(self.guard.wrap(media)),
             self.guard.clone(),
@@ -1490,6 +1514,7 @@ impl BaseDocument {
                 net_provider: self.net_provider.clone(),
                 shell_provider: self.shell_provider.clone(),
                 abort_signal: self.abort_signal.clone(),
+                referrer: Some(url_data.0.as_ref().clone()),
             }),
             None,
             QuirksMode::NoQuirks,
@@ -1692,6 +1717,10 @@ impl BaseDocument {
                 {
                     self.push_element_load_event(node_id, false);
                 }
+                #[cfg(feature = "svg")]
+                if let Some(url) = res.resolved_url.as_ref() {
+                    self.fail_svg_sprite(url);
+                }
                 if let Some(url) = res.resolved_url.as_ref() {
                     let waiting_nodes = self.pending_images.remove(url).unwrap_or_default();
                     #[cfg(feature = "tracing")]
@@ -1760,6 +1789,13 @@ impl BaseDocument {
                 };
 
                 self.apply_loaded_image(url, image);
+            }
+            #[cfg(feature = "svg")]
+            Resource::SvgSprite(sprite) => {
+                let Some(url) = res.resolved_url.as_ref() else {
+                    return;
+                };
+                self.apply_loaded_svg_sprite(url, sprite);
             }
             Resource::DocumentSrc(html) => {
                 let Some(node_id) = res.node_id else {

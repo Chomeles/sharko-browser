@@ -1,0 +1,363 @@
+GET / HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   sec-ch-ua-mobile: ?0
+   sec-ch-ua-platform: "Windows"
+   Upgrade-Insecure-Requests: 1
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   Accept-Language: de-DE
+   Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+   Sec-Fetch-Site: none
+   Sec-Fetch-Mode: navigate
+   Sec-Fetch-User: ?1
+   Sec-Fetch-Dest: document
+   Accept-Encoding: gzip, deflate, br, zstd
+
+GET /style.css HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: text/css,*/*;q=0.1
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: no-cors
+   Sec-Fetch-Dest: style
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de
+
+GET /script.js HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: no-cors
+   Sec-Fetch-Dest: script
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de
+
+GET /img.png HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: no-cors
+   Sec-Fetch-Dest: image
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de
+
+GET /frame.html HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   sec-ch-ua-mobile: ?0
+   sec-ch-ua-platform: "Windows"
+   Upgrade-Insecure-Requests: 1
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   Accept-Language: de-DE
+   Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: navigate
+   Sec-Fetch-Dest: iframe
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /css-img.png HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: no-cors
+   Sec-Fetch-Dest: image
+   Referer: http://localhost:8787/style.css
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /fetch-omit HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+
+GET /video.mp4 HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   Accept-Encoding: identity;q=1, *;q=0
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: no-cors
+   Sec-Fetch-Dest: video
+   Referer: http://localhost:8787/
+   Cookie: sid=abc; pref=de; jsc=1
+   Range: bytes=0-
+
+GET /css-font.woff2 HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   Origin: http://localhost:8787
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: font
+   Referer: http://localhost:8787/style.css
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /fetch-same HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /frame-fetch HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/frame.html
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /fetch-include HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+POST /fetch-post HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   Content-Length: 3
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Content-Type: text/plain
+   sec-ch-ua-mobile: ?0
+   Accept-Language: de-DE
+   Accept: */*
+   Origin: http://localhost:8787
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+POST /fetch-json HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   Content-Length: 2
+   X-Custom: y
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Content-Type: application/json
+   sec-ch-ua-mobile: ?0
+   Accept-Language: de-DE
+   Accept: */*
+   Origin: http://localhost:8787
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /favicon.ico HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: no-cors
+   Sec-Fetch-Dest: image
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /fetch-cross HTTP/1.1
+   Host: 127.0.0.1:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Origin: http://localhost:8787
+   Sec-Fetch-Site: cross-site
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+
+GET /fetch-cross-cred HTTP/1.1
+   Host: 127.0.0.1:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Origin: http://localhost:8787
+   Sec-Fetch-Site: cross-site
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Sec-Fetch-Storage-Access: active
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+
+GET /xhr HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /xhr-cross HTTP/1.1
+   Host: 127.0.0.1:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Origin: http://localhost:8787
+   Sec-Fetch-Site: cross-site
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Sec-Fetch-Storage-Access: active
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+
+GET /redirect-me HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /redirected HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: empty
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1
+
+GET /font.woff2 HTTP/1.1
+   Host: localhost:8787
+   Connection: keep-alive
+   Origin: http://localhost:8787
+   sec-ch-ua-platform: "Windows"
+   User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36
+   sec-ch-ua: "Chromium";v="141", "Not?A_Brand";v="8"
+   Accept-Language: de-DE
+   sec-ch-ua-mobile: ?0
+   Accept: */*
+   Sec-Fetch-Site: same-origin
+   Sec-Fetch-Mode: cors
+   Sec-Fetch-Dest: font
+   Referer: http://localhost:8787/
+   Accept-Encoding: gzip, deflate, br, zstd
+   Cookie: sid=abc; pref=de; jsc=1

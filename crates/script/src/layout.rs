@@ -283,6 +283,10 @@ pub(crate) fn n_set_scroll(cx: &mut Cx) -> NResult {
     let Some(node) = doc.get_node(id) else {
         return Err(JsErr::invalid_node());
     };
+    // A `<body>` whose `overflow` the viewport took over is no scroller of its own.
+    if node.flags.propagates_overflow_to_viewport() {
+        return Ok(());
+    }
     let before = *node.scroll_offset();
     doc.scroll_to(
         id,

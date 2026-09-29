@@ -186,6 +186,9 @@ pub(crate) struct ModuleLoader {
     fetches: HashMap<u64, String>,
     jobs: Vec<Job>,
     next_fetch: u64,
+    /// Set while `advance` runs: module evaluation can call `import()`, which
+    /// re-enters `advance`.
+    advancing: bool,
 }
 
 impl ModuleLoader {
@@ -478,6 +481,17 @@ fn graph_state(scope: &mut v8::PinScope, st: &RuntimeState, root: &str) -> Graph
 
 /// Instantiate + evaluate every job whose graph is complete; reject failed ones.
 fn advance(scope: &mut v8::PinScope, st: &RuntimeState) {
+    // A nested call (an `import()` from a module's top level) must not evaluate
+    // jobs whose module is still `kEvaluating`, which V8 treats as a fatal error.
+    // The outer loop re-reads `jobs`, so it picks up whatever the nested call added.
+    if std::mem::replace(&mut st.modules.borrow_mut().advancing, true) {
+        return;
+    }
+    advance_jobs(scope, st);
+    st.modules.borrow_mut().advancing = false;
+}
+
+fn advance_jobs(scope: &mut v8::PinScope, st: &RuntimeState) {
     let mut i = 0;
     loop {
         let (root, namespace) = {

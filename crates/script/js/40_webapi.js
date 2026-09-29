@@ -44,6 +44,8 @@
     N.setTimer(id, normDelay(delay));
     return id;
   };
+  // The id the next timer gets: it changes when a timer is set in between (IndexedDB looks at this).
+  L.timerSeq = function () { return nextTimerId; };
   L.clearInternalTimeout = function (id) {
     if (internalTimers.delete(id)) N.clearTimer(id);
   };
@@ -124,9 +126,11 @@
     return id;
   }
   function cancelAnimationFrame(id) { rafCallbacks.delete(Number(id)); }
+  L.firstFrameAt = 0; // N.now() of the first animation frame the host ran (window.chrome.loadTimes)
   L.onFrame = function (ts) {
     frameRequested = false;
     const t = Number(ts);
+    if (L.firstFrameAt === 0) L.firstFrameAt = N.now() || 0.001;
     try { L.tickAnimations(); } catch (e) { L.reportException(e); }
     const maxId = rafId;
     for (const [id, cb] of rafCallbacks) {
@@ -180,9 +184,10 @@
     try {
       return N.structuredClone(value);
     } catch (e) {
+      // A DataCloneError from the serializer, or else what a getter of the value threw (rethrown as is).
       const c = L.fromNative(e);
-      if (c instanceof DOMException) throw c;
-      throw new DOMException(`Failed to execute 'structuredClone' on 'Window': ${e && e.message ? e.message : 'value could not be cloned.'}`, 'DataCloneError');
+      if (c === undefined || c === null) throw new DOMException("Failed to execute 'structuredClone' on 'Window': value could not be cloned.", 'DataCloneError');
+      throw c;
     }
   }
   L.cloneValue = cloneValue;
@@ -191,13 +196,120 @@
     return cloneValue(value);
   }
 
+  // The entries of a `transfer` argument: a sequence, or the `transfer` member of an options dictionary.
+  const transferOf = (x) => (Array.isArray(x) ? x : (x !== null && typeof x === 'object' && Array.isArray(x.transfer) ? x.transfer : []));
+  const abTransfer = ArrayBuffer.prototype.transfer;
+  const isBuffer = (x) => Object.prototype.toString.call(x) === '[object ArrayBuffer]';
+  // A MessagePort of any realm of the page: a same-origin frame's objects are reachable, but
+  // their class (and so its private state) is another one, so they are recognized by their shape.
+  const isPort = (x) => x instanceof MessagePort || (Object.prototype.toString.call(x) === '[object MessagePort]'
+    && typeof x.postMessage === 'function' && typeof x.addEventListener === 'function' && typeof x.start === 'function');
+  // Only ports and ArrayBuffers can be transferred. Other transferables (ImageBitmap, streams, ...)
+  // don't exist here, so listing one is ignored rather than an error.
+  function transferables(list, self, iface) {
+    const ports = [], orig = [], buffers = [];
+    if (list.length === 0) return { ports, orig, buffers };
+    const seen = new Set();
+    for (let i = 0; i < list.length; i++) {
+      const x = list[i];
+      if (x === null || typeof x !== 'object') continue;
+      const port = isPort(x);
+      if (!port && !isBuffer(x)) continue;
+      const fail = (what) => new DOMException(`Failed to execute 'postMessage' on '${iface}': ${port ? 'Port' : 'ArrayBuffer'} at index ${i} ${what}.`, 'DataCloneError');
+      if (seen.has(x)) throw fail('is a duplicate');
+      seen.add(x);
+      if (port) {
+        const p = asLocalPort(x);
+        if (p === self) throw fail('contains the source port');
+        if (L.portDetached(p)) throw fail('is already neutered');
+        ports.push(p);
+        orig.push(x);
+      } else {
+        if (x.detached === true) throw fail('is already detached');
+        buffers.push(x);
+      }
+    }
+    return { ports, orig, buffers };
+  }
+  // The buffers of a transfer list are detached in the sender once the message is on its way.
+  // The receiver got a copy (the clone); `transfer()` hands the sender's memory to a buffer that is
+  // dropped right away, without another copy.
+  function detachBuffers(list) {
+    if (typeof abTransfer !== 'function') return;
+    for (const b of list) {
+      try { abTransfer.call(b); } catch (_) { /* not detachable */ }
+    }
+  }
+  // A transferred port is a plain object when the message is cloned, so where the message holds
+  // ports (`{ channel: port }`) is noted as paths from the root: a property name, or [index] for
+  // the value of the index-th entry of a Map. Sets and Map keys are not searched.
+  function portPaths(root, ports) {
+    const out = [];
+    const seen = new Set();
+    const walk = (v, path) => {
+      if (v === null || typeof v !== 'object') return;
+      const i = ports.indexOf(v);
+      if (i >= 0) { out.push([path, i]); return; }
+      if (seen.has(v)) return;
+      seen.add(v);
+      const tag = Object.prototype.toString.call(v);
+      if (tag === '[object Map]') {
+        let n = 0;
+        for (const x of v.values()) walk(x, [...path, [n++]]);
+      } else if (Array.isArray(v) || tag === '[object Object]') {
+        for (const k of Object.keys(v)) walk(v[k], [...path, k]);
+      }
+    };
+    walk(root, []);
+    return out;
+  }
+  // Puts `ports[i]` at each path of a clone made without them; returns the clone (the root itself
+  // may be a port). The paths of a message from another frame are not trusted.
+  function setPortPaths(data, paths, ports) {
+    if (!Array.isArray(paths)) return data;
+    for (const e of paths) {
+      if (!Array.isArray(e) || !Array.isArray(e[0]) || !(ports[e[1]] instanceof MessagePort)) continue;
+      const path = e[0], port = ports[e[1]];
+      if (path.length === 0) return port;
+      let cur = data;
+      for (let i = 0; i < path.length - 1 && cur !== null && typeof cur === 'object'; i++) {
+        const k = path[i];
+        if (Array.isArray(k)) cur = Object.prototype.toString.call(cur) === '[object Map]' ? [...cur.values()][k[0]] : null;
+        else cur = Object.prototype.hasOwnProperty.call(cur, k) ? cur[k] : null;
+      }
+      if (cur === null || typeof cur !== 'object') continue;
+      const last = path[path.length - 1];
+      if (Array.isArray(last)) {
+        if (Object.prototype.toString.call(cur) === '[object Map]') { const key = [...cur.keys()][last[0]]; if (cur.has(key)) cur.set(key, port); }
+      } else if (Object.prototype.hasOwnProperty.call(cur, last)) {
+        Object.defineProperty(cur, last, { value: port, writable: true, enumerable: true, configurable: true });
+      }
+    }
+    return data;
+  }
+  // The clone of `message` for a receiver in this realm; ports of the transfer list (`orig`) that
+  // it holds become `ports` (their stand-ins in this realm).
+  function cloneMessage(message, orig, ports) {
+    const paths = orig.length === 0 ? [] : portPaths(message, orig);
+    return setPortPaths(cloneValue(message), paths, ports);
+  }
+  // StructuredSerializeWithTransfer within this realm.
+  function serializeWithTransfer(message, transfer, self, iface) {
+    const t = transferables(transferOf(transfer), self, iface);
+    return { data: cloneMessage(message, t.orig, t.ports), ports: t.ports, buffers: t.buffers };
+  }
+
   class MessagePort extends EventTarget {
-    #other = null; #queue = []; #started = false; #closed = false;
+    // A port's peer is another port of this realm (#other) or, once its channel spans realms,
+    // a link that carries what is posted (#link). A port that has been transferred (#fwd) stays
+    // behind as a stub: it hands what it still receives on to the new owner.
+    #other = null; #link = null; #fwd = null; #queue = []; #started = false; #closed = false;
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); super(); }
     static {
       L.entangle = (a, b) => { a.#other = b; b.#other = a; };
       L.portEnqueue = (port, data, ports) => {
         if (port.#closed) return;
+        if (port.#fwd !== null) { port.#fwd.send(data, ports); return; }
         port.#queue.push([data, ports]);
         if (port.#started) L.postTask(() => L.portDeliver(port));
       };
@@ -212,16 +324,48 @@
         port.#started = true;
         for (let i = 0; i < port.#queue.length; i++) L.postTask(() => L.portDeliver(port));
       };
+      // `port` posts towards its peer.
+      L.portSend = (port, data, ports) => {
+        if (port.#other !== null) L.portEnqueue(port.#other, data, ports);
+        else if (port.#link !== null) port.#link.send(data, ports);
+      };
+      // The peer is in another realm: `link.send(data, ports)` posts, `link.close()` closes.
+      L.portLink = (port, link) => { port.#other = null; port.#link = link; };
+      L.portUnlink = (port) => { port.#link = null; };
+      L.portDetached = (port) => port.#fwd !== null;
+      // Transfer: the port's undelivered messages leave with it and `fwd.send` gets what arrives
+      // later. `undo` puts everything back (the message could not be sent after all).
+      L.portDetach = (port, fwd) => {
+        const queue = port.#queue, closed = port.#closed;
+        port.#queue = [];
+        port.#fwd = fwd;
+        return { queue, closed, undo() { port.#fwd = null; port.#queue = queue; } };
+      };
+      // The peer of a stub closed its end.
+      L.portPeerClosed = (port) => {
+        if (port.#closed) return;
+        port.#closed = true;
+        const link = port.#link;
+        port.#link = null;
+        if (link !== null) link.close();
+      };
     }
     postMessage(message, transfer) {
-      const other = this.#other;
-      if (this.#closed || other === null) return;
-      const list = Array.isArray(transfer) ? transfer : (transfer && Array.isArray(transfer.transfer) ? transfer.transfer : []);
-      const ports = list.filter((x) => x instanceof MessagePort);
-      L.portEnqueue(other, cloneValue(message), ports);
+      // Like a detached port: nothing happens, not even a DataCloneError.
+      if (this.#closed || this.#fwd !== null || (this.#other === null && this.#link === null)) return;
+      const t = serializeWithTransfer(message, transfer, this, 'MessagePort');
+      L.portSend(this, t.data, t.ports);
+      detachBuffers(t.buffers);
     }
     start() { L.portStart(this); }
-    close() { this.#closed = true; }
+    close() {
+      if (this.#closed || this.#fwd !== null) return;
+      this.#closed = true;
+      const link = this.#link;
+      this.#link = null;
+      if (link !== null) link.close();
+      forgetPort(this);
+    }
     get onmessage() { return L.getHandlerIDL(this, 'message'); }
     set onmessage(v) { L.setHandlerIDL(this, 'message', v); L.portStart(this); }
   }
@@ -250,7 +394,7 @@
     postMessage(message) {
       if (this.#closed) throw new DOMException("Failed to execute 'postMessage' on 'BroadcastChannel': Channel is closed", 'InvalidStateError');
       const data = cloneValue(message);
-      const origin = L.location ? L.location.origin : '';
+      const origin = L.docOrigin();
       for (const ch of broadcastChannels.get(this.#name)) {
         if (ch === this) continue;
         L.postTask(() => { if (!L.bcClosed(ch)) L.fire(ch, 'message', { data: cloneValue(data), origin }, L.MessageEvent); });
@@ -263,19 +407,16 @@
   // Windows of other frames. The documents of a page and its frames run in one isolate,
   // each in its own realm (context): a same-origin frame's window is its real global
   // object (`N.realmGlobal`), so its document and functions are reachable. A cross-origin
-  // frame gets a stand-in for its WindowProxy (only postMessage reaches it). A window is
-  // named by its frame path: the <iframe> node ids from the page down (the page is []).
-  const REMOTE = new WeakMap(); // RemoteWindow -> frame path
-  const remoteByPath = new Map(); // path key -> RemoteWindow
+  // frame gets a stand-in for its WindowProxy (only the CrossOriginProperties reach it, see
+  // below). A window is named by its frame path: the <iframe> node ids from the page down
+  // (the page is []).
+  const REMOTE = new WeakMap(); // stand-in Proxy and its target -> state {kind, path, props, ...}
+  const remoteByPath = new Map(); // path key -> stand-in window
   const pathKey = (p) => p.join(',');
   let ownPath = null;
   function selfPath() {
     if (ownPath === null) ownPath = typeof N.framePath === 'function' ? N.framePath() : [];
     return ownPath;
-  }
-  function remoteTarget(w) {
-    if (!REMOTE.has(w)) throw L.illegal();
-    return REMOTE.get(w);
   }
   // The real window of a same-origin frame (its realm is created on demand), else null.
   function realmGlobal(path) {
@@ -296,8 +437,7 @@
     if (g !== null) return g;
     let w = remoteByPath.get(key);
     if (w === undefined) {
-      w = new Proxy(new RemoteWindow(INTERNAL, path), remoteHandler);
-      REMOTE.set(w, path);
+      w = newCrossOrigin('Window', path);
       remoteByPath.set(key, w);
     }
     return w;
@@ -318,77 +458,258 @@
     const e = INDEX_RE.test(name) ? list[+name] : (name === '' ? undefined : list.find((f) => f[1] === name));
     return e === undefined ? undefined : L.windowAt([...path, e[0]]);
   }
-  const crossOriginErr = (what) => new DOMException(`Failed to read a named property '${what}' from 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+  // ---------------------------------------------------------------------------------------
+  // Cross-origin objects. The window of another origin and its Location are exotic objects
+  // (HTML "cross-origin objects"): only the CrossOriginProperties are visible, anything else
+  // is a SecurityError, and the prototype is null. Each of those properties is one function
+  // (or accessor pair) per stand-in, created in the current realm, so `w.postMessage ===
+  // w.postMessage`. Like the operations of a [Global] interface they act on their `this`,
+  // where null/undefined stands for the realm's own window: `const post = parent.postMessage;
+  // post(msg, '*')` posts to the calling window, as in browsers.
+  // ---------------------------------------------------------------------------------------
+  // In spec order. m: method, g: getter, gs: getter and setter, s: setter only.
+  const CROSS_ORIGIN_PROPS = {
+    Window: [['window', 'g'], ['self', 'g'], ['location', 'gs'], ['close', 'm'], ['closed', 'g'], ['focus', 'm'], ['blur', 'm'],
+      ['frames', 'g'], ['length', 'g'], ['top', 'g'], ['opener', 'g'], ['parent', 'g'], ['postMessage', 'm']],
+    Location: [['href', 's'], ['replace', 'm']],
+  };
+  // CrossOriginPropertyFallback: "then" and these symbols read as undefined on any cross-origin object.
+  const CROSS_ORIGIN_FALLBACK = Object.freeze({ value: undefined, writable: false, enumerable: false, configurable: true });
+  const isFallbackKey = (p) => p === 'then' || p === Symbol.toStringTag || p === Symbol.hasInstance || p === Symbol.isConcatSpreadable;
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  // The location of a lenient stand-in (see sameOriginChild): its URL isn't known here.
   const remoteLocation = Object.freeze({ replace() { }, set href(v) { }, toString() { return ''; } });
-  class RemoteWindow {
-    constructor(token, path) {
-      if (token !== INTERNAL) throw L.illegal();
-      REMOTE.set(this, path);
-    }
-    postMessage(message, targetOrigin, transfer) {
-      const path = remoteTarget(this);
-      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-      let t = targetOrigin !== null && typeof targetOrigin === 'object'
-        ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
-        : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
-      if (t === '/') t = L.location.origin;
-      else if (t !== '*') {
-        const p = N.urlParse(t, null);
-        if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
-        t = p[10];
-      }
-      N.framePost(path, message, t);
-    }
-    get window() { remoteTarget(this); return this; }
-    get self() { remoteTarget(this); return this; }
-    get frames() { remoteTarget(this); return this; }
-    get parent() { const p = remoteTarget(this); return p.length === 0 ? this : L.windowAt(p.slice(0, -1)); }
-    get top() { remoteTarget(this); return L.windowAt([]); }
-    get opener() { remoteTarget(this); return null; }
-    get closed() { remoteTarget(this); return false; }
-    get length() { return framesOf(remoteTarget(this)).length; }
-    get location() { remoteTarget(this); return remoteLocation; }
-    set location(v) { remoteTarget(this); }
-    get document() {
-      const p = remoteTarget(this);
-      // A child frame of this document that isn't cross-origin: not scriptable from here
-      // yet (null rather than a SecurityError).
-      const own = selfPath();
-      if (p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(p[p.length - 1])) return null;
-      throw crossOriginErr('document');
-    }
-    focus() { remoteTarget(this); }
-    blur() { remoteTarget(this); }
-    close() { remoteTarget(this); }
-    // Listeners on a same-origin child window (its document isn't scriptable from here, so
-    // they never fire); a cross-origin window blocks them, as in browsers.
-    addEventListener(type, listener, options) { remoteEventTarget(this, 'addEventListener').addEventListener(type, listener, options); }
-    removeEventListener(type, listener, options) { remoteEventTarget(this, 'removeEventListener').removeEventListener(type, listener, options); }
-    dispatchEvent(event) { return remoteEventTarget(this, 'dispatchEvent').dispatchEvent(event); }
+  // The state of this realm's own window, which the properties above act on for `this === window`.
+  let ownWindow = null;
+  function ownState() {
+    if (ownWindow === null) ownWindow = { kind: 'Window', path: selfPath() };
+    return ownWindow;
   }
-  const REMOTE_TARGETS = new WeakMap();
-  function remoteEventTarget(w, what) {
-    const p = remoteTarget(w);
+  // A stand-in Proxy for the window (or Location) of the frame at `path`. Its state: `props` caches the
+  // descriptors, `location` the window's cross-origin Location, `events` and `expando` serve the
+  // lenient case.
+  function newCrossOrigin(kind, path) {
+    const target = {};
+    const st = { kind, path, props: new Map(), location: null, events: null, expando: false };
+    const proxy = new Proxy(target, crossOriginHandler);
+    REMOTE.set(target, st);
+    REMOTE.set(proxy, st);
+    return proxy;
+  }
+  // The window (Location) a cross-origin property acts on: its `this`. For a window a null or undefined
+  // `this` is this realm's own window; anything else that isn't one fails the brand check.
+  function windowThis(v) {
+    if (v === undefined || v === null || v === L.window) return ownState();
+    const st = REMOTE.get(v);
+    if (st === undefined || st.kind !== 'Window') throw new TypeError('Illegal invocation');
+    return st;
+  }
+  function locationThis(v) {
+    if (v === L.location) return ownState();
+    const st = REMOTE.get(v);
+    if (st === undefined || st.kind !== 'Location') throw new TypeError('Illegal invocation');
+    return st;
+  }
+  function parentOf(st) {
+    if (st === ownState()) return L.parentWindow();
+    return L.windowAt(st.path.length === 0 ? st.path : st.path.slice(0, -1));
+  }
+  // `window.location` of `st`: the real one, or its cross-origin Location (one per window).
+  function locationOf(st) {
+    if (st === ownState()) return L.location;
+    if (isLenient(st)) return remoteLocation;
+    if (st.location === null) st.location = newCrossOrigin('Location', st.path);
+    return st.location;
+  }
+  // `top.location = url`, `parent.location.replace(url)`: the host navigates the frame (if it can).
+  function navigateFrame(st, url, replace, method) {
+    if (st === ownState()) { L.navigateTo(url, replace, method); return; }
+    const p = N.urlParse(L.toUSV(url), L.baseURL());
+    if (p === null) throw new DOMException(`Failed to execute '${method}' on 'Location': '${url}' is not a valid URL.`, 'SyntaxError');
+    // (a javascript: URL would run in the other origin's document)
+    if (p[1] === 'javascript:' || typeof N.frameNavigate !== 'function') return;
+    N.frameNavigate(st.path, p[0], replace);
+  }
+  function postMessageTo(st, ...args) {
+    if (args.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+    const [message, targetOrigin, transfer] = args;
+    if (st === ownState()) { L.windowPostMessage(message, targetOrigin, transfer, null); return; }
+    let t = targetOrigin !== null && typeof targetOrigin === 'object'
+      ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
+      : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
+    if (t === '/') t = L.docOrigin();
+    else if (t !== '*') {
+      const p = N.urlParse(t, null);
+      if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
+      t = p[10];
+    }
+    const { ports, orig, buffers } = transferables(transferArg(targetOrigin, transfer), null, 'Window');
+    // The ports move to the other realm with the message (see the port-control protocol below).
+    const undo = [];
+    try {
+      N.framePost(st.path, ports.length === 0 ? message
+        : { [PORT_CTL]: 'w', data: message, ports: exportPorts(ports, st.path, undo), paths: portPaths(message, orig) }, t);
+    } catch (e) {
+      for (const f of undo.reverse()) f();
+      throw L.fromNative(e);
+    }
+    detachBuffers(buffers);
+  }
+  const windowSelf = { get: (st) => L.windowAt(st.path) };
+  const setHref = (st, v) => navigateFrame(st, `${v}`, false, 'href');
+  const noop = { call() { }, length: 0 };
+  // What each property does to the window (Location) it is invoked on.
+  const WINDOW_OPS = {
+    window: windowSelf,
+    self: windowSelf,
+    frames: windowSelf,
+    location: { get: locationOf, set: setHref },
+    close: noop,
+    closed: { get: () => false },
+    focus: noop,
+    blur: noop,
+    length: { get: (st) => framesOf(st.path).length },
+    top: { get: (st) => (st === ownState() ? L.windowTop() : L.windowAt([])) },
+    opener: { get: () => null },
+    parent: { get: parentOf },
+    postMessage: { call: postMessageTo, length: 1 },
+  };
+  const LOCATION_OPS = {
+    href: { set: setHref },
+    replace: {
+      call(st, ...args) {
+        if (args.length === 0) throw new TypeError("Failed to execute 'replace' on 'Location': 1 argument required, but only 0 present.");
+        navigateFrame(st, `${args[0]}`, true, 'replace');
+      },
+      length: 1,
+    },
+  };
+  function crossOriginFn(name, length, thisOf, run) {
+    const fn = { [name](...args) { return run(thisOf(this), ...args); } }[name];
+    Object.defineProperty(fn, 'length', { value: length, configurable: true });
+    L.nativeFns.add(fn);
+    return fn;
+  }
+  // The descriptor of one of CrossOriginProperties (cached: identity is stable per stand-in).
+  function crossOriginProperty(st, name, kind) {
+    let d = st.props.get(name);
+    if (d !== undefined) return d;
+    const thisOf = st.kind === 'Window' ? windowThis : locationThis;
+    const op = (st.kind === 'Window' ? WINDOW_OPS : LOCATION_OPS)[name];
+    if (kind === 'm') {
+      d = { value: crossOriginFn(name, op.length, thisOf, op.call), writable: false, enumerable: false, configurable: true };
+    } else {
+      d = {
+        get: kind.includes('g') ? crossOriginFn(`get ${name}`, 0, thisOf, op.get) : undefined,
+        set: kind.includes('s') ? crossOriginFn(`set ${name}`, 1, thisOf, op.set) : undefined,
+        enumerable: false, configurable: true,
+      };
+    }
+    st.props.set(name, d);
+    return d;
+  }
+  // [[GetOwnProperty]] without the SecurityError: the descriptor, or undefined for what a cross-origin
+  // object hides. Child frames are the window's indexed (enumerable) and named properties.
+  function crossOriginOwn(st, p) {
+    if (typeof p === 'string') {
+      const e = CROSS_ORIGIN_PROPS[st.kind].find((x) => x[0] === p);
+      if (e !== undefined) return crossOriginProperty(st, e[0], e[1]);
+      if (st.kind === 'Window') {
+        const w = childWindow(st.path, p);
+        if (w !== undefined) return { value: w, writable: false, enumerable: INDEX_RE.test(p), configurable: true };
+      }
+    }
+    return isFallbackKey(p) ? CROSS_ORIGIN_FALLBACK : undefined;
+  }
+  function crossOriginErr(st, verb, p) {
+    const blocked = `Blocked a frame with origin "${L.docOrigin()}" from accessing a cross-origin frame.`;
+    if (verb === undefined) return new DOMException(blocked, 'SecurityError');
+    const index = typeof p === 'string' && INDEX_RE.test(p);
+    const what = index ? `an indexed property [${p}]` : `a named property${typeof p === 'string' ? ` '${p}'` : ''}`;
+    return new DOMException(`Failed to ${verb} ${what} ${verb === 'read' ? 'from' : 'on'} '${st.kind}': ${blocked}`, 'SecurityError');
+  }
+  // A direct child frame that is not cross-origin but whose real window isn't available (not
+  // loaded yet, ...). Its stand-in is lenient: plain expandos, `document` is null, and it takes
+  // event listeners that never fire.
+  function sameOriginChild(path) {
     const own = selfPath();
-    const child = p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own);
-    if (!child || frameIsCrossOrigin(p[p.length - 1])) throw new DOMException(`Failed to execute '${what}' on 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
-    let t = REMOTE_TARGETS.get(w);
-    if (t === undefined) { t = new EventTarget(); REMOTE_TARGETS.set(w, t); }
-    return t;
+    return path.length === own.length + 1 && pathKey(path.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(path[path.length - 1]);
   }
-  Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
-  // Named and indexed access to a remote window's child frames (`parent.frames['__tcfapiLocator']`, `top[0]`).
-  const remoteHandler = {
-    get(t, p, r) {
-      if (typeof p === 'string' && !(p in t)) {
-        const w = childWindow(REMOTE.get(t), p);
-        if (w !== undefined) return w;
-      }
-      return Reflect.get(t, p, r);
+  const isLenient = (st) => st.kind === 'Window' && sameOriginChild(st.path);
+  function lenientEvents(w) {
+    const st = REMOTE.get(w);
+    if (st === undefined || st.kind !== 'Window') throw new TypeError('Illegal invocation');
+    if (st.events === null) st.events = new EventTarget();
+    return st.events;
+  }
+  const lenientMethods = {
+    addEventListener(type, listener, options) { lenientEvents(this).addEventListener(type, listener, options); },
+    removeEventListener(type, listener, options) { lenientEvents(this).removeEventListener(type, listener, options); },
+    dispatchEvent(event) { return lenientEvents(this).dispatchEvent(event); },
+  };
+  // The essential internal methods of the cross-origin WindowProxy and Location (7.2.3.x).
+  const crossOriginHandler = {
+    getOwnPropertyDescriptor(t, p) {
+      const st = REMOTE.get(t);
+      if (st.expando && hasOwn(t, p)) return Reflect.getOwnPropertyDescriptor(t, p);
+      const d = crossOriginOwn(st, p);
+      if (d !== undefined) return d;
+      if (isLenient(st)) return undefined;
+      throw crossOriginErr(st, 'read', p);
+    },
+    defineProperty(t, p, d) {
+      const st = REMOTE.get(t);
+      if (!isLenient(st)) throw crossOriginErr(st);
+      st.expando = true;
+      return Reflect.defineProperty(t, p, d);
     },
     has(t, p) {
-      return Reflect.has(t, p) || (typeof p === 'string' && childWindow(REMOTE.get(t), p) !== undefined);
+      const st = REMOTE.get(t);
+      if ((st.expando && hasOwn(t, p)) || crossOriginOwn(st, p) !== undefined) return true;
+      if (!isLenient(st)) throw crossOriginErr(st);
+      return p === 'document' || (typeof p === 'string' && hasOwn(lenientMethods, p)) || Reflect.has(t, p);
     },
+    get(t, p, receiver) {
+      const st = REMOTE.get(t);
+      if (st.expando && hasOwn(t, p)) return Reflect.get(t, p, receiver);
+      if (p === Symbol.toStringTag && isLenient(st)) return 'Window';
+      const d = crossOriginOwn(st, p);
+      if (d !== undefined) {
+        if ('value' in d) return d.value;
+        if (d.get !== undefined) return Reflect.apply(d.get, receiver, []);
+        throw crossOriginErr(st, 'read', p);
+      }
+      if (!isLenient(st)) throw crossOriginErr(st, 'read', p);
+      if (p === 'document') return null;
+      if (typeof p === 'string' && hasOwn(lenientMethods, p)) return lenientMethods[p];
+      return Reflect.get(t, p);
+    },
+    set(t, p, v, receiver) {
+      const st = REMOTE.get(t);
+      const d = st.expando && hasOwn(t, p) ? undefined : crossOriginOwn(st, p);
+      if (d !== undefined && d.set !== undefined) { Reflect.apply(d.set, receiver, [v]); return true; }
+      if (!isLenient(st)) throw crossOriginErr(st, 'set', p);
+      st.expando = true;
+      return Reflect.set(t, p, v);
+    },
+    deleteProperty(t, p) {
+      const st = REMOTE.get(t);
+      if (!isLenient(st)) throw crossOriginErr(st);
+      return Reflect.deleteProperty(t, p);
+    },
+    ownKeys(t) {
+      const st = REMOTE.get(t);
+      const keys = [];
+      const n = st.kind === 'Window' ? framesOf(st.path).length : 0;
+      for (let i = 0; i < n; i++) keys.push(`${i}`);
+      for (const e of CROSS_ORIGIN_PROPS[st.kind]) keys.push(e[0]);
+      keys.push('then', Symbol.toStringTag, Symbol.hasInstance, Symbol.isConcatSpreadable);
+      if (st.expando) for (const k of Reflect.ownKeys(t)) if (!keys.includes(k)) keys.push(k);
+      return keys;
+    },
+    getPrototypeOf(t) { return isLenient(REMOTE.get(t)) ? Reflect.getPrototypeOf(t) : null; },
+    setPrototypeOf(t, v) { return v === crossOriginHandler.getPrototypeOf(t); },
+    preventExtensions() { return false; },
   };
   // The window of this document's <iframe> `id`.
   L.remoteWindowFor = (id) => L.windowAt([...selfPath(), id]);
@@ -419,39 +740,178 @@
     const src = N.getAttr(id, 'src');
     if (src === null || src.trim() === '' || N.getAttr(id, 'srcdoc') !== null) return false;
     const p = N.urlParse(src.trim(), L.baseURL());
-    return p !== null && (p[1] === 'https:' || p[1] === 'http:') && p[10] !== L.location.origin;
+    return p !== null && (p[1] === 'https:' || p[1] === 'http:') && p[10] !== L.docOrigin();
   }
   // Child frames of this document in tree order (window.length, window[i]).
   L.childFrames = function () {
     try { return N.querySelectorAll(L.documentId, 'iframe,frame'); } catch (_) { return []; }
   };
+  // The `transfer` of window.postMessage(message, targetOrigin, transfer) or of postMessage(message, options).
+  const transferArg = (targetOrigin, transfer) => (targetOrigin !== null && typeof targetOrigin === 'object'
+    ? (Array.isArray(targetOrigin) ? [] : transferOf(targetOrigin)) : transferOf(transfer));
   L.onMessage = function (source, origin, data) {
+    if (data !== null && typeof data === 'object' && PORT_CTL in data) { portControl(source, origin, data); return; }
     L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports: [], lastEventId: '' }, L.MessageEvent);
   };
   // `source`: the caller's window (another realm of this page), null for this one.
   L.windowPostMessage = function (message, targetOrigin, transfer, source) {
     let target = '/';
-    let list = [];
     if (targetOrigin !== null && typeof targetOrigin === 'object') {
       target = targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`;
-      list = Array.isArray(targetOrigin.transfer) ? targetOrigin.transfer : [];
     } else {
       target = targetOrigin === undefined ? '/' : `${targetOrigin}`;
-      list = Array.isArray(transfer) ? transfer : [];
     }
-    const origin = L.location.origin;
+    const origin = L.docOrigin();
+    let elsewhere = false;
     if (target !== '*' && target !== '/') {
       const p = N.urlParse(target, null);
       if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${target}' in a call to 'postMessage'.`, 'SyntaxError');
-      if (p[10] !== origin) return;
+      elsewhere = p[10] !== origin;
     }
-    const data = cloneValue(message);
-    const ports = list.filter((x) => x instanceof MessagePort);
+    // The transfer happens even when the message is then dropped for its target origin.
+    const t = serializeWithTransfer(message, transferArg(targetOrigin, transfer), null, 'Window');
+    detachBuffers(t.buffers);
+    if (elsewhere) return;
     const src = source !== null && source !== undefined ? source : L.window;
     let srcOrigin = origin;
-    if (src !== L.window) { try { srcOrigin = src.location.origin; } catch (_) { /* keep ours */ } }
-    L.postTask(() => L.fire(L.window, 'message', { data, origin: srcOrigin, source: src, ports }, L.MessageEvent));
+    // (the document's origin, not the Location's: an about:srcdoc frame has its parent's)
+    if (src !== L.window) { try { srcOrigin = src.origin; } catch (_) { /* keep ours */ } }
+    L.postTask(() => L.fire(L.window, 'message', { data: t.data, origin: srcOrigin, source: src, ports: t.ports }, L.MessageEvent));
   };
+
+  // ---------------------------------------------------------------------------------------
+  // Ports across realms. Every frame is a realm of its own and a port's class keeps its state
+  // private, so a transferred port becomes a new port in the receiving realm and the two
+  // realms carry the channel between them:
+  //  - Frames of another origin are reached through N.framePost, which takes any frame path.
+  //    Port messages travel in envelopes (see PORT_CTL) that portControl unwraps on arrival;
+  //    the host just sees messages. A port is addressed by an id that its owner registered, and
+  //    only the frame it was handed to may use it.
+  //  - Same-origin frames hold each other's objects, so a foreign port is used through its
+  //    public API only (asLocalPort).
+  // The realm a port left keeps it as a stub (L.portDetach): a message posted to the old
+  // port is passed on, and what the new owner posts goes through the stub to the old peer.
+  // A channel whose ports both left therefore still runs through the realm that made it.
+  // ---------------------------------------------------------------------------------------
+  // Marks the envelopes. The key is a value that a page's own messages won't have; forging an
+  // envelope gains nothing, since the ports it names are only usable by their registered peer.
+  const PORT_CTL = '\u0001sharko:port';
+  const portReg = new Map(); // id -> { port, from, relay }: what a message with that id is for
+  const portIds = new WeakMap(); // port -> the ids registered for it
+  let idSalt = '', idCount = 0;
+  function newPortId() {
+    // Unique across documents of the same frame path (a navigated frame keeps its path)
+    if (idSalt === '') idSalt = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+    return `${idSalt}.${++idCount}`;
+  }
+  function registerPort(id, port, from, relay) {
+    portReg.set(id, { port, from: pathKey(from), relay });
+    const ids = portIds.get(port);
+    if (ids === undefined) portIds.set(port, [id]); else ids.push(id);
+  }
+  function unregisterPort(id) {
+    const e = portReg.get(id);
+    portReg.delete(id);
+    if (e === undefined) return;
+    const ids = portIds.get(e.port);
+    const i = ids === undefined ? -1 : ids.indexOf(id);
+    if (i >= 0) ids.splice(i, 1);
+  }
+  function forgetPort(port) {
+    const ids = portIds.get(port);
+    if (ids !== undefined) for (const id of ids.slice()) unregisterPort(id);
+  }
+  // A MessagePort of another realm of this page, as a port of this one.
+  const FOREIGN_PORTS = new WeakMap();
+  function asLocalPort(x) {
+    if (x instanceof MessagePort) return x;
+    let p = FOREIGN_PORTS.get(x);
+    if (p === undefined) {
+      p = new MessagePort(INTERNAL);
+      FOREIGN_PORTS.set(x, p);
+      L.portLink(p, { send: (data, ports) => x.postMessage(data, ports), close() { } });
+      x.addEventListener('message', (ev) => {
+        const orig = Array.from(ev.ports);
+        const ports = orig.map(asLocalPort);
+        L.portEnqueue(p, cloneMessage(ev.data, orig, ports), ports);
+      });
+      x.start();
+    }
+    return p;
+  }
+  // Moves `ports` to the frame at `dest`; returns their descriptions for the envelope. Undo
+  // steps are collected in `undo` and run if the envelope can't be sent.
+  function exportPorts(ports, dest, undo) {
+    return ports.map((port) => {
+      const id = newPortId(), relay = newPortId();
+      const st = L.portDetach(port, { send(data, moved) { portPost(dest, 'm', id, data, moved); } });
+      undo.push(st.undo);
+      if (st.closed) return { closed: true };
+      registerPort(relay, port, dest, true);
+      undo.push(() => unregisterPort(relay));
+      return {
+        id,
+        peer: relay,
+        queue: st.queue.map(([data, qports]) => ({ data, ports: exportPorts(qports, dest, undo), paths: qports.length === 0 ? [] : portPaths(data, qports) })),
+      };
+    });
+  }
+  // A port that came from the frame `from`. Its queue arrives with it.
+  function importPort(d, from) {
+    const port = new MessagePort(INTERNAL);
+    if (d === null || typeof d !== 'object' || d.closed === true || typeof d.id !== 'string' || typeof d.peer !== 'string' || portReg.has(d.id)) {
+      port.close();
+      return port;
+    }
+    L.portLink(port, {
+      send(data, ports) { portPost(from, 'm', d.peer, data, ports); },
+      close() { portPost(from, 'c', d.peer); },
+    });
+    registerPort(d.id, port, from, false);
+    if (Array.isArray(d.queue)) {
+      for (const m of d.queue) {
+        if (m === null || typeof m !== 'object') continue;
+        const ports = importPorts(m.ports, from);
+        L.portEnqueue(port, setPortPaths(m.data, m.paths, ports), ports);
+      }
+    }
+    return port;
+  }
+  const importPorts = (descs, from) => (Array.isArray(descs) ? descs.map((d) => importPort(d, from)) : []);
+  // A port-control message to the frame at `path`: 'm' delivers a message to the port `id`
+  // there (`ports` move with it), 'c' closes it.
+  function portPost(path, kind, id, data, ports) {
+    const undo = [];
+    try {
+      const list = ports === undefined ? [] : ports;
+      N.framePost(path, { [PORT_CTL]: kind, id, data, ports: exportPorts(list, path, undo), paths: list.length === 0 ? [] : portPaths(data, list) }, '*');
+    } catch (e) {
+      for (const f of undo.reverse()) f();
+      // (a close that can't be sent needs no report)
+      if (kind !== 'c') throw L.fromNative(e);
+    }
+  }
+  // An envelope from the frame at path `source`.
+  function portControl(source, origin, d) {
+    const kind = d[PORT_CTL];
+    if (kind === 'w') {
+      // window.postMessage that transferred ports
+      const ports = importPorts(d.ports, source);
+      const data = setPortPaths(d.data, d.paths, ports);
+      L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports, lastEventId: '' }, L.MessageEvent);
+      return;
+    }
+    const e = typeof d.id === 'string' ? portReg.get(d.id) : undefined;
+    if (e === undefined || e.from !== pathKey(source)) return;
+    if (kind === 'm') {
+      const ports = importPorts(d.ports, source);
+      const data = setPortPaths(d.data, d.paths, ports);
+      // A stub relays what its new owner posts to the peer the port had.
+      if (e.relay) L.portSend(e.port, data, ports); else L.portEnqueue(e.port, data, ports);
+    } else if (kind === 'c') {
+      if (e.relay) { L.portPeerClosed(e.port); forgetPort(e.port); } else { unregisterPort(d.id); L.portUnlink(e.port); }
+    }
+  }
 
   // =======================================================================================
   // UTF-8 helpers (JS; used for URL encoding, multipart bodies, ...)
@@ -720,7 +1180,7 @@
     }
     static createObjectURL(obj) {
       if (!(obj instanceof Blob) && !(L.MediaSource && obj instanceof L.MediaSource)) throw new TypeError("Failed to execute 'createObjectURL' on 'URL': Overload resolution failed.");
-      const origin = L.location ? L.location.origin : 'null';
+      const origin = L.docOrigin();
       const url = 'blob:' + (origin === 'null' ? 'null' : origin) + '/' + randomUUID();
       blobURLs.set(url, obj);
       if (typeof N.registerBlobURL === 'function') {
@@ -1939,7 +2399,7 @@
   const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
   // `initiator` ('fetch', 'xmlhttprequest'): record a PerformanceResourceTiming entry. The
   // first downloaded bytes (a progress report) stand in for responseStart.
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator) {
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator, dest) {
     const reqId = nextReqId++;
     if (initiator !== undefined) {
       const timing = { start: N.now(), firstByte: 0 };
@@ -1956,7 +2416,7 @@
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
-      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function');
+      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function', dest || '');
     } catch (e) {
       pendingFetches.delete(reqId);
       fetchProgress.delete(reqId);
@@ -2031,7 +2491,7 @@
         fail(); return;
       }
       if (scheme !== 'http' && scheme !== 'https' && scheme !== 'file') { fail(); return; }
-      const docOrigin = L.location.origin;
+      const docOrigin = L.docOrigin();
       const sameOrigin = originOf(url) === docOrigin;
       if (d.mode === 'same-origin' && !sameOrigin) { fail(); return; }
       const b = bodies.get(request);
@@ -2190,7 +2650,7 @@
         } else flat.push(n, v);
       }
       if (!hasCT && ctype !== null) flat.push('Content-Type', ctype);
-      const mode = originOf(s.url) === L.location.origin ? 'same-origin' : 'cors';
+      const mode = 'cors'; // XHR is always a cors-mode request (Sec-Fetch-Mode: cors, even same-origin)
       if (!s.async) { this.#sendSync(flat, bytes, mode); return; }
       s.send = true;
       s.error = false;
@@ -2529,7 +2989,7 @@
       super();
       const fail = (msg, name) => new DOMException(`Failed to construct 'WebSocket': ${msg}`, name || 'SyntaxError');
       if (arguments.length === 0) throw new TypeError("Failed to construct 'WebSocket': 1 argument required, but only 0 present.");
-      const base = L.location ? L.location.href : null;
+      const base = L.documentURL();
       const p = N.urlParse(`${url}`, base);
       if (p === null) throw fail(`The URL '${url}' is invalid.`);
       let href = p[0];
@@ -2537,7 +2997,7 @@
       if (scheme === 'http' || scheme === 'https') { href = (scheme === 'http' ? 'ws' : 'wss') + href.slice(scheme.length); scheme = scheme === 'http' ? 'ws' : 'wss'; }
       if (scheme !== 'ws' && scheme !== 'wss') throw fail(`The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '${scheme}' is not allowed.`);
       if (href.includes('#')) throw fail(`The URL contains a fragment identifier ('${href.slice(href.indexOf('#') + 1)}'). Fragment identifiers are not allowed in WebSocket URLs.`);
-      if (scheme === 'ws' && L.location && L.location.protocol === 'https:') {
+      if (scheme === 'ws' && L.docProtocol() === 'https:') {
         const host = N.urlParse(href, null);
         const h = host === null ? '' : host[5];
         if (h !== 'localhost' && h !== '127.0.0.1' && h !== '[::1]') {
@@ -2557,7 +3017,7 @@
       this.#id = nextSocketId++;
       liveSockets.set(this.#id, this);
       let ok = false;
-      try { ok = N.wsOpen(this.#id, href, list, L.location ? L.location.origin : 'null'); } catch (_) { ok = false; }
+      try { ok = N.wsOpen(this.#id, href, list, L.docOrigin()); } catch (_) { ok = false; }
       if (!ok) {
         const id = this.#id;
         L.postTask(() => { L.onWebSocket(id, 'error', 'WebSocket is not supported here'); L.onWebSocket(id, 'close', 1006, '', false); });
@@ -2652,7 +3112,9 @@
     'BroadcastChannel', 'DOMException', 'crypto', 'Crypto', 'CryptoKey', 'SubtleCrypto', 'performance', 'console',
     'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'ReadableStream', 'ReadableStreamDefaultReader',
     'ReadableStreamDefaultController', 'WritableStream', 'TransformStream', 'TextEncoderStream', 'TextDecoderStream',
-    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBKeyRange', 'caches', 'isSecureContext', 'origin',
+    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBFactory', 'IDBDatabase', 'IDBObjectStore', 'IDBIndex',
+    'IDBTransaction', 'IDBRequest', 'IDBOpenDBRequest', 'IDBCursor', 'IDBCursorWithValue', 'IDBKeyRange', 'IDBRecord',
+    'IDBVersionChangeEvent', 'caches', 'isSecureContext', 'origin',
     'requestAnimationFrame', 'cancelAnimationFrame', 'ImageData', 'createImageBitmap', 'OffscreenCanvas'];
   const WORKER_BRAND = Symbol('WorkerGlobalScope');
   class WorkerScopeTarget extends EventTarget { }
@@ -2680,10 +3142,10 @@
       super();
       if (arguments.length === 0) throw new TypeError("Failed to construct 'Worker': 1 argument required, but only 0 present.");
       if (typeof N.workerCreate !== 'function') throw new DOMException("Failed to construct 'Worker': Workers are not supported.", 'NotSupportedError');
-      const p = N.urlParse(`${url}`, L.location ? L.location.href : null);
+      const p = N.urlParse(`${url}`, L.documentURL());
       if (p === null) throw new DOMException(`Failed to construct 'Worker': The URL '${url}' is invalid.`, 'SyntaxError');
       const href = p[0];
-      const pageOrigin = L.location ? L.location.origin : 'null';
+      const pageOrigin = L.docOrigin();
       if (p[1] !== 'blob:' && p[1] !== 'data:' && p[10] !== pageOrigin) {
         throw new DOMException(`Failed to construct 'Worker': Script at '${href}' cannot be accessed from origin '${pageOrigin}'.`, 'SecurityError');
       }
@@ -2761,7 +3223,7 @@
         try { v = win[k]; } catch (_) { v = undefined; }
         if (v !== undefined) define(k, v);
       }
-      const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.location ? L.location.href : null)); return q === null ? `${u}` : q[0]; };
+      const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.documentURL())); return q === null ? `${u}` : q[0]; };
       define('self', g);
       define('name', this.#name);
       define('navigator', win.navigator);
@@ -2853,6 +3315,75 @@
     TextDecoder, Blob, File, FileList, FileReader, FormData, ReadableStream, ReadableStreamDefaultReader,
     ReadableStreamDefaultController, WritableStream, TransformStream, Headers, Request, Response, XMLHttpRequest,
     XMLHttpRequestUpload, XMLHttpRequestEventTarget, IdleDeadline })) L.expose(k, v);
+
+  // =======================================================================================
+  // Cookie Store API (https://cookiestore.spec.whatwg.org), secure contexts. A view of the
+  // document's cookies (what document.cookie shows: no HttpOnly ones) through promises.
+  // =======================================================================================
+  function cookieArgs(method, args, needValue) {
+    const a = args[0];
+    if (a !== null && typeof a === 'object') {
+      const o = { name: a.name === undefined ? undefined : `${a.name}` };
+      for (const k of ['value', 'path', 'domain', 'sameSite']) if (a[k] !== undefined) o[k] = `${a[k]}`;
+      if (a.expires !== undefined && a.expires !== null) o.expires = Number(a.expires);
+      if (a.partitioned) o.partitioned = true;
+      if (needValue && (o.name === undefined || o.value === undefined)) throw new TypeError(`Failed to execute '${method}' on 'CookieStore': Required member is undefined.`);
+      return o;
+    }
+    if (args.length === 0) return {};
+    const o = { name: `${a}` };
+    if (needValue) {
+      if (args.length < 2) throw new TypeError(`Failed to execute '${method}' on 'CookieStore': 2 arguments required, but only 1 present.`);
+      o.value = `${args[1]}`;
+    }
+    return o;
+  }
+  class CookieStore extends EventTarget {
+    constructor(key) { if (key !== INTERNAL) throw new TypeError('Illegal constructor'); super(); }
+    #list(o) {
+      const out = [];
+      for (const part of N.getCookie().split(';')) {
+        const t = part.trim();
+        if (t === '') continue;
+        const i = t.indexOf('=');
+        const name = i < 0 ? '' : t.slice(0, i), value = i < 0 ? t : t.slice(i + 1);
+        if (o.name === undefined || o.name === name) out.push({ name, value });
+      }
+      return out;
+    }
+    get(...args) {
+      try { const o = cookieArgs('get', args, false); if (args.length === 0) throw new TypeError("Failed to execute 'get' on 'CookieStore': At least one of name or url is required."); return Promise.resolve(this.#list(o)[0] || null); } catch (e) { return Promise.reject(e); }
+    }
+    getAll(...args) {
+      try { return Promise.resolve(this.#list(cookieArgs('getAll', args, false))); } catch (e) { return Promise.reject(e); }
+    }
+    set(...args) {
+      try {
+        const o = cookieArgs('set', args, true);
+        const enc = (v) => v.replace(/[;\u0000-\u001f\u007f]/g, '');
+        let c = `${enc(o.name)}=${enc(o.value)}; path=${o.path === undefined ? '/' : o.path}`;
+        if (o.domain !== undefined) c += `; domain=${o.domain}`;
+        if (o.expires !== undefined) c += `; expires=${new Date(o.expires).toUTCString()}`;
+        c += `; samesite=${(o.sameSite || 'strict').toLowerCase()}`;
+        if (L.location && L.location.protocol === 'https:') c += '; secure';
+        N.setCookie(c);
+        return Promise.resolve();
+      } catch (e) { return Promise.reject(e); }
+    }
+    delete(...args) {
+      try {
+        const o = cookieArgs('delete', args, false);
+        if (o.name === undefined) throw new TypeError("Failed to execute 'delete' on 'CookieStore': Required member is undefined.");
+        let c = `${o.name}=; path=${o.path === undefined ? '/' : o.path}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        if (o.domain !== undefined) c += `; domain=${o.domain}`;
+        N.setCookie(c);
+        return Promise.resolve();
+      } catch (e) { return Promise.reject(e); }
+    }
+  }
+  L.defineEventHandlers(CookieStore.prototype, ['onchange']);
+  L.expose('CookieStore', CookieStore);
+  L.cookieStore = new CookieStore(INTERNAL);
 
   // =======================================================================================
   // crypto
@@ -3609,6 +4140,7 @@
     try {
       if (isNode(v)) return inspectNode(v);
       if (v === L.window) return 'Window';
+      if (REMOTE.has(v)) return REMOTE.get(v).kind;
       if (v instanceof Error || (typeof v.stack === 'string' && typeof v.message === 'string' && 'name' in v)) return L.errToString(v);
       if (v instanceof Date) return isNaN(v) ? 'Invalid Date' : v.toISOString();
       if (v instanceof RegExp) return String(v);
@@ -3781,6 +4313,15 @@
   // =======================================================================================
   // navigator
   // =======================================================================================
+  // Whether this document is a secure context (https, file, localhost); frames without a URL of
+  // their own (about:blank, srcdoc) inherit it because the layer's document URL is the parent's.
+  L.isSecureContext = function () {
+    const p = N.urlParse(L.documentURL(), null);
+    if (p === null) return false;
+    if (p[1] === 'https:' || p[1] === 'wss:' || p[1] === 'file:') return true;
+    const h = p[5];
+    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost');
+  };
   let uaCache = null;
   function ua() { if (uaCache === null) uaCache = `${N.userAgent()}`; return uaCache; }
   function chromeVersion() { const m = /Chrome\/(\d+)(?:\.(\d+\.\d+\.\d+))?/.exec(ua()); return m ? [m[1], m[1] + '.' + (m[2] || '0.0.0')] : ['130', '130.0.0.0']; }
@@ -3846,17 +4387,41 @@
     get state() { return this.#state; }
   }
   L.defineEventHandlers(PermissionStatus.prototype, ['onchange']);
-  const PERMISSION_NAMES = ['accelerometer', 'background-fetch', 'background-sync', 'camera', 'clipboard-read', 'clipboard-write',
-    'display-capture', 'geolocation', 'gyroscope', 'local-fonts', 'magnetometer', 'microphone', 'midi', 'notifications',
-    'payment-handler', 'persistent-storage', 'push', 'screen-wake-lock', 'storage-access', 'top-level-storage-access',
-    'window-management', 'idle-detection', 'periodic-background-sync', 'system-wake-lock', 'nfc', 'speaker-selection', 'captured-surface-control', 'keyboard-lock', 'pointer-lock'];
+  L.orderKeys(PermissionStatus.prototype, ['name', 'state', 'onchange', 'constructor']);
+  // Chrome's answers for a profile without grants: `granted` for the permissions that need no
+  // prompt (or that only check a user gesture later), `prompt` for the others. In an insecure
+  // context everything is `denied` (Chrome cannot prompt there).
+  const PERMISSION_STATES = {
+    'accelerometer': 'granted', 'background-fetch': 'granted', 'background-sync': 'granted', 'camera': 'prompt',
+    'clipboard-read': 'prompt', 'clipboard-write': 'granted', 'display-capture': 'prompt', 'geolocation': 'prompt',
+    'gyroscope': 'granted', 'local-fonts': 'prompt', 'magnetometer': 'granted', 'microphone': 'prompt', 'midi': 'prompt',
+    'notifications': 'prompt', 'payment-handler': 'granted', 'persistent-storage': 'prompt', 'push': 'prompt',
+    'screen-wake-lock': 'granted', 'storage-access': 'granted', 'top-level-storage-access': 'prompt',
+    'window-management': 'prompt', 'idle-detection': 'prompt', 'periodic-background-sync': 'denied',
+    'captured-surface-control': 'prompt', 'keyboard-lock': 'granted', 'pointer-lock': 'granted',
+  };
+  // Names of the enum that Chrome rejects with a feature message (the feature is off).
+  const PERMISSION_DISABLED = {
+    'system-wake-lock': 'System Wake Lock is not enabled.', 'nfc': 'Web NFC is not enabled.',
+    'speaker-selection': 'The Speaker Selection API is not enabled.', 'ambient-light-sensor': 'GenericSensorExtraClasses flag is not enabled.',
+  };
   class Permissions {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     query(desc) {
-      if (desc === null || typeof desc !== 'object') return L.rejectedPromise(new TypeError("Failed to execute 'query' on 'Permissions': parameter 1 is not of type 'Object'."));
-      const name = `${desc.name}`;
-      if (!PERMISSION_NAMES.includes(name)) return L.rejectedPromise(new TypeError(`Failed to execute 'query' on 'Permissions': Failed to read the 'name' property from 'PermissionDescriptor': The provided value '${name}' is not a valid enum value of type PermissionName.`));
-      const st = name === 'clipboard-write' ? 'granted' : 'prompt';
+      const fail = (msg, type = TypeError) => L.rejectedPromise(type === TypeError ? new TypeError(`Failed to execute 'query' on 'Permissions': ${msg}`) : new DOMException(`Failed to execute 'query' on 'Permissions': ${msg}`, 'NotSupportedError'));
+      if (arguments.length === 0) return fail('1 argument required, but only 0 present.');
+      if (desc === null || typeof desc !== 'object') return fail("parameter 1 is not of type 'object'.");
+      let name;
+      try { name = desc.name; } catch (e) { return L.rejectedPromise(e); }
+      if (name === undefined) return fail("Failed to read the 'name' property from 'PermissionDescriptor': Required member is undefined.");
+      name = `${name}`;
+      if (Object.prototype.hasOwnProperty.call(PERMISSION_DISABLED, name)) return fail(PERMISSION_DISABLED[name]);
+      if (!Object.prototype.hasOwnProperty.call(PERMISSION_STATES, name)) return fail(`Failed to read the 'name' property from 'PermissionDescriptor': The provided value '${name}' is not a valid enum value of type PermissionName.`);
+      if (name === 'push' && desc.userVisibleOnly !== true) return fail("Push Permission without userVisibleOnly:true isn't supported yet.", DOMException);
+      if (name === 'top-level-storage-access' && typeof desc.requestedOrigin !== 'string') return fail('The requested origin is invalid.');
+      let st = PERMISSION_STATES[name];
+      if (!L.isSecureContext()) st = 'denied';
+      else if (name === 'notifications') st = notificationPermission() === 'default' ? 'prompt' : 'denied';
       return L.resolvedPromise(new PermissionStatus(INTERNAL, name, st));
     }
   }
@@ -3884,21 +4449,48 @@
     writeText(data) { this.#text = `${data}`; if (typeof N.clipboardWrite === 'function') { try { N.clipboardWrite(this.#text); } catch (_) { } } return L.resolvedPromise(undefined); }
     write(items) { return L.resolvedPromise(undefined); }
   }
+  // The brand list of `navigator.userAgentData` / Sec-CH-UA, generated like Chromium's
+  // `GenerateBrandVersionList` (components/embedder_support/user_agent_utils.cc): the "GREASE"
+  // brand and its version depend on the major version, and its position in the list on
+  // `major % 6`. Chrome 140 gives Chromium, "Not=A?Brand" 24, Google Chrome.
+  const GREASE_CHARS = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
+  const GREASE_VERSIONS = ['8', '99', '24'];
+  const BRAND_ORDERS = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  function brandList(major, full) {
+    const seed = Number(major) | 0;
+    const gv = GREASE_VERSIONS[seed % 3];
+    const grease = ['Not' + GREASE_CHARS[seed % 11] + 'A' + GREASE_CHARS[(seed + 1) % 11] + 'Brand', full ? gv + '.0.0.0' : gv];
+    const list = new Array(3);
+    const order = BRAND_ORDERS[seed % 6];
+    list[order[0]] = grease;
+    list[order[1]] = ['Chromium', full ? full : major];
+    list[order[2]] = ['Google Chrome', full ? full : major];
+    return list.map((b) => Object.freeze({ brand: b[0], version: b[1] }));
+  }
+  L.brandList = brandList;
+  // The build of the claimed Chrome (the User-Agent string only carries `140.0.0.0`).
+  const CHROME_BUILDS = { 140: '140.0.7339.207' };
+  function chromeFullVersion() {
+    const [major, full] = chromeVersion();
+    return full.endsWith('.0.0.0') && CHROME_BUILDS[major] !== undefined ? CHROME_BUILDS[major] : full;
+  }
   class NavigatorUAData {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
-    get brands() { const [v] = chromeVersion(); return Object.freeze([Object.freeze({ brand: 'Chromium', version: v }), Object.freeze({ brand: 'Google Chrome', version: v }), Object.freeze({ brand: 'Not?A_Brand', version: '99' })]); }
+    get brands() { return Object.freeze(brandList(chromeVersion()[0], null)); }
     get mobile() { return false; }
     get platform() { return 'Windows'; }
     getHighEntropyValues(hints) {
-      const [v, full] = chromeVersion();
+      if (arguments.length === 0) return L.rejectedPromise(new TypeError("Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': 1 argument required, but only 0 present."));
+      const [major] = chromeVersion();
+      const full = chromeFullVersion();
       const all = {
-        brands: this.brands, mobile: false, platform: 'Windows', architecture: 'x86', bitness: '64', model: '',
-        platformVersion: '15.0.0', uaFullVersion: full, wow64: false, formFactors: ['Desktop'],
-        fullVersionList: Object.freeze([{ brand: 'Chromium', version: full }, { brand: 'Google Chrome', version: full }, { brand: 'Not?A_Brand', version: '99.0.0.0' }]),
+        architecture: 'x86', bitness: '64', model: '', platformVersion: '15.0.0', uaFullVersion: full, wow64: false,
+        formFactors: ['Desktop'], fullVersionList: Object.freeze(brandList(major, full)),
       };
-      const out = { brands: all.brands, mobile: false, platform: 'Windows' };
-      for (const h of Array.from(hints || [], String)) if (h in all) out[h] = all[h];
-      void v;
+      const out = { brands: this.brands, mobile: false, platform: 'Windows' };
+      let list;
+      try { list = Array.from(hints, String); } catch (e) { return L.rejectedPromise(new TypeError("Failed to execute 'getHighEntropyValues' on 'NavigatorUAData': The provided value cannot be converted to a sequence.")); }
+      for (const h of list) if (h in all) out[h] = all[h];
       return L.resolvedPromise(out);
     }
     toJSON() { return { brands: this.brands, mobile: false, platform: 'Windows' }; }
@@ -3911,6 +4503,7 @@
     get saveData() { return false; }
   }
   L.defineEventHandlers(NetworkInformation.prototype, ['onchange']);
+  L.orderKeys(NetworkInformation.prototype, ['onchange', 'effectiveType', 'rtt', 'downlink', 'saveData', 'constructor']);
   class DeprecatedStorageQuota {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     queryUsageAndQuota(success, error) {
@@ -3921,19 +4514,23 @@
       L.microtask(() => { try { if (typeof success === 'function') success(Number(bytes) || 0); } catch (e) { L.reportException(e); } });
     }
   }
-  // Notifications: never granted (no permission prompt), like a denied site in Chrome.
+  // Notifications: never granted (there is no permission prompt). As in Chrome without a grant
+  // the permission is `default` in a secure context (`denied` in an insecure one), and
+  // requestPermission() resolves `denied` without changing it (headless Chrome, no UI).
+  function notificationPermission() { return L.isSecureContext() ? 'default' : 'denied'; }
   class Notification extends EventTarget {
     #title; #options;
-    constructor(title, options) {
+    constructor(title, options = undefined) {
       super();
       if (arguments.length === 0) throw new TypeError("Failed to construct 'Notification': 1 argument required, but only 0 present.");
       this.#title = `${title}`;
       this.#options = options !== null && typeof options === 'object' ? options : {};
       L.microtask(() => L.fire(this, 'error', {}));
     }
-    static get permission() { return 'denied'; }
+    static get permission() { return notificationPermission(); }
     static get maxActions() { return 2; }
-    static requestPermission(callback) {
+    static requestPermission(callback = undefined) {
+      if (callback !== undefined && typeof callback !== 'function') return L.rejectedPromise(new TypeError("Failed to execute 'requestPermission' on 'Notification': parameter 1 is not of type 'Function'."));
       const p = L.resolvedPromise('denied');
       if (typeof callback === 'function') L.promiseThen.call(p, (v) => { try { callback(v); } catch (e) { L.reportException(e); } });
       return p;
@@ -3956,6 +4553,8 @@
     close() { }
   }
   L.defineEventHandlers(Notification.prototype, ['onclick', 'onshow', 'onerror', 'onclose']);
+  L.orderKeys(Notification.prototype, ['onclick', 'onshow', 'onerror', 'onclose', 'title', 'dir', 'lang', 'body', 'tag', 'icon', 'badge',
+    'vibrate', 'timestamp', 'renotify', 'silent', 'requireInteraction', 'data', 'actions', 'close', 'image', 'constructor']);
   class StorageManager {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     estimate() { return L.resolvedPromise({ quota: 299977904946, usage: 0, usageDetails: {} }); }
@@ -4055,6 +4654,44 @@
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     isInputPending() { return false; }
   }
+  // navigator.mediaDevices: the machine has no capture devices, so enumerateDevices() is empty
+  // and every capture request fails like it does on a computer without camera and microphone.
+  const SUPPORTED_CONSTRAINTS = ['aspectRatio', 'autoGainControl', 'brightness', 'channelCount', 'colorTemperature', 'contrast',
+    'deviceId', 'displaySurface', 'echoCancellation', 'exposureCompensation', 'exposureMode', 'exposureTime', 'facingMode',
+    'focusDistance', 'focusMode', 'frameRate', 'groupId', 'height', 'iso', 'latency', 'noiseSuppression', 'pan',
+    'pointsOfInterest', 'resizeMode', 'restrictOwnAudio', 'sampleRate', 'sampleSize', 'saturation', 'sharpness',
+    'suppressLocalAudioPlayback', 'tilt', 'torch', 'voiceIsolation', 'whiteBalanceMode', 'width', 'zoom'];
+  function wantsMedia(c) {
+    if (c === undefined || c === null) return false;
+    if (typeof c !== 'object') return false;
+    const t = (v) => v !== undefined && v !== null && v !== false && v !== 0 && v !== '';
+    return t(c.audio) || t(c.video);
+  }
+  class MediaDevices extends EventTarget {
+    constructor(token) { if (token !== INTERNAL) throw L.illegal(); super(); }
+    enumerateDevices() { return L.resolvedPromise([]); }
+    getSupportedConstraints() { const o = {}; for (const k of SUPPORTED_CONSTRAINTS) o[k] = true; return o; }
+    getUserMedia(constraints = undefined) {
+      if (constraints !== undefined && constraints !== null && typeof constraints !== 'object') return L.rejectedPromise(new TypeError("Failed to execute 'getUserMedia' on 'MediaDevices': The provided value is not of type 'MediaStreamConstraints'."));
+      if (!wantsMedia(constraints)) return L.rejectedPromise(new TypeError("Failed to execute 'getUserMedia' on 'MediaDevices': At least one of audio and video must be requested"));
+      return L.rejectedPromise(new DOMException('Requested device not found', 'NotFoundError'));
+    }
+    getDisplayMedia(options = undefined) {
+      if (!navigator.userActivation.isActive) return L.rejectedPromise(new DOMException('getDisplayMedia requires transient activation from a user gesture.', 'NotAllowedError'));
+      return L.rejectedPromise(new DOMException('Permission denied', 'NotAllowedError'));
+    }
+  }
+  L.defineEventHandlers(MediaDevices.prototype, ['ondevicechange']);
+  L.orderKeys(MediaDevices.prototype, ['ondevicechange', 'enumerateDevices', 'getSupportedConstraints', 'getUserMedia', 'getDisplayMedia', 'constructor']);
+  // The callback form (`navigator.getUserMedia(constraints, success, error)`), still present in Chrome.
+  function legacyGetUserMedia(method, args) {
+    if (args.length < 3) throw new TypeError(`Failed to execute '${method}' on 'Navigator': 3 arguments required, but only ${args.length} present.`);
+    const error = args[2];
+    if (typeof args[1] !== 'function') throw new TypeError(`Failed to execute '${method}' on 'Navigator': parameter 2 is not of type 'Function'.`);
+    if (typeof error !== 'function') throw new TypeError(`Failed to execute '${method}' on 'Navigator': parameter 3 is not of type 'Function'.`);
+    const e = wantsMedia(args[0]) ? new DOMException('Requested device not found', 'NotFoundError') : new TypeError('At least one of audio and video must be requested');
+    L.postTask(() => L.safeCall(error, undefined, [e]));
+  }
   class Navigator {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
     get userAgent() { return ua(); }
@@ -4066,7 +4703,6 @@
     get vendor() { return 'Google Inc.'; }
     get vendorSub() { return ''; }
     get platform() { return 'Win32'; }
-    get oscpu() { return undefined; }
     get language() { return 'de-DE'; }
     get languages() { return lazy('languages', () => Object.freeze(['de-DE', 'de', 'en-US', 'en'])); }
     get onLine() { return true; }
@@ -4092,8 +4728,11 @@
     get locks() { return lazy('locks', () => new LockManager(INTERNAL)); }
     get userActivation() { return lazy('userActivation', () => new UserActivation(INTERNAL)); }
     get scheduling() { return lazy('scheduling', () => new Scheduling(INTERNAL)); }
-    // No `serviceWorker` / `mediaDevices` members (like Chrome in an insecure context):
-    // sites test `'serviceWorker' in navigator` and then call methods on it.
+    // No `serviceWorker` member: sites test `'serviceWorker' in navigator` and then call methods on it.
+    // `mediaDevices` is a device-less MediaDevices (no camera, no microphone, nothing to enumerate).
+    get mediaDevices() { return lazy('mediaDevices', () => new MediaDevices(INTERNAL)); }
+    getUserMedia(constraints, success, error) { return legacyGetUserMedia('getUserMedia', arguments); }
+    webkitGetUserMedia(constraints, success, error) { return legacyGetUserMedia('webkitGetUserMedia', arguments); }
     sendBeacon(url, data) {
       const p = N.urlParse(L.toUSV(url), L.baseURL());
       if (p === null) throw new TypeError(`Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported.`);
@@ -4118,8 +4757,68 @@
       }));
     }
   }
+  // Blink's order (V8 installs `constructor` after the members that are always there and before
+  // the [SecureContext] ones); members this engine does not have are left out.
+  L.orderKeys(Navigator.prototype, ['vendorSub', 'productSub', 'vendor', 'maxTouchPoints', 'scheduling', 'userActivation', 'geolocation',
+    'doNotTrack', 'connection', 'plugins', 'mimeTypes', 'pdfViewerEnabled', 'webkitTemporaryStorage', 'webkitPersistentStorage',
+    'hardwareConcurrency', 'cookieEnabled', 'appCodeName', 'appName', 'appVersion', 'platform', 'product', 'userAgent', 'language',
+    'languages', 'onLine', 'webdriver', 'getGamepads', 'javaEnabled', 'sendBeacon', 'vibrate', 'constructor', 'clipboard',
+    'mediaDevices', 'storage', 'deviceMemory', 'userAgentData', 'locks', 'permissions', 'getBattery', 'getUserMedia',
+    'webkitGetUserMedia', 'registerProtocolHandler', 'unregisterProtocolHandler']);
   const navigator = new Navigator(INTERNAL);
   L.navigator = navigator;
+
+  // =======================================================================================
+  // window.chrome
+  // =======================================================================================
+  // What a Chrome page without extension access sees (there is no `runtime`): `loadTimes()` and
+  // `csi()` (deprecated page timing, derived from the same milestones as performance.timing) and
+  // `app`, the packaged-app stub of a browser tab. Shapes and function names follow Chromium:
+  // loadTimes/csi are anonymous constructor-like functions, the `app` members are methods.
+  // `rel`: a milestone of L.milestones (ms since the time origin; undefined: has not happened yet)
+  function epochMs(rel) { return rel === undefined ? 0 : Math.round(N.timeOrigin()) + Math.round(rel); }
+  function loadTimes() {
+    const origin = Math.round(N.timeOrigin());
+    const sec = (rel) => epochMs(rel) / 1000;
+    const m = L.milestones;
+    const https = /^https:/i.test(L.documentURL());
+    const web = /^https?:/i.test(L.documentURL());
+    return {
+      requestTime: origin / 1000,
+      startLoadTime: origin / 1000,
+      commitLoadTime: sec(m.responseEnd || 0),
+      finishDocumentLoadTime: sec(m.domContentLoadedEventEnd),
+      finishLoadTime: sec(m.loadEventEnd),
+      firstPaintTime: L.firstFrameAt === 0 ? 0 : sec(L.firstFrameAt),
+      firstPaintAfterLoadTime: 0,
+      navigationType: 'Other',
+      wasFetchedViaSpdy: false,
+      wasNpnNegotiated: https,
+      npnNegotiatedProtocol: https ? 'http/1.1' : '',
+      wasAlternateProtocolAvailable: false,
+      connectionInfo: web ? 'http/1.1' : 'unknown',
+    };
+  }
+  function csi() {
+    const origin = Math.round(N.timeOrigin());
+    return { startE: origin, onloadT: epochMs(L.milestones.loadEventEnd), pageT: N.now(), tran: 15 };
+  }
+  // Anonymous, like Chromium's (`chrome.loadTimes.name === ''`, prints as `function () { [native code] }`).
+  Object.defineProperty(loadTimes, 'name', { value: '', configurable: true });
+  Object.defineProperty(csi, 'name', { value: '', configurable: true });
+  const chromeApp = {
+    isInstalled: false,
+    ...{
+      getDetails() { return null; },
+      getIsInstalled() { return false; },
+      installState() { const callback = arguments[0]; if (typeof callback === 'function') L.postTask(() => L.safeCall(callback, undefined, ['not_installed'])); },
+      runningState() { return 'cannot_run'; },
+    },
+    InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+    RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+  };
+  // (installState's callback receives the state asynchronously in Chrome.)
+  L.chrome = { loadTimes, csi, app: chromeApp };
 
   // =======================================================================================
   // screen / visualViewport
@@ -4169,6 +4868,8 @@
   // Location / History
   // =======================================================================================
   const locCache = { url: null, p: null };
+  // The host's URL of this document, split (see L.documentURL): what the layer itself needs
+  // (origin checks, resolving, storage keys). The Location object shows exposedParts().
   function curParts() {
     const u = L.documentURL();
     if (u !== locCache.url) {
@@ -4176,6 +4877,19 @@
       locCache.p = N.urlParse(u, null) || [u, ':', '', '', '', '', '', '', '', '', 'null'];
     }
     return locCache.p;
+  }
+  // The origin of the document (an about:blank frame has its parent's, unlike its Location).
+  L.docOrigin = function () { return curParts()[10]; };
+  L.docProtocol = function () { return curParts()[1]; };
+  const exposedCache = { url: null, p: null };
+  function exposedParts() {
+    const u = L.exposedURL();
+    if (u === L.documentURL()) return curParts();
+    if (u !== exposedCache.url) {
+      exposedCache.url = u;
+      exposedCache.p = N.urlParse(u, null) || [u, ':', '', '', '', '', '', '', '', '', 'null'];
+    }
+    return exposedCache.p;
   }
   function stripHash(u) { const i = u.indexOf('#'); return i < 0 ? u : u.slice(0, i); }
   L.lastURL = null;
@@ -4219,22 +4933,22 @@
   L.navigateTo = navigateTo;
   class Location {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
-    get href() { return L.documentURL(); }
+    get href() { return L.exposedURL(); }
     set href(v) { navigateTo(`${v}`, false, 'href'); }
-    get origin() { return curParts()[10]; }
-    get protocol() { return curParts()[1]; }
+    get origin() { return exposedParts()[10]; }
+    get protocol() { return exposedParts()[1]; }
     set protocol(v) { setLocPart('protocol', v); }
-    get host() { return curParts()[4]; }
+    get host() { return exposedParts()[4]; }
     set host(v) { setLocPart('host', v); }
-    get hostname() { return curParts()[5]; }
+    get hostname() { return exposedParts()[5]; }
     set hostname(v) { setLocPart('hostname', v); }
-    get port() { return curParts()[6]; }
+    get port() { return exposedParts()[6]; }
     set port(v) { setLocPart('port', v); }
-    get pathname() { return curParts()[7]; }
+    get pathname() { return exposedParts()[7]; }
     set pathname(v) { setLocPart('pathname', v); }
-    get search() { return curParts()[8]; }
+    get search() { return exposedParts()[8]; }
     set search(v) { setLocPart('search', v); }
-    get hash() { return curParts()[9]; }
+    get hash() { return exposedParts()[9]; }
     set hash(v) {
       const u = new URL(L.documentURL());
       let s = `${v}`;
@@ -4247,7 +4961,7 @@
     assign(url) { navigateTo(`${url}`, false, 'assign'); }
     replace(url) { navigateTo(`${url}`, true, 'replace'); }
     reload() { N.reload(); }
-    toString() { return L.documentURL(); }
+    toString() { return L.exposedURL(); }
     get ancestorOrigins() { return lazy('ancestorOrigins', () => L.makeDOMStringList([])); }
   }
   function setLocPart(part, v) {
@@ -4267,7 +4981,12 @@
     *[Symbol.iterator]() { yield* this.#list; }
   }
   L.makeIndexed(DOMStringList.prototype, (o, i) => L.dslItems(o)[i], 8);
-  L.makeDOMStringList = (list) => new DOMStringList(INTERNAL, list);
+  // The indexed properties are own properties of the list (not only prototype getters), as for a platform object.
+  L.makeDOMStringList = (list) => {
+    const d = new DOMStringList(INTERNAL, list);
+    for (let i = 0; i < list.length; i++) Object.defineProperty(d, i, { value: list[i], enumerable: true, configurable: true });
+    return d;
+  };
 
   // states/urls are keyed by session history index (N.historyIndex()); urls let us notice a
   // new entry created by a Rust-side fragment navigation at an index that had a (pruned) state.
@@ -4423,13 +5142,115 @@
     removeListener(cb) { if (cb !== null && cb !== undefined) this.removeEventListener('change', cb); }
   }
   L.defineEventHandlers(MediaQueryList.prototype, ['onchange']);
+  // The style engine answers the media features of Stylo's Servo build (width, height,
+  // orientation, resolution, hover, pointer, prefers-color-scheme, ...). The others make a
+  // query "unknown", i.e. false, although a screen browser has fixed answers for them: these
+  // are decided here, where a feature the engine does not know is replaced by a condition
+  // that is always true or false. (A feature the engine learns to answer is left to it.)
+  //   enum: [current value, in boolean context]     int: current value (min-/max- allowed)
+  const MQ_FEATURES = {
+    'color-gamut': { enum: 'srgb', values: ['srgb', 'p3', 'rec2020'], bool: true },
+    'display-mode': { enum: 'browser', values: ['fullscreen', 'standalone', 'minimal-ui', 'browser', 'picture-in-picture', 'window-controls-overlay'], bool: true },
+    'dynamic-range': { enum: 'standard', values: ['standard', 'high'], bool: false },
+    'forced-colors': { enum: 'none', values: ['none', 'active'], bool: false },
+    'prefers-contrast': { enum: 'no-preference', values: ['no-preference', 'more', 'less', 'custom'], bool: false },
+    'prefers-reduced-motion': { enum: 'no-preference', values: ['no-preference', 'reduce'], bool: false },
+    'prefers-reduced-transparency': { enum: 'no-preference', values: ['no-preference', 'reduce'], bool: false },
+    'scripting': { enum: 'enabled', values: ['none', 'initial-only', 'enabled'], bool: true },
+    'update': { enum: 'fast', values: ['none', 'slow', 'fast'], bool: true },
+    'overflow-block': { enum: 'scroll', values: ['none', 'scroll', 'paged'], bool: true },
+    'overflow-inline': { enum: 'scroll', values: ['none', 'scroll'], bool: true },
+    'color': { int: 8 },
+    'color-index': { int: 0 },
+    'monochrome': { int: 0 },
+    'grid': { int: 0, noRange: true },
+  };
+  const MQ_TRUE = '(width >= 0px)';
+  const MQ_FALSE = '(width < 0px)';
+  const mqNativeKnows = new Map();
+  function nativeKnowsFeature(name, f) {
+    let k = mqNativeKnows.get(name);
+    if (k === undefined) {
+      const probe = f.values !== undefined ? f.values.map((v) => `(${name}: ${v})`).join(', ') : `(min-${name}: 0)`;
+      try { k = !!N.matchMedia(probe); } catch (_) { k = false; }
+      mqNativeKnows.set(name, k);
+    }
+    return k;
+  }
+  function cmp(a, op, b) {
+    switch (op) {
+      case '<': return a < b; case '<=': return a <= b; case '>': return a > b; case '>=': return a >= b; default: return a === b;
+    }
+  }
+  const FLIP = { '<': '>', '<=': '>=', '>': '<', '>=': '<=', '=': '=' };
+  // The answer ('t' / 'f') for one `( ... )` condition of a media feature we decide, else null.
+  function shimCondition(inner) {
+    const t = inner.trim().toLowerCase();
+    let name = null, prefix = '', value = null, ops = null;
+    let m = /^(min-|max-)?([a-z][a-z-]*)\s*(?::\s*(.*?))?$/.exec(t);
+    if (m !== null && MQ_FEATURES[m[2]] !== undefined) { prefix = m[1] || ''; name = m[2]; value = m[3] === undefined ? null : m[3]; }
+    else {
+      // range syntax: `name op value`, `value op name`, `value op name op value`
+      m = /^([a-z][a-z-]*)\s*(<=|>=|<|>|=)\s*(.+)$/.exec(t);
+      if (m !== null && MQ_FEATURES[m[1]] !== undefined) { name = m[1]; ops = [[m[2], m[3]]]; }
+      else {
+        m = /^(.+?)\s*(<=|>=|<|>|=)\s*([a-z][a-z-]*)\s*(?:(<=|>=|<|>|=)\s*(.+))?$/.exec(t);
+        if (m !== null && MQ_FEATURES[m[3]] !== undefined) {
+          name = m[3]; ops = [[FLIP[m[2]], m[1]]];
+          if (m[4] !== undefined) ops.push([m[4], m[5]]);
+        }
+      }
+    }
+    if (name === null) return null;
+    const f = MQ_FEATURES[name];
+    if (nativeKnowsFeature(name, f)) return null;
+    if (f.enum !== undefined) {
+      if (prefix !== '' || ops !== null) return 'f';
+      if (value === null) return f.bool ? 't' : 'f';
+      return value === f.enum ? 't' : 'f';
+    }
+    const num = (v) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN);
+    if (ops !== null) {
+      if (f.noRange) return 'f';
+      for (const [op, v] of ops) { const n = num(v); if (Number.isNaN(n) || !cmp(f.int, op, n)) return 'f'; }
+      return 't';
+    }
+    if (value === null) return prefix === '' && f.int !== 0 ? 't' : 'f';
+    const n = num(value);
+    if (Number.isNaN(n)) return 'f';
+    if (prefix !== '' && f.noRange) return 'f';
+    if (prefix === 'min-') return f.int >= n ? 't' : 'f';
+    if (prefix === 'max-') return f.int <= n ? 't' : 'f';
+    return f.int === n ? 't' : 'f';
+  }
+  const MQ_LEAF = /\(([^()]*)\)/g;
+  const MQ_NAMES = /(?:^|[^a-z-])(?:min-|max-)?(?:color-gamut|display-mode|dynamic-range|forced-colors|prefers-contrast|prefers-reduced-motion|prefers-reduced-transparency|scripting|update|overflow-block|overflow-inline|color|color-index|monochrome|grid)(?![a-z-])/i;
+  const mqRewrites = new Map();
+  function shimMedia(q) {
+    if (!MQ_NAMES.test(q)) return q;
+    let r = mqRewrites.get(q);
+    if (r === undefined) {
+      r = q.replace(MQ_LEAF, (whole, inner) => {
+        const a = shimCondition(inner);
+        return a === null ? whole : a === 't' ? MQ_TRUE : MQ_FALSE;
+      });
+      if (mqRewrites.size > 200) mqRewrites.clear();
+      mqRewrites.set(q, r);
+    }
+    return r;
+  }
   function evalMQ(q) {
     if (q.trim() === '') return true;
-    try { return !!N.matchMedia(q); } catch (_) { return false; }
+    try { return !!N.matchMedia(shimMedia(q)); } catch (_) { return false; }
+  }
+  // MediaQueryList.media: the query in canonical form (lower case, `(name: value)`, `a, b`).
+  function serializeMedia(q) {
+    return q.toLowerCase().replace(/\s+/g, ' ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')')
+      .replace(/\s*:\s*/g, ': ').replace(/\s*,\s*/g, ', ').trim();
   }
   function matchMedia(query) {
     if (arguments.length === 0) throw new TypeError("Failed to execute 'matchMedia' on 'Window': 1 argument required, but only 0 present.");
-    const q = `${query}`.trim().replace(/\s+/g, ' ');
+    const q = serializeMedia(`${query}`);
     const m = new MediaQueryList(INTERNAL);
     mqlData.set(m, { media: q, last: evalMQ(q) });
     mqls.push(typeof WeakRef === 'function' ? new WeakRef(m) : { deref: () => m });
@@ -5527,7 +6348,7 @@
     Crypto, SubtleCrypto, CryptoKey, Performance, PerformanceEntry, PerformanceMark, PerformanceMeasure, PerformanceResourceTiming,
     PerformanceNavigationTiming, PerformanceTiming, PerformanceNavigation, PerformanceObserver, PerformanceObserverEntryList,
     Navigator, MimeType, MimeTypeArray, Plugin, PluginArray, Permissions, PermissionStatus, Clipboard, ClipboardItem,
-    NavigatorUAData, NetworkInformation, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
+    NavigatorUAData, NetworkInformation, MediaDevices, StorageManager, DeprecatedStorageQuota, Notification, Geolocation, GeolocationPositionError, LockManager, Lock,
     UserActivation, Scheduling,
     Screen, ScreenOrientation, VisualViewport, Location, History, DOMStringList, Storage, MediaQueryList,
     IntersectionObserver, IntersectionObserverEntry, ResizeObserver, ResizeObserverEntry, ResizeObserverSize,

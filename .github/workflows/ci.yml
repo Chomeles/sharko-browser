@@ -21,13 +21,7 @@ jobs:
         include:
           - name: Windows x64
             os: windows-latest
-          - name: Linux x64
-            os: ubuntu-24.04
-          - name: macOS arm64
-            os: macos-14
     runs-on: ${{ matrix.os }}
-    # macOS support is best-effort for now.
-    continue-on-error: ${{ matrix.os == 'macos-14' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

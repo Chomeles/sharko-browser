@@ -14,6 +14,13 @@ Darstellung stimmt auf den getesteten Seiten weitgehend überein (Seitenhöhen m
 innerhalb weniger Prozent); bei 10 von 19 Seiten ist das `load`-Ereignis früher als in
 Chromium. Details und Zahlen: [README.md](README.md#-tested-side-by-side-with-chromium).
 
+Dazu kommt `node tools/sitediff/run.js`: rund 200 Alltagsseiten (plus zufällige Domains
+aus der Tranco-Liste) werden in Sharko und Chromium geladen, in beiden läuft dieselbe
+Messsonde, und die Unterschiede – fehlender Text, verschobenes Layout, vertauschte
+Farben, kaputte Bilder, Fehler nur in Sharko, Abstürze – werden nach der Zahl der
+betroffenen Seiten sortiert. So wird an der Engine repariert, nicht an einzelnen Seiten
+([Details](tools/sitediff/README.md)).
+
 ## Geplant – das ist erst der Anfang
 
 - **Session pro Tab:** mehrere Konten auf derselben Seite gleichzeitig (z. B. mehrere M365-Tenants)

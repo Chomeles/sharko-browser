@@ -332,7 +332,8 @@ pub fn run_headless(bopts: BrowserOptions, opts: HeadlessOptions) -> i32 {
         height: (opts.height as f32 * opts.scale) as u32,
         scale: opts.scale,
         zoom: 1.0,
-        dark_mode: false,
+        // SHARKO_DARK=1: report `prefers-color-scheme: dark` (testing dark mode).
+        dark_mode: std::env::var_os("SHARKO_DARK").is_some_and(|v| v != "0"),
     };
     let startup = t0.elapsed();
     let tab = match browser.new_tab(&opts.url, viewport) {

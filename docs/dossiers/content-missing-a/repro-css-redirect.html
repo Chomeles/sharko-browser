@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CSS redirect repro</title>
+<link rel="stylesheet" href="/redirect.css">
+<link rel="stylesheet" href="/redirect301.css" id="l301">
+<link rel="stylesheet" href="/jsession/style.css;jsessionid=ABCDEF.live1?v=1" id="ljs">
+<link rel="stylesheet" href="/direct.css" id="ldirect">
+<script src="/redirect.js"></script>
+</head><body>
+<h1>Redirected stylesheet</h1>
+<p class="redirected">Should be rgb(1,2,3) if the redirected sheet applied.</p>
+<img id="im" src="/redirect.png" width="40" height="40">
+<script>
+window.__probe = function () {
+  const sheets = [...document.styleSheets].map(s => { let n; try { n = s.cssRules.length } catch (e) { n = 'err' } return { href: s.href, rules: n } });
+  return JSON.stringify({
+    sheets,
+    h1: getComputedStyle(document.querySelector('h1')).color,
+    bodyBg: getComputedStyle(document.body).backgroundColor,
+    redirectedJsRan: !!window.__redirectedJsRan,
+    img: { complete: im.complete, natural: im.naturalWidth },
+  });
+};
+</script>
+</body></html>
