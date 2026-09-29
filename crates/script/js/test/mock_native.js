@@ -778,6 +778,12 @@ class MockNative {
       workerEval: (g, src, url) => {
         try { vm.runInContext(src, g, { filename: url }); return null; } catch (err) { return M.arr([String(err && err.message), url, 1, 1, err]); }
       },
+      workerEvalModule: (g, src, url) => {
+        if (/^\s*import\b/m.test(src)) return 'imports';
+        // Node's vm has no module realm without flags: emulate the parts the tests use.
+        const body = String(src).replace(/import\.meta\.url/g, JSON.stringify(String(url)));
+        try { vm.runInContext(`'use strict';${body}`, g, { filename: url }); return null; } catch (err) { return M.arr([String(err && err.message), url, 1, 1, err]); }
+      },
       cloneInto: (g, v) => require('v8').deserialize(require('v8').serialize(v)),
       wsOpen: (id, url, protocols, origin) => { M.ws.push(['open', id, url, Array.from(protocols), origin]); return true; },
       wsSend: (id, data) => { M.ws.push(['send', id, typeof data === 'string' ? data : Array.from(new Uint8Array(data))]); },

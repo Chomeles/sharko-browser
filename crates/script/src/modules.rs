@@ -348,11 +348,35 @@ fn compile_and_register(scope: &mut v8::PinScope, st: &RuntimeState, url: &str, 
         }
     }
     for dep in deps {
-        start_fetch(st, &dep);
+        start_fetch(scope, st, &dep);
     }
 }
 
-fn start_fetch(st: &RuntimeState, url: &str) {
+fn start_fetch(scope: &mut v8::PinScope, st: &RuntimeState, url: &str) {
+    // `blob:` URLs live in the process-wide registry, not on the network (HTML "fetch a
+    // single module script" goes through Fetch's blob URL store).
+    if url.starts_with("blob:") {
+        if st.modules.borrow().map.contains_key(url) {
+            return;
+        }
+        match crate::blob::resolve_blob_url(url) {
+            Some(b) if is_js_mime(&b.content_type) => {
+                let source = String::from_utf8_lossy(&b.bytes).into_owned();
+                compile_and_register(scope, st, url, &source);
+            }
+            Some(b) => fail(
+                scope,
+                st,
+                url,
+                &format!(
+                    "Failed to load module script {url}: expected a JavaScript module script but the server responded with a MIME type of \"{}\"",
+                    b.content_type
+                ),
+            ),
+            None => fail(scope, st, url, &format!("Failed to fetch module {url}: blob URL not found")),
+        }
+        return;
+    }
     let id = {
         let mut loader = st.modules.borrow_mut();
         if loader.map.contains_key(url) {
@@ -634,7 +658,7 @@ pub(crate) fn load<'s>(
     match source {
         Some(src) if !existing => compile_and_register(scope, st, url, src),
         Some(_) => {}
-        None => start_fetch(st, url),
+        None => start_fetch(scope, st, url),
     }
     let g = v8::Global::new(scope, resolver);
     st.modules.borrow_mut().jobs.push(Job {
@@ -710,6 +734,81 @@ pub(crate) fn dynamic_import_callback<'s>(
             Some(resolver.get_promise(scope))
         }
     }
+}
+
+/// Compile and run a module with no static imports in the current (worker) realm.
+/// `Ok(None)` ran; `Ok(Some(()))` it has imports (nothing run); `Err(None)` terminated;
+/// `Err(Some((message, line, column, exception)))` threw (also a rejected top-level await).
+#[allow(clippy::type_complexity)]
+pub(crate) fn eval_isolated_module<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    st: &RuntimeState,
+    source: &str,
+    url: &str,
+) -> Result<Option<()>, Option<(String, i32, i32, v8::Local<'s, v8::Value>)>> {
+    v8::tc_scope!(let tc, scope);
+    let src = v8_str(tc, source);
+    let name = v8_str(tc, url);
+    let origin = v8::ScriptOrigin::new(
+        tc,
+        name.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        true,
+        None,
+    );
+    let mut src = v8::script_compiler::Source::new(src, Some(&origin));
+    macro_rules! failed {
+        () => {
+            match tc.exception() {
+                Some(exception) if !tc.has_terminated() => {
+                    let msg = tc.message();
+                    let text = match msg {
+                        Some(m) => m.get(tc).to_rust_string_lossy(tc),
+                        None => exception.to_rust_string_lossy(tc),
+                    };
+                    let line = msg.and_then(|m| m.get_line_number(tc)).unwrap_or(0) as i32;
+                    let column = msg.map(|m| m.get_start_column()).unwrap_or(0) as i32;
+                    return Err(Some((text, line, column, exception)));
+                }
+                _ => return Err(None),
+            }
+        };
+    }
+    let Some(module) = v8::script_compiler::compile_module(tc, &mut src) else {
+        failed!();
+    };
+    if module.get_module_requests().length() > 0 {
+        return Ok(Some(()));
+    }
+    // Registered so `import.meta.url` finds the worker script's URL.
+    st.modules
+        .borrow_mut()
+        .by_hash
+        .entry(module.get_identity_hash().get())
+        .or_default()
+        .push((v8::Global::new(tc, module), url.to_string()));
+    if module.instantiate_module(tc, resolve_callback) != Some(true) {
+        failed!();
+    }
+    let Some(result) = module.evaluate(tc) else {
+        failed!();
+    };
+    if let Ok(p) = v8::Local::<v8::Promise>::try_from(result) {
+        tc.perform_microtask_checkpoint();
+        if p.state() == v8::PromiseState::Rejected {
+            let exception = p.result(tc);
+            p.mark_as_handled();
+            let text = exception.to_rust_string_lossy(tc);
+            return Err(Some((text, 0, 0, exception)));
+        }
+    }
+    Ok(None)
 }
 
 /// `import.meta`: `url` and `resolve()`.

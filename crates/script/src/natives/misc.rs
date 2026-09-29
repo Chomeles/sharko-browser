@@ -1421,6 +1421,42 @@ pub(crate) fn n_worker_eval(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Addition: `N.workerEvalModule(global, source, url)`: run `source` as an ES module in the
+/// realm of `global` (module worker, HTML "run a worker" with type "module"). Only modules
+/// without static imports are supported: the page's module map is per-URL and not
+/// per-realm, so a graph would be shared with the page. Returns `null`, `'imports'` when the
+/// source has static imports, or `[message, url, line, column, error]` for an exception.
+pub(crate) fn n_worker_eval_module(cx: &mut Cx) -> NResult {
+    let target = realm_of(cx.scope, cx.arg(0))?;
+    let source = cx.string(1)?;
+    let url = cx.string(2)?;
+    let st = cx.st;
+    let outcome = {
+        let scope = &mut v8::ContextScope::new(cx.scope, target);
+        crate::modules::eval_isolated_module(scope, st, &source, &url)
+    };
+    match outcome {
+        Ok(None) => cx.ret_null(),
+        Ok(Some(())) => {
+            let s = v8_str(cx.scope, "imports");
+            cx.ret_value(s.into());
+        }
+        Err(None) => return Err(JsErr::Thrown),
+        Err(Some((text, line, column, exception))) => {
+            let items = [
+                v8_str(cx.scope, &text).into(),
+                v8_str(cx.scope, &url).into(),
+                v8::Integer::new(cx.scope, line as i32).into(),
+                v8::Integer::new(cx.scope, column as i32 + 1).into(),
+                exception,
+            ];
+            let arr = v8::Array::new_with_elements(cx.scope, &items);
+            cx.ret_value(arr.into());
+        }
+    }
+    Ok(())
+}
+
 /// Addition: `N.cloneInto(global, value)`: structured clone of `value` whose result
 /// belongs to the realm of `global` (worker messages must be objects of the receiving
 /// realm, so `instanceof Array` etc. work there).

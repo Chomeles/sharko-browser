@@ -428,6 +428,19 @@ test('WebSocket: handshake, messages, bufferedAmount, close and failures', async
   assert.deepStrictEqual(Array.from(e.run('log2')), ['error', 'close:1006:false']);
 });
 
+test('Worker: type module runs as a module (import.meta), static imports report an error', async () => {
+  const routes = Object.assign({}, ROUTES, {
+    'https://example.com/m.js': { body: 'postMessage(import.meta.url);' },
+    'https://example.com/mi.js': { body: "import { x } from './lib.js'; postMessage(x);" },
+  });
+  const e = await env({ routes });
+  e.run(`window.got = [];
+    window.w = new Worker('/m.js', { type: 'module' }); w.onmessage = (ev) => got.push(ev.data);
+    window.w2 = new Worker('/mi.js', { type: 'module' }); w2.onerror = () => got.push('imports-error');`);
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')).sort(), ['https://example.com/m.js', 'imports-error']);
+});
+
 test('Worker: own realm, messages both ways, importScripts, timers, errors, terminate', async () => {
   const routes = Object.assign({}, ROUTES, {
     'https://example.com/w.js': { body: `
