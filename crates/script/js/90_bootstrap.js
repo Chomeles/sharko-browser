@@ -190,14 +190,10 @@
   defGetter('crypto', () => L.crypto);
   defGetter('visualViewport', () => L.visualViewport, { replaceable: true });
   defGetter('event', () => L.currentEvent, { replaceable: true });
-  defGetter('origin', () => L.location.origin, { replaceable: true });
-  defGetter('isSecureContext', () => {
-    const p = N.urlParse(L.documentURL(), null);
-    if (p === null) return false;
-    if (p[1] === 'https:' || p[1] === 'wss:' || p[1] === 'file:') return true;
-    const h = p[5];
-    return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost');
-  });
+  defGetter('origin', () => L.docOrigin(), { replaceable: true });
+  defGetter('isSecureContext', () => L.isSecureContext());
+  // `chrome` is a plain writable data property that cannot be deleted (as in Chrome).
+  Object.defineProperty(g, 'chrome', { value: L.chrome, writable: true, enumerable: true, configurable: false });
   defGetter('crossOriginIsolated', () => false);
   defGetter('originAgentCluster', () => false);
   defGetter('closed', () => false);
@@ -671,7 +667,23 @@
     (parsingFinished ? endQueue : deferQueue).push(rec);
     return 'defer';
   }
+  // [SecureContext] members of Navigator do not exist in an insecure document (plain http):
+  // `'clipboard' in navigator` is false there, as in Chrome. The URL is only known now (the layer
+  // is snapshotted before the page is loaded), which is before any page script runs.
+  const SECURE_NAVIGATOR_MEMBERS = ['clipboard', 'mediaDevices', 'storage', 'deviceMemory', 'userAgentData', 'locks', 'getBattery',
+    'getUserMedia', 'webkitGetUserMedia'];
+  let secureApplied = false;
+  function applySecureContext() {
+    if (secureApplied) return;
+    secureApplied = true;
+    if (L.isSecureContext()) return;
+    const proto = Object.getPrototypeOf(L.navigator);
+    for (const k of SECURE_NAVIGATOR_MEMBERS) Reflect.deleteProperty(proto, k);
+    Reflect.deleteProperty(g, 'MediaDevices');
+  }
   function onDocumentParsed() {
+    applySecureContext();
+    L.frameKind(); // pin what kind of document this frame shows before scripts can change its <iframe>
     L.milestones.responseEnd = N.now();
     L.extractTemplates(docId); // parsed template contents leave the document tree
     L.attachDeclarativeShadowRoots(docId);
@@ -847,6 +859,7 @@
   // document). Written scripts that have not run yet are dropped, as in browsers, then a
   // script-created parser starts with an empty body.
   function openWrittenParser() {
+    L.docOpened = true; // an about:blank document now has the URL of its opener (see L.exposedURL)
     parserQueue = parserQueue.filter((r) => !r.written);
     writtenQueued = 0;
     endQueue.length = 0;
@@ -1115,9 +1128,20 @@
   for (const [name, C] of interfaces) {
     if (typeof C !== 'function') continue;
     nativeFns.add(C);
+    // Static operations and attributes of an interface are enumerable (WebIDL), unlike class statics.
+    for (const k of Object.getOwnPropertyNames(C)) {
+      if (k === 'length' || k === 'name' || k === 'prototype') continue;
+      const d = Object.getOwnPropertyDescriptor(C, k);
+      if (d !== undefined && d.configurable && !d.enumerable) { d.enumerable = true; Object.defineProperty(C, k, d); }
+    }
     markFns(C, seen);
     const P = C.prototype;
     if (P === null || typeof P !== 'object') continue;
+    // Blink lists `constructor` behind the members of an interface (see L.orderKeys).
+    if (!L.orderedProtos.has(P)) {
+      const cd = Reflect.getOwnPropertyDescriptor(P, 'constructor');
+      if (cd !== undefined && cd.configurable && Reflect.deleteProperty(P, 'constructor')) Reflect.defineProperty(P, 'constructor', cd);
+    }
     if (!Object.prototype.hasOwnProperty.call(P, Symbol.toStringTag) && C !== L.DOMException) {
       Object.defineProperty(P, Symbol.toStringTag, { value: name, configurable: true });
     }
@@ -1131,7 +1155,7 @@
     markFns(P, seen);
   }
   markFns(g, seen);
-  for (const o of [L.console, L.CSS, L.location, L.history, L.navigator, L.screen, L.performance, L.crypto, L.document, L.customElements]) markFns(o, seen);
+  for (const o of [L.console, L.CSS, L.location, L.history, L.navigator, L.screen, L.performance, L.crypto, L.document, L.customElements, L.chrome, L.chrome.app]) markFns(o, seen);
   const origToString = L.nativeFunctionToString;
   const patchedToString = {
     toString() {

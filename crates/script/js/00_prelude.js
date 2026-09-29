@@ -289,6 +289,21 @@
     Object.defineProperty(proto, name, { get, set, enumerable: true, configurable: true });
   };
 
+  // Order the own string keys of a prototype like Blink's V8 templates do (scripts hash
+  // `Object.getOwnPropertyNames(Navigator.prototype)`): the listed keys move behind the others,
+  // in the given order; keys that are not listed keep their place in front. The bootstrap puts
+  // `constructor` last on every other interface (see there).
+  L.orderedProtos = new WeakSet();
+  L.orderKeys = function (proto, keys) {
+    for (const k of keys) {
+      const d = Reflect.getOwnPropertyDescriptor(proto, k);
+      if (d === undefined || !d.configurable) continue;
+      Reflect.deleteProperty(proto, k);
+      Reflect.defineProperty(proto, k, d);
+    }
+    L.orderedProtos.add(proto);
+  };
+
   // Indexed-property support without Proxies: getters for "0".."n-1" are installed on the
   // prototype and grown on demand (whenever a `length` larger than the current capacity is
   // observed).

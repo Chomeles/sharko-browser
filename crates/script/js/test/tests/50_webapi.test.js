@@ -359,9 +359,9 @@ test('performance, console formatting, navigator, screen, misc window props', as
   assert.deepStrictEqual(logs[12], ['log', "{name: 'c', me: [Circular *]}"]);
   assert.ok(logs[13][1].includes('│ (index) │ a │ b │'), logs[13][1]);
   assert.deepStrictEqual(logs[14], ['log', '{x: 1}']);
-  assert.strictEqual(e.run("'serviceWorker' in navigator || 'mediaDevices' in navigator"), false);
-  assert.strictEqual(e.run(`[navigator.language, navigator.languages.join(), navigator.platform, navigator.vendor, navigator.onLine, navigator.cookieEnabled, navigator.hardwareConcurrency, navigator.deviceMemory, navigator.maxTouchPoints, navigator.webdriver, navigator.mediaDevices, navigator.serviceWorker, navigator.plugins.length, navigator.mimeTypes[0].type, navigator.userAgentData.brands.length, navigator.appVersion.startsWith('5.0'), typeof navigator.clipboard.writeText].join('|')`),
-    'de-DE|de-DE,de,en-US,en|Win32|Google Inc.|true|true|8|8|0|false|||5|application/pdf|3|true|function');
+  assert.strictEqual(e.run("'serviceWorker' in navigator || 'oscpu' in navigator"), false);
+  assert.strictEqual(e.run(`[navigator.language, navigator.languages.join(), navigator.platform, navigator.vendor, navigator.onLine, navigator.cookieEnabled, navigator.hardwareConcurrency, navigator.deviceMemory, navigator.maxTouchPoints, navigator.webdriver, typeof navigator.mediaDevices, navigator.serviceWorker, navigator.plugins.length, navigator.mimeTypes[0].type, navigator.userAgentData.brands.length, navigator.appVersion.startsWith('5.0'), typeof navigator.clipboard.writeText].join('|')`),
+    'de-DE|de-DE,de,en-US,en|Win32|Google Inc.|true|true|8|8|0|false|object||5|application/pdf|3|true|function');
   const r2 = await settle(e, `
     const p = await navigator.permissions.query({ name: 'geolocation' });
     const hi = await navigator.userAgentData.getHighEntropyValues(['platformVersion']);

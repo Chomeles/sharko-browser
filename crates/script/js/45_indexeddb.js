@@ -75,7 +75,7 @@
     drop(key, name) { },
   };
   L.idbBackend = backend;
-  function storageKey() { return L.location ? L.location.origin : 'null'; }
+  function storageKey() { return L.docOrigin(); }
 
   // ---------------------------------------------------------------------------------------
   // Keys (https://w3c.github.io/IndexedDB/#key-construct)

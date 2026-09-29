@@ -22,7 +22,7 @@ const BLOCK = new Set(['html', 'body', 'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5',
   'section', 'article', 'header', 'footer', 'nav', 'main', 'aside', 'blockquote', 'pre', 'address', 'figure',
   'figcaption', 'fieldset', 'hr', 'details', 'summary', 'dialog', 'legend', 'center', 'menu', 'search', 'hgroup']);
 const HIDDEN_TAGS = new Set(['head', 'script', 'style', 'title', 'meta', 'link', 'template', 'base', 'noscript', 'datalist', 'param']);
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 class MockNative {
   constructor(opts = {}) {
@@ -419,6 +419,8 @@ class MockNative {
         to.schedule(to.clock, 'hook', { name: 'onMessage', args: [to.arr(F.path), M.originString, data] });
       },
       frameList: () => null,
+      // The <iframe> element (a wrapper of the parent's realm) of this document, for a same-origin parent.
+      frameElement: () => { const P = same(F.path.slice(0, -1)); return P && F.path.length ? P.hooks.wrapNode(F.path[F.path.length - 1]) : null; },
       realmGlobal: (path) => { const o = same(path); return o ? o.global : null; },
       parentGlobal: () => { const o = same(F.path.slice(0, -1)); return F.path.length && o ? o.global : null; },
       topGlobal: () => { const o = same([]); return F.path.length && o ? o.global : null; },
@@ -847,7 +849,7 @@ class MockNative {
         try { dec = new TextDecoder(String(label), { fatal: !!fatal, ignoreBOM: true }); } catch (e) { throw M.err('RangeError', `unknown encoding ${label}`); }
         try { return dec.decode(buf); } catch (e) { throw new M.R.TypeError('The encoded data was not valid.'); }
       },
-      userAgent: () => UA,
+      userAgent: () => M.opts.userAgent || UA,
       structuredClone: (v) => M.cloneInRealm(v),
       pendingResourceCount: () => M.pendingResources,
       setHooks: (h) => { M.hooks = h; },
@@ -978,9 +980,18 @@ class MockNative {
         p = p.trim();
         if (p === 'all' || p === 'screen') continue;
         if (p === 'print') { ok = false; continue; }
+        // range syntax on the viewport width (the layer uses `(width >= 0px)` / `(width < 0px)` as constants)
+        const rm = /^\(\s*(width|height)\s*(>=|<=|<|>|=)\s*(-?[\d.]+)px\s*\)$/.exec(p);
+        if (rm) {
+          const dim = rm[1] === 'width' ? this.vp.w : this.vp.h, n = parseFloat(rm[3]);
+          ok = ok && ({ '>=': dim >= n, '<=': dim <= n, '<': dim < n, '>': dim > n, '=': dim === n })[rm[2]];
+          continue;
+        }
         const m = /^\(\s*([a-z-]+)\s*(?::\s*([^)]+))?\)$/.exec(p);
         if (!m) { ok = false; continue; }
         const f = m[1], v = (m[2] || '').trim();
+        // option noReducedMotion: an engine that does not know the feature yet
+        if (f === 'prefers-reduced-motion' && this.opts.noReducedMotion) { ok = false; continue; }
         const px = parseFloat(v);
         switch (f) {
           case 'min-width': ok = ok && this.vp.w >= px; break;
