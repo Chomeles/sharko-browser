@@ -12,7 +12,8 @@ layer files in this directory in this order:
 5. `40_webapi.js`    – URL, TextEncoder/Decoder, fetch/Headers/Request/Response, XHR,
                        Blob, FormData, AbortController, MessageChannel, storage, timers,
                        rAF, performance, crypto, navigator, location, history, observers…
-6. `90_bootstrap.js` – creates `window`/`document` globals, registers hooks with `N.setHooks`
+6. `45_indexeddb.js` – IndexedDB (in memory; uses only `N.structuredClone` through the layer)
+7. `90_bootstrap.js` – creates `window`/`document` globals, registers hooks with `N.setHooks`
 
 All files are plain classic scripts (no ES modules, no imports). They share state via a
 single IIFE-local object passed through `globalThis.__layer` which `90_bootstrap.js`

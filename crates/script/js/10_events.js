@@ -7,7 +7,7 @@
 
   const NONE = 0, CAPTURING_PHASE = 1, AT_TARGET = 2, BUBBLING_PHASE = 3;
   // Event flag bits
-  const F_STOP = 1, F_STOP_IMM = 2, F_CANCELED = 4, F_PASSIVE = 8, F_DISPATCH = 16, F_UNINIT = 32;
+  const F_STOP = 1, F_STOP_IMM = 2, F_CANCELED = 4, F_PASSIVE = 8, F_DISPATCH = 16, F_UNINIT = 32, F_THREW = 64;
 
   function initDict(init, ctorName) {
     if (init === undefined || init === null) return null;
@@ -1009,6 +1009,7 @@
           Reflect.apply(he, cb, [event]);
         }
       } catch (e) {
+        EV.setFlag(event, F_THREW);
         L.report(e);
       }
       L.currentEvent = prevEvent;
@@ -1018,7 +1019,8 @@
   }
 
   // Core dispatch; returns bit flags: 1 = canceled, 2 = propagation stopped,
-  // 4 = default/activation behaviour performed by the JS layer.
+  // 4 = default/activation behaviour performed by the JS layer, 8 = a listener threw
+  // (the "legacy output did listeners throw flag", which IndexedDB needs).
   function dispatchCore(target, event, pathOverride, targetOverride) {
     EV.setFlag(event, F_DISPATCH);
     const type = EV.type(event);
@@ -1058,11 +1060,11 @@
       }
     }
     const f = EV.flags(event);
-    let result = ((f & F_CANCELED) ? 1 : 0) | ((f & F_STOP) ? 2 : 0);
+    let result = ((f & F_CANCELED) ? 1 : 0) | ((f & F_STOP) ? 2 : 0) | ((f & F_THREW) ? 8 : 0);
     EV.setPhase(event, NONE);
     EV.setCurrent(event, null);
     EV.setPath(event, []);
-    EV.clearFlag(event, F_DISPATCH | F_STOP | F_STOP_IMM);
+    EV.clearFlag(event, F_DISPATCH | F_STOP | F_STOP_IMM | F_THREW);
 
     if (act !== null) {
       try {
