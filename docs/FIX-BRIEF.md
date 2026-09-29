@@ -8,7 +8,7 @@ You work alone on your own machine and clone. Fix the causes named in your task 
 2. **Read how a working engine does it** (`docs/REFERENCE-MAP.md`: Ladybird, Servo/Stylo, Chromium, Gecko, plus the spec section) and write the rules and edge cases into the commit message. Ported code needs the attribution described there.
 3. **Implement** in our structure, minimal and general. Comments say why, not what.
 4. **Test**: an engine/JS-layer test that fails before and passes after; the affected WPT directories; the affected sites through sitediff.
-5. **Commit** one root cause per commit, push to your outcome branch.
+5. **Commit** one root cause per commit, push to your outcome branch. A push to the outcome branch is the finished state: there is no PR step and nothing to wait for (the maintainer merges the branch itself); never mention PRs in your reports.
 
 ## Repository map
 
