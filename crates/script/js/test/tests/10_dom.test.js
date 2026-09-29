@@ -204,6 +204,27 @@ test('innerHTML/outerHTML/insertAdjacentHTML/textContent/innerText', async () =>
   assert.deepStrictEqual(e.mock.titles.slice(-1), ['New']);
 });
 
+test('innerText: whitespace between blocks adds no line breaks', async () => {
+  const e = await createEnv({
+    html: `<!DOCTYPE html><html><body>
+<div id="a">
+  <p>one</p>
+  <p>two</p>
+</div>
+<div id="b"> <div>x</div> <span> y </span> <div>z</div> </div>
+<div id="c">m <div>n</div> o <div>p</div> </div>
+</body></html>`,
+    url: 'https://example.com/',
+  });
+  const text = (id) => e.run(`document.getElementById('${id}').innerText`);
+  // Whitespace that collapses away entirely used to release the pending break early, so
+  // the next block's own break counted again ("one\n\n\n\ntwo\n\n").
+  assert.strictEqual(text('a'), 'one\n\ntwo');
+  assert.strictEqual(text('b'), 'x\ny\nz');
+  assert.strictEqual(text('c'), 'm\nn\no\np');
+  assert.strictEqual(e.run("document.body.innerText"), 'one\n\ntwo\n\nx\ny\nz\nm\nn\no\np');
+});
+
 test('cloneNode, importNode, isEqualNode, template content', async () => {
   const e = await env();
   e.run("var m = document.getElementById('main'); var c = m.cloneNode(true); var sh = m.cloneNode(false)");

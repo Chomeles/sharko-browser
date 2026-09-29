@@ -374,16 +374,15 @@
     let lineStart = true;
     const dropTail = () => { if (tail) { out = out.slice(0, out.length - tail); tail = 0; } };
     const flushBreak = () => {
-      if (pendingBreak === 0) return;
-      dropTail();
       out += '\n'.repeat(pendingBreak);
       pendingBreak = 0;
-      lineStart = true;
     };
     for (const it of items) {
       if (typeof it === 'number') {
-        // Collapsible whitespace before a block boundary goes; breaks before any text don't count.
+        // A block boundary ends the line: collapsible whitespace before it goes, and
+        // whitespace after it is at a line start. Breaks before any text don't count.
         dropTail();
+        lineStart = true;
         if (out !== '') pendingBreak = Math.max(pendingBreak, it);
         continue;
       }
@@ -395,15 +394,18 @@
         tail = 0; lineStart = false;
         continue;
       }
-      flushBreak();
       if (s.startsWith('\n')) dropTail();
       if (it.pre) {
+        flushBreak();
         out += s; tail = 0; lineStart = s.endsWith('\n');
         continue;
       }
       // Collapsible text: drop leading spaces at a line start or after a collapsible space.
+      // Text that collapses away entirely (whitespace between blocks) must not release the
+      // pending line break, or the break would count twice.
       if (lineStart || tail) s = s.replace(/^ +/, '');
       if (s === '') continue;
+      flushBreak();
       const m = / +$/.exec(s);
       out += s;
       tail = m ? m[0].length : 0;
