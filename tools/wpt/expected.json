@@ -3076,9 +3076,6 @@
  "/cors/credentials-flag.htm": {
   "status": "OK",
   "subtests": {
-   "Don't send cookie by default": "FAIL",
-   "Don't send cookie part 2": "FAIL",
-   "Don't obey Set-Cookie when withCredentials=false": "FAIL",
    "Access-Control-Allow-Credentials: TRUE should be disallowed (async)": "FAIL",
    "Access-Control-Allow-Credentials: True should be disallowed (async)": "FAIL",
    "Access-Control-Allow-Credentials: \"true\" should be disallowed (async)": "FAIL",
@@ -3099,13 +3096,6 @@
  "/cors/origin.htm": {
   "status": "OK",
   "subtests": {
-   "Allow origin: *": "FAIL",
-   "Allow origin: _*__": "FAIL",
-   "Allow origin: [tab]*": "FAIL",
-   "Allow origin: http://web-platform.test:8000": "FAIL",
-   "Allow origin: _http://web-platform.test:8000": "FAIL",
-   "Allow origin: _http://web-platform.test:8000___[tab]_": "FAIL",
-   "Allow origin: [tab]http://web-platform.test:8000": "FAIL",
    "Disallow origin: http://www1.web-platform.test:8000": "FAIL",
    "Disallow origin: //web-platform.test:8000": "FAIL",
    "Disallow origin: ://web-platform.test:8000": "FAIL",
@@ -3217,16 +3207,10 @@
  "/cors/redirect-origin.htm": {
   "status": "OK",
   "subtests": {
-   "local (*) to remote (*), expect origin=http://web-platform.test:8000": "FAIL",
-   "local (*) to remote (http://web-platform.test:8000), expect origin=http://web-platform.test:8000": "FAIL",
    "local (*) to remote (null), expect to fail": "FAIL",
    "local (*) to remote (none), expect to fail": "FAIL",
-   "local (http://web-platform.test:8000) to remote (*), expect origin=http://web-platform.test:8000": "FAIL",
-   "local (http://web-platform.test:8000) to remote (http://web-platform.test:8000), expect origin=http://web-platform.test:8000": "FAIL",
    "local (http://web-platform.test:8000) to remote (null), expect to fail": "FAIL",
    "local (http://web-platform.test:8000) to remote (none), expect to fail": "FAIL",
-   "local (null) to remote (*), expect origin=http://web-platform.test:8000": "FAIL",
-   "local (none) to remote (*), expect origin=http://web-platform.test:8000": "FAIL",
    "remote (*) to local (*), expect origin=null": "FAIL",
    "remote (*) to local (http://web-platform.test:8000), expect to fail": "FAIL",
    "remote (*) to local (null), expect origin=null": "FAIL",
@@ -3237,12 +3221,8 @@
    "remote (http://web-platform.test:8000) to local (none), expect to fail": "FAIL",
    "remote (null) to local (*), expect to fail": "FAIL",
    "remote (none) to local (*), expect to fail": "FAIL",
-   "remote (*) to remote (*), expect origin=http://web-platform.test:8000": "FAIL",
-   "remote (*) to remote (http://web-platform.test:8000), expect origin=http://web-platform.test:8000": "FAIL",
    "remote (*) to remote (null), expect to fail": "FAIL",
    "remote (*) to remote (none), expect to fail": "FAIL",
-   "remote (http://web-platform.test:8000) to remote (*), expect origin=http://web-platform.test:8000": "FAIL",
-   "remote (http://web-platform.test:8000) to remote (http://web-platform.test:8000), expect origin=http://web-platform.test:8000": "FAIL",
    "remote (http://web-platform.test:8000) to remote (null), expect to fail": "FAIL",
    "remote (http://web-platform.test:8000) to remote (none), expect to fail": "FAIL",
    "remote (null) to remote (*), expect to fail": "FAIL",
@@ -3281,13 +3261,6 @@
  "/cors/remote-origin.htm": {
   "status": "OK",
   "subtests": {
-   "Allow origin: *": "FAIL",
-   "Allow origin: _*__": "FAIL",
-   "Allow origin: [tab]*": "FAIL",
-   "Allow origin: http://www1.web-platform.test:8000": "FAIL",
-   "Allow origin: _http://www1.web-platform.test:8000": "FAIL",
-   "Allow origin: _http://www1.web-platform.test:8000___[tab]_": "FAIL",
-   "Allow origin: [tab]http://www1.web-platform.test:8000": "FAIL",
    "Disallow origin: http://web-platform.test:8000": "FAIL",
    "Disallow origin: //www1.web-platform.test:8000": "FAIL",
    "Disallow origin: ://www1.web-platform.test:8000": "FAIL",
@@ -3342,7 +3315,6 @@
  "/cors/status-async.htm": {
   "status": "OK",
   "subtests": {
-   "Status on GET 200": "FAIL",
    "Status on GET 201": "FAIL",
    "Status on GET 202": "FAIL",
    "Status on GET 203": "FAIL",
@@ -3351,7 +3323,6 @@
    "Status on GET 206": "FAIL",
    "Status on GET 209": "FAIL",
    "Status on GET 299": "FAIL",
-   "Status on HEAD 200": "FAIL",
    "Status on GET 400": "FAIL",
    "Status on HEAD 401": "FAIL",
    "Status on POST 404": "FAIL",
@@ -3363,21 +3334,6 @@
    "Status on POST 404 (nonsimple)": "FAIL",
    "Status on PUT 699 (nonsimple)": "FAIL",
    "Status on CHICKEN 501 (nonsimple)": "FAIL"
-  }
- },
- "/cors/status-preflight.htm": {
-  "status": "OK",
-  "subtests": {
-   "CORS - status after preflight on GET 200": "FAIL",
-   "CORS - status after preflight on GET 204": "FAIL",
-   "CORS - status after preflight on GET 400": "FAIL",
-   "CORS - status after preflight on GET 401": "FAIL",
-   "CORS - status after preflight on HEAD 200": "FAIL",
-   "CORS - status after preflight on HEAD 204": "FAIL",
-   "CORS - status after preflight on HEAD 400": "FAIL",
-   "CORS - status after preflight on HEAD 401": "FAIL",
-   "CORS - status after preflight on HEAD 501": "FAIL",
-   "CORS - status after preflight on HEAD 699": "FAIL"
   }
  },
  "/cors/status.htm": {
@@ -38939,19 +38895,10 @@
  "/fetch/api/cors/cors-preflight-star.any.html": {
   "status": "OK",
   "subtests": {
-   "CORS that succeeds with credentials: false; method: GET (allowed: get); header: X-Test,1 (allowed: x-test)": "FAIL",
    "CORS that fails with credentials: true; method: OK (allowed: *); header: X-Test,1 (allowed: *)": "FAIL",
    "CORS that fails with credentials: true; method: PUT (allowed: *); header:  (allowed: )": "FAIL",
    "CORS that fails with credentials: true; method: GET (allowed: get); header: X-Test,1 (allowed: *)": "FAIL",
    "CORS that fails with credentials: true; method: GET (allowed: *); header: X-Test,1 (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: GET (allowed: GET); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: get (allowed: GET); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: GET (allowed: get); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: get (allowed: get); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: HEAD (allowed: HEAD); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: head (allowed: HEAD); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: HEAD (allowed: head); header:  (allowed: *)": "FAIL",
-   "CORS that succeeds with credentials: true; method: head (allowed: head); header:  (allowed: *)": "FAIL",
    "CORS that fails with credentials: true; method: DELETE (allowed: delete); header:  (allowed: *)": "FAIL",
    "CORS that fails with credentials: true; method: delete (allowed: delete); header:  (allowed: *)": "FAIL",
    "CORS that fails with credentials: true; method: PUT (allowed: put); header:  (allowed: *)": "FAIL",
@@ -39122,25 +39069,15 @@
  "/fetch/api/cors/cors-redirect.any.html": {
   "status": "OK",
   "subtests": {
-   "Redirect 301: cors to same cors": "FAIL",
    "Redirect 301: cors to another cors": "FAIL",
-   "Redirect 301: same origin to cors": "FAIL",
    "Redirect 301: cors to same origin": "FAIL",
-   "Redirect 302: cors to same cors": "FAIL",
    "Redirect 302: cors to another cors": "FAIL",
-   "Redirect 302: same origin to cors": "FAIL",
    "Redirect 302: cors to same origin": "FAIL",
-   "Redirect 303: cors to same cors": "FAIL",
    "Redirect 303: cors to another cors": "FAIL",
-   "Redirect 303: same origin to cors": "FAIL",
    "Redirect 303: cors to same origin": "FAIL",
-   "Redirect 307: cors to same cors": "FAIL",
    "Redirect 307: cors to another cors": "FAIL",
-   "Redirect 307: same origin to cors": "FAIL",
    "Redirect 307: cors to same origin": "FAIL",
-   "Redirect 308: cors to same cors": "FAIL",
    "Redirect 308: cors to another cors": "FAIL",
-   "Redirect 308: same origin to cors": "FAIL",
    "Redirect 308: cors to same origin": "FAIL"
   }
  },
@@ -39526,31 +39463,15 @@
  "/fetch/api/redirect/redirect-origin.any.html": {
   "status": "OK",
   "subtests": {
-   "[GET] Redirect 301 Same origin to other origin": "FAIL",
-   "[GET] Redirect 301 Other origin to other origin": "FAIL",
    "[GET] Redirect 301 Other origin to same origin": "FAIL",
-   "[POST] Redirect 301 Same origin to other origin": "FAIL",
-   "[POST] Redirect 301 Other origin to other origin": "FAIL",
    "[POST] Redirect 301 Other origin to same origin": "FAIL",
-   "[GET] Redirect 302 Same origin to other origin": "FAIL",
-   "[GET] Redirect 302 Other origin to other origin": "FAIL",
    "[GET] Redirect 302 Other origin to same origin": "FAIL",
-   "[POST] Redirect 302 Same origin to other origin": "FAIL",
-   "[POST] Redirect 302 Other origin to other origin": "FAIL",
    "[POST] Redirect 302 Other origin to same origin": "FAIL",
-   "[GET] Redirect 303 Same origin to other origin": "FAIL",
-   "[GET] Redirect 303 Other origin to other origin": "FAIL",
    "[GET] Redirect 303 Other origin to same origin": "FAIL",
-   "[POST] Redirect 303 Same origin to other origin": "FAIL",
-   "[POST] Redirect 303 Other origin to other origin": "FAIL",
    "[POST] Redirect 303 Other origin to same origin": "FAIL",
-   "[GET] Redirect 307 Same origin to other origin": "FAIL",
-   "[GET] Redirect 307 Other origin to other origin": "FAIL",
    "[GET] Redirect 307 Other origin to same origin": "FAIL",
    "[POST] Redirect 307 Same origin to same origin": "FAIL",
    "[POST] Redirect 307 Other origin to same origin": "FAIL",
-   "[GET] Redirect 308 Same origin to other origin": "FAIL",
-   "[GET] Redirect 308 Other origin to other origin": "FAIL",
    "[GET] Redirect 308 Other origin to same origin": "FAIL",
    "[POST] Redirect 308 Same origin to same origin": "FAIL",
    "[POST] Redirect 308 Other origin to same origin": "FAIL"

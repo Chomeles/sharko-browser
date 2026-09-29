@@ -171,7 +171,11 @@ pub(crate) fn apply_defaults(
     {
         map.insert(REFERER, value);
     }
-    if !is_safe_method(method)
+    // Fetch "append a request Origin header": always for cors-mode requests to another
+    // origin (fetch/XHR and fonts), whatever the method; otherwise only for unsafe methods.
+    let cross_origin_cors = matches!(destination, Destination::Fetch | Destination::Font)
+        && referrer.is_some_and(|r| r.origin() != url.origin());
+    if (cross_origin_cors || !is_safe_method(method))
         && !map.contains_key(ORIGIN)
         && let Some(r) = referrer
         && let Ok(origin) = HeaderValue::from_str(&r.origin().ascii_serialization())
@@ -291,6 +295,14 @@ mod tests {
         assert_eq!(map[ORIGIN], "https://www.example.com");
         assert_eq!(map["sec-fetch-site"], "cross-site");
         assert_eq!(map["sec-fetch-mode"], "cors");
+
+        // A cross-origin cors GET carries Origin too; a same-origin one does not.
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://accounts.other.org/status"), &Method::GET, Destination::Fetch, Some(&referrer), &config);
+        assert_eq!(map[ORIGIN], "https://www.example.com");
+        let mut map = HeaderMap::new();
+        apply_defaults(&mut map, &url("https://www.example.com/api"), &Method::GET, Destination::Fetch, Some(&referrer), &config);
+        assert!(!map.contains_key(ORIGIN));
 
         // No Sec-Fetch-* for insecure origins; ranges are not content-coded.
         let mut map = HeaderMap::new();
