@@ -261,10 +261,31 @@ pub(crate) fn n_fetch(cx: &mut Cx) -> NResult {
     let redirect = cx.opt_string(8)?.unwrap_or_default();
     // Addition: report upload/download progress (XHR with progress listeners).
     let progress = cx.len() > 9 && cx.arg(9).is_true();
-    let destination = match mode.as_str() {
-        "navigate" => Destination::Document,
+    // Optional 11th argument: the Fetch destination of the request (`"script"` for
+    // `<script src>` and module loads); plain fetch()/XHR leave it out.
+    let dest = cx.opt_string(10)?.unwrap_or_default();
+    let destination = match (mode.as_str(), dest.as_str()) {
+        ("navigate", _) => Destination::Document,
+        (_, "script") => Destination::Script,
+        (_, "style") => Destination::Style,
+        (_, "image") => Destination::Image,
+        (_, "font") => Destination::Font,
+        (_, "video" | "audio") => Destination::Media,
+        (_, "iframe" | "frame") => Destination::Iframe,
         _ => Destination::Fetch,
     };
+    let mut headers = headers;
+    // The request mode has no field of its own on the wire: the network stack takes it from
+    // `Sec-Fetch-Mode` (a forbidden header name, so page headers can't spoof it) and
+    // otherwise derives it from the destination (`cors` for fetch/XHR and fonts).
+    let derived = match destination {
+        Destination::Document | Destination::Iframe => "navigate",
+        Destination::Fetch | Destination::Font => "cors",
+        _ => "no-cors",
+    };
+    if matches!(mode.as_str(), "cors" | "no-cors" | "same-origin") && mode != derived {
+        headers.push(("sec-fetch-mode".to_owned(), mode.clone()));
+    }
     let cache_mode = match cache.as_str() {
         "no-store" => CacheMode::NoStore,
         "reload" => CacheMode::Reload,

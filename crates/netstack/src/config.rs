@@ -24,7 +24,13 @@ pub struct NetConfig {
     pub user_agent: String,
     /// `Accept-Language` sent when a request does not carry its own.
     pub accept_language: String,
-    /// `Accept` for [`Destination::Document`](common::protocol::Destination::Document).
+    /// `Sec-CH-UA` low-entropy client hint (brand list), sent to potentially trustworthy
+    /// origins like Chrome does. Must agree with `navigator.userAgentData.brands`.
+    pub sec_ch_ua: String,
+    /// `Sec-CH-UA-Platform` (quoted string).
+    pub sec_ch_ua_platform: String,
+    /// `Accept` for [`Destination::Document`](common::protocol::Destination::Document) and
+    /// [`Destination::Iframe`](common::protocol::Destination::Iframe).
     pub document_accept: String,
     /// `Accept` for [`Destination::Image`](common::protocol::Destination::Image).
     /// AVIF is not advertised by default because the image decoder of the engine may not
@@ -68,7 +74,11 @@ impl NetConfig {
             read_idle_timeout: Duration::from_secs(60),
             user_agent: common::USER_AGENT.to_string(),
             accept_language: "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7".to_string(),
-            document_accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8".to_string(),
+            // Chrome 140: GREASE brand "Not=A?Brand"/24 derived from the major version
+            // (components/embedder_support/user_agent_utils.cc, GenerateBrandVersionList).
+            sec_ch_ua: r#""Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140""#.to_string(),
+            sec_ch_ua_platform: r#""Windows""#.to_string(),
+            document_accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string(),
             image_accept: "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8".to_string(),
             http3: cfg!(feature = "http3"),
             h3_head_start: Duration::from_millis(300),

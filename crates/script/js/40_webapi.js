@@ -2396,7 +2396,7 @@
   const fetchProgress = new Map(); // reqId -> fn(loaded, total, upload)
   // `initiator` ('fetch', 'xmlhttprequest'): record a PerformanceResourceTiming entry. The
   // first downloaded bytes (a progress report) stand in for responseStart.
-  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator) {
+  L.startNativeFetch = function (method, url, flat, body, mode, done, credentials, cache, redirect, progress, initiator, dest) {
     const reqId = nextReqId++;
     if (initiator !== undefined) {
       const timing = { start: N.now(), firstByte: 0 };
@@ -2413,7 +2413,7 @@
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     try {
-      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function');
+      N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function', dest || '');
     } catch (e) {
       pendingFetches.delete(reqId);
       fetchProgress.delete(reqId);
@@ -2647,7 +2647,7 @@
         } else flat.push(n, v);
       }
       if (!hasCT && ctype !== null) flat.push('Content-Type', ctype);
-      const mode = originOf(s.url) === L.location.origin ? 'same-origin' : 'cors';
+      const mode = 'cors'; // XHR is always a cors-mode request (Sec-Fetch-Mode: cors, even same-origin)
       if (!s.async) { this.#sendSync(flat, bytes, mode); return; }
       s.send = true;
       s.error = false;
@@ -4346,7 +4346,7 @@
   }
   class NavigatorUAData {
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); }
-    get brands() { const [v] = chromeVersion(); return Object.freeze([Object.freeze({ brand: 'Chromium', version: v }), Object.freeze({ brand: 'Google Chrome', version: v }), Object.freeze({ brand: 'Not?A_Brand', version: '99' })]); }
+    get brands() { const [v] = chromeVersion(); return Object.freeze([Object.freeze({ brand: 'Chromium', version: v }), Object.freeze({ brand: 'Not=A?Brand', version: '24' }), Object.freeze({ brand: 'Google Chrome', version: v })]); }
     get mobile() { return false; }
     get platform() { return 'Windows'; }
     getHighEntropyValues(hints) {
@@ -4354,7 +4354,7 @@
       const all = {
         brands: this.brands, mobile: false, platform: 'Windows', architecture: 'x86', bitness: '64', model: '',
         platformVersion: '15.0.0', uaFullVersion: full, wow64: false, formFactors: ['Desktop'],
-        fullVersionList: Object.freeze([{ brand: 'Chromium', version: full }, { brand: 'Google Chrome', version: full }, { brand: 'Not?A_Brand', version: '99.0.0.0' }]),
+        fullVersionList: Object.freeze([{ brand: 'Chromium', version: full }, { brand: 'Not=A?Brand', version: '24.0.0.0' }, { brand: 'Google Chrome', version: full }]),
       };
       const out = { brands: all.brands, mobile: false, platform: 'Windows' };
       for (const h of Array.from(hints || [], String)) if (h in all) out[h] = all[h];

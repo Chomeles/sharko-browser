@@ -1140,7 +1140,7 @@ impl<'doc> DocumentMutator<'doc> {
                 );
                 self.doc.net_provider.fetch(
                     self.doc.id(),
-                    self.doc.build_request(url),
+                    self.doc.build_request(url, preload_destination(node.attr(local_name!("as")))),
                     Box::new(handler),
                 );
             }
@@ -1182,7 +1182,7 @@ impl<'doc> DocumentMutator<'doc> {
 
         self.doc.net_provider.fetch(
             self.doc.id(),
-            self.doc.build_request(url),
+            self.doc.build_request(url, "style"),
             Box::new(handler),
         );
     }
@@ -1806,4 +1806,15 @@ fn picture_images(doc: &BaseDocument, source: NodeId) -> Vec<NodeId> {
         .copied()
         .filter(|&c| doc.nodes[c].data.is_element_with_tag_name(&local_name!("img")))
         .collect()
+}
+
+/// `<link rel=preload as=...>` to the Fetch destination it stands for.
+fn preload_destination(as_attr: Option<&str>) -> &'static str {
+    match as_attr.map(str::trim) {
+        Some(a) if a.eq_ignore_ascii_case("style") => "style",
+        Some(a) if a.eq_ignore_ascii_case("image") => "image",
+        Some(a) if a.eq_ignore_ascii_case("font") => "font",
+        Some(a) if a.eq_ignore_ascii_case("script") => "script",
+        _ => "",
+    }
 }

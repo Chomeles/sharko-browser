@@ -291,3 +291,11 @@ Patches so far:
     markup handed to usvg also declares `xmlns:xlink` when it carries `xlink:` attributes:
     HTML parsing leaves the prefix unbound, usvg's XML parser rejected the whole `<svg>`, so
     `<use xlink:href="#icon">` drew nothing even for sprites inside the page.
+80. `blitz-dom/src/net.rs` (`stamped_request`, `StylesheetLoader::referrer`, `fetch_font_face`),
+    `document.rs`, `iframe.rs`, `image_source.rs`, `svg_sprite.rs`, `mutator.rs`,
+    `layout/damage.rs`: every parser-initiated request (stylesheet, `@import`, image, CSS
+    `url()`, `@font-face`, `<iframe>`, preload) carries `Referer` (the document, or the
+    stylesheet for `@import`/fonts) and a `Sec-Fetch-Dest` marker with its Fetch destination,
+    which the network provider turns into the destination and strips. Without them the
+    requests had no `Referer`/`Sec-Fetch-Site`, fonts no `Origin`, and an iframe went out as a
+    generic request instead of `Sec-Fetch-Dest: iframe`.

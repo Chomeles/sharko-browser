@@ -105,8 +105,24 @@ impl NetProvider for BlitzNetProvider {
     }
 }
 
-/// Infers the request destination from `Accept` or the URL's file extension.
+/// Header the document loader sets on the requests it starts (`<link>`, `<img>`, CSS
+/// `url()`, `@font-face`, `<iframe>`): the Fetch destination, which the URL and `Accept`
+/// can't tell (`/css2?family=X` is a stylesheet). Not sent on the wire.
+pub const DESTINATION_HEADER: &str = "sec-fetch-dest";
+
+/// Infers the request destination from the loader's marker, `Accept` or the URL's file
+/// extension.
 fn infer_destination(request: &Request) -> Destination {
+    match request.headers.get(DESTINATION_HEADER).and_then(|v| v.to_str().ok()) {
+        Some("style") => return Destination::Style,
+        Some("image") => return Destination::Image,
+        Some("font") => return Destination::Font,
+        Some("iframe" | "frame") => return Destination::Iframe,
+        Some("script") => return Destination::Script,
+        Some("video" | "audio" | "track") => return Destination::Media,
+        Some("document") => return Destination::Document,
+        _ => {}
+    }
     if let Some(accept) = request.headers.get(http::header::ACCEPT).and_then(|v| v.to_str().ok()) {
         let accept = accept.to_ascii_lowercase();
         if accept.starts_with("text/css") {
@@ -144,6 +160,7 @@ fn to_net_request(request: Request, destination: Destination) -> NetRequest {
     let mut headers: Vec<(String, String)> = request
         .headers
         .iter()
+        .filter(|(k, _)| k.as_str() != DESTINATION_HEADER)
         .map(|(k, v)| (k.as_str().to_owned(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
         .collect();
     let referrer = headers
@@ -377,6 +394,19 @@ mod tests {
         let mut r = req("https://fonts.googleapis.com/css2?family=Roboto");
         r.headers.insert(http::header::ACCEPT, http::HeaderValue::from_static("text/css,*/*;q=0.1"));
         assert_eq!(infer_destination(&r), Destination::Style);
+    }
+
+    #[test]
+    fn destination_marker_wins_and_is_not_sent() {
+        let mut r = req("https://a.com/css2?family=Roboto");
+        r.headers.insert("sec-fetch-dest", http::HeaderValue::from_static("style"));
+        assert_eq!(infer_destination(&r), Destination::Style);
+        r.headers.insert("sec-fetch-dest", http::HeaderValue::from_static("iframe"));
+        r.headers.insert(http::header::REFERER, http::HeaderValue::from_static("https://a.com/p"));
+        assert_eq!(infer_destination(&r), Destination::Iframe);
+        let n = to_net_request(r, Destination::Iframe);
+        assert!(n.headers.iter().all(|(k, _)| k != "sec-fetch-dest"));
+        assert_eq!(n.referrer.as_deref(), Some("https://a.com/p"));
     }
 
     fn form() -> FormData {
