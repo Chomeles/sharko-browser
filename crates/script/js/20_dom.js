@@ -1573,7 +1573,14 @@
     const compute = () => {
       const ids = N.querySelectorAll(scopeId, l === '*' ? '*' : L.cssEscape(l));
       if (nsv === '*') return ids;
-      return ids.filter((id) => (N.namespaceURI(id) || null) === nsv || (nsv === L.NS.HTML && N.namespaceURI(id) === ''));
+      return ids.filter((id) => {
+        // "No namespace" and HTML are the same natively: elements of XML documents that have none say so in their stamp.
+        if (foreignWrappers !== 0) {
+          const w = cache.get(id);
+          if (w !== undefined && nsOf(w) === NONE) return nsv === null;
+        }
+        return (N.namespaceURI(id) || null) === nsv || (nsv === L.NS.HTML && N.namespaceURI(id) === '');
+      });
     };
     return L.makeHTMLCollection({ kind: 3, compute }, false);
   }
