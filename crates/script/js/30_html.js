@@ -257,7 +257,8 @@
   // The HTML "rendered text collection steps" (https://html.spec.whatwg.org/#rendered-text-
   // collection-steps), driven by computed styles. Items are text chunks `{s, pre, atomic}`
   // (pre: whitespace is preserved; atomic: an inline-block/replaced box, which behaves like
-  // a character for whitespace collapsing) and required line break counts (numbers).
+  // a character for whitespace collapsing, and carries the required line breaks at its edges
+  // as `lead`/`trail`) and required line break counts (numbers).
   // Soft line wrapping is ignored, ::first-line / ::first-letter styles are not applied.
   const BLOCK_LEVEL = new Set(['block', 'flex', 'grid', 'table', 'list-item', 'flow-root', 'table-caption', '-webkit-box']);
   const ATOMIC_INLINE = new Set(['inline-block', 'inline-flex', 'inline-grid', 'inline-table', '-webkit-inline-box']);
@@ -325,9 +326,12 @@
       if (required) items.push(required);
       if (atomic) {
         // Its own inline formatting context: leading/trailing collapsible whitespace goes.
+        // Blocks inside it still end the line around the box, so the breaks at its edges
+        // travel with it (`lead`, `trail`) instead of being dropped with the inner text.
         const inner = [];
         innerTextCollect(c, inner, vis, childMode);
-        items.push({ s: innerTextConcat(inner), pre: true, atomic: true });
+        const box = innerTextRun(inner);
+        items.push({ s: box.s, pre: true, atomic: true, lead: box.lead, trail: box.trail });
         if (required) items.push(required);
         continue;
       }
@@ -366,13 +370,20 @@
   }
   // Concatenate items: collapsible spaces merge across chunks and vanish at line starts and
   // ends, required line breaks become the maximum run of newlines (none at the very start
-  // or end).
-  function innerTextConcat(items) {
+  // or end). Also reports those edge breaks (`lead`, `trail`) for an inline-block, whose
+  // text is nested into the surrounding text: they are not dropped there, only at the very
+  // start and end of the result.
+  function innerTextRun(items) {
     let out = '';
     let tail = 0; // collapsible spaces at the end of `out`
     let pendingBreak = 0;
+    let lead = 0;
     let lineStart = true;
     const dropTail = () => { if (tail) { out = out.slice(0, out.length - tail); tail = 0; } };
+    const addBreak = (n) => {
+      if (out === '') lead = Math.max(lead, n);
+      else pendingBreak = Math.max(pendingBreak, n);
+    };
     const flushBreak = () => {
       out += '\n'.repeat(pendingBreak);
       pendingBreak = 0;
@@ -380,18 +391,23 @@
     for (const it of items) {
       if (typeof it === 'number') {
         // A block boundary ends the line: collapsible whitespace before it goes, and
-        // whitespace after it is at a line start. Breaks before any text don't count.
+        // whitespace after it is at a line start.
         dropTail();
         lineStart = true;
-        if (out !== '') pendingBreak = Math.max(pendingBreak, it);
+        addBreak(it);
         continue;
       }
       let s = it.s;
       if (it.atomic) {
-        // An inline-block / replaced box: like a character for whitespace collapsing, but an
+        // An inline-block / replaced box: like a character for whitespace collapsing, so the
+        // spaces on either side of it stay, even next to a line break from a block inside it
+        // ("a <inline-block><div>b</div></inline-block> c" is "a \nb\n c", as in Blink). An
         // empty one contributes no text (line breaks around it still merge).
+        tail = 0;
+        if (it.lead) addBreak(it.lead);
         if (s !== '') { flushBreak(); out += s; }
-        tail = 0; lineStart = false;
+        if (it.trail) addBreak(it.trail);
+        lineStart = false;
         continue;
       }
       if (s.startsWith('\n')) dropTail();
@@ -412,7 +428,7 @@
       lineStart = s.endsWith('\n');
     }
     dropTail();
-    return out;
+    return { s: out, lead, trail: pendingBreak };
   }
   function innerTextGet(el) {
     const id = idOf(el);
@@ -423,7 +439,7 @@
     const svg = nsOf(el) === SVG && ln !== 'foreignObject';
     const items = [];
     innerTextCollect(id, items, N.computedStyle(id, 'visibility', '') === 'visible', svg ? 'svg' : ln === 'select' ? 'select' : ln === 'optgroup' ? 'optgroup' : 'html');
-    return innerTextConcat(items);
+    return innerTextRun(items).s;
   }
   function innerTextSet(el, v) {
     const id = idOf(el);
