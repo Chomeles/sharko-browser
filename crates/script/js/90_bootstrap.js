@@ -1124,11 +1124,22 @@
       if (typeof d.set === 'function') nativeFns.add(d.set);
     }
   }
+  // The source text of a class's own constructor (from `constructor(`), '' if it has none.
+  function ctorSource(C) {
+    const src = L.nativeFunctionToString.call(C);
+    const m = /\n\s*(constructor\()/.exec(src);
+    return m === null ? '' : src.slice(m.index + m[0].length - m[1].length);
+  }
   const seen = new Set();
   const interfaces = L.exposed.concat([['Window', Window]]);
   for (const [name, C] of interfaces) {
     if (typeof C !== 'function') continue;
     nativeFns.add(C);
+    // An interface without a constructor has length 0 (WebIDL); the internal token parameter of
+    // its class must not show.
+    if (C.length !== 0 && /^constructor\(\s*token\b[^)]*\)\s*\{\s*if \(token !== INTERNAL\) throw L\.illegal\(\)/.test(ctorSource(C))) {
+      Object.defineProperty(C, 'length', { value: 0, configurable: true });
+    }
     // Static operations and attributes of an interface are enumerable (WebIDL), unlike class statics.
     for (const k of Object.getOwnPropertyNames(C)) {
       if (k === 'length' || k === 'name' || k === 'prototype') continue;

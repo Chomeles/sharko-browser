@@ -1340,8 +1340,22 @@ impl Renderer {
         let page_origin = page.host.origin.clone();
         let debug = std::env::var_os("SHARKO_DEBUG_FRAMES").is_some();
         for _ in 0..8 {
+            // Messages posted in order are delivered in order: a same-origin frame gets its
+            // message as a task of the page's timer queue, a cross-origin one through this
+            // queue. Run the tasks that are due first (in each round), else the native
+            // messages posted later would overtake the earlier in-page ones (and their replies).
+            let mut ran_timers = false;
+            if let Some(rt) = page.rt.as_mut() {
+                if rt.next_timer_deadline().is_some_and(|d| d <= Instant::now()) {
+                    rt.run_timers(&mut page.doc);
+                    ran_timers = true;
+                }
+            }
             let messages = std::mem::take(&mut *page.messages.borrow_mut());
             if messages.is_empty() {
+                if ran_timers {
+                    continue;
+                }
                 return;
             }
             self.shared.redraw.store(true, Ordering::SeqCst);
