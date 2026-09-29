@@ -8,11 +8,15 @@ layer files in this directory in this order:
                        internal registry objects (`__priv` symbols etc.)
 2. `10_events.js`    – Event classes + EventTarget
 3. `20_dom.js`       – Node / Element / Document / collections / CSSOM
-4. `30_html.js`      – HTML element subclasses (input, a, img, script, form, template, ...)
-5. `40_webapi.js`    – URL, TextEncoder/Decoder, fetch/Headers/Request/Response, XHR,
+4. `25_xpath.js`     – XPath 1.0 (`document.evaluate`, `XPathResult`, ...); reads the tree through
+                       `nodeType`, `localName`, `namespaceURI`, `parent`, `childIds`, `nextSibling`,
+                       `prevSibling`, `attrNames`, `getAttr`, `getText`, `textContent`, `contains`,
+                       `compareDocumentPosition`, `getElementById`, `querySelector` and needs no native of its own
+5. `30_html.js`      – HTML element subclasses (input, a, img, script, form, template, ...)
+6. `40_webapi.js`    – URL, TextEncoder/Decoder, fetch/Headers/Request/Response, XHR,
                        Blob, FormData, AbortController, MessageChannel, storage, timers,
                        rAF, performance, crypto, navigator, location, history, observers…
-6. `90_bootstrap.js` – creates `window`/`document` globals, registers hooks with `N.setHooks`
+7. `90_bootstrap.js` – creates `window`/`document` globals, registers hooks with `N.setHooks`
 
 All files are plain classic scripts (no ES modules, no imports). They share state via a
 single IIFE-local object passed through `globalThis.__layer` which `90_bootstrap.js`

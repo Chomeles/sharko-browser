@@ -1247,11 +1247,14 @@
     },
     lookupNamespaceURI(prefix) {
       const p = prefix === null || prefix === undefined || prefix === '' ? null : `${prefix}`;
-      if (p === 'xml') return L.NS.XML;
-      if (p === 'xmlns') return L.NS.XMLNS;
+      // "Locate a namespace" starts at an element; a node without one (a fragment, a
+      // doctype, an empty document, a detached text node) has no namespaces, not even xml.
       let w = this;
       if (typeOf(w) === 9) w = w.documentElement;
       else if (typeOf(w) !== 1) w = w.parentElement;
+      if (w === null || w === undefined) return null;
+      if (p === 'xml') return L.NS.XML;
+      if (p === 'xmlns') return L.NS.XMLNS;
       for (; w !== null && w !== undefined; w = w.parentElement) {
         const id = idOf(w);
         if (p === null && N.hasAttr(id, 'xmlns')) return N.getAttr(id, 'xmlns') || null;
@@ -1820,6 +1823,7 @@
     get baseURI() { return L.baseURL(); }
     hasChildNodes() { return false; }
     getRootNode() { return this; }
+    lookupNamespaceURI(prefix) { return this.#owner === null ? null : this.#owner.lookupNamespaceURI(prefix); }
     cloneNode() { return new Attr(INTERNAL, null, this.#name, this.value, this.#ns, this.#prefix, this.#local); }
     isEqualNode(o) { return L.isAttr(o) && o.name === this.name && o.value === this.value; }
     contains(o) { return o === this; }
@@ -1845,6 +1849,7 @@
     }
     return a;
   }
+  L.attrNode = attrNode;
   function detachAttr(el, name, value) {
     const m = attrNodeCache.get(el);
     const a = m !== undefined ? m.get(name) : undefined;
