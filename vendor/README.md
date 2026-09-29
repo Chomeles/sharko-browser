@@ -313,3 +313,8 @@ Patches so far:
     answers with the container's last laid-out content-box size and records it on the node;
     `resolve` loops style → layout (at most 4 extra passes, for nested containers) and restyles
     the descendants of every container whose size changed since style queried it.
+83. `blitz-dom/src/mutator.rs` (iframe loading): an `<iframe>` without `src` or with
+    `src="about:blank"` fires its `load` event after its initial empty document is attached
+    (HTML "process the iframe attributes"; Chromium and Gecko do the same). It fired none, so
+    `frame.onload = ...; frame.src = 'about:blank'` (the WPT `with_iframe` helper) never
+    resolved.

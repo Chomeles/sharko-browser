@@ -1260,6 +1260,11 @@ impl<'doc> DocumentMutator<'doc> {
         if raw_src.is_empty() || raw_src.eq_ignore_ascii_case("about:blank") {
             if node.subdoc().is_none() {
                 self.doc.load_iframe_srcdoc(target_id, "");
+                // PATCH: HTML "process the iframe attributes": an empty or about:blank `src`
+                // navigates to about:blank, whose completion fires the `<iframe>`'s `load`
+                // (Chromium and Gecko fire it for the initial document too; test helpers
+                // wait for it: `frame.onload = ...; frame.src = 'about:blank'`).
+                self.doc.push_element_load_event(target_id, true);
             }
             return;
         }
