@@ -15,7 +15,7 @@ use crate::invalidation::element::element_wrapper::ElementSnapshot;
 use crate::properties::longhands::display::computed_value::T as Display;
 use crate::properties::{ComputedValues, PropertyFlags};
 use crate::selector_parser::AttrValue as SelectorAttrValue;
-use crate::selector_parser::{PseudoElementCascadeType, SelectorParser};
+use crate::selector_parser::{Direction, PseudoElementCascadeType, SelectorParser};
 use crate::values::{AtomIdent, AtomString};
 use crate::{Atom, CaseSensitivityExt, LocalName, Namespace, Prefix};
 use cssparser::{
@@ -374,6 +374,8 @@ pub enum NonTSPseudoClass {
     CustomState(CustomState),
     Default,
     Defined,
+    // PATCH: `:dir()` (Selectors 4 §8.2); matched by the embedder from the `dir` attributes.
+    Dir(Direction),
     Disabled,
     Enabled,
     Focus,
@@ -483,7 +485,7 @@ impl ToCss for NonTSPseudoClass {
             Self::UserValid => ":user-valid",
             Self::Valid => ":valid",
             Self::Visited => ":visited",
-            Self::Lang(_) => unreachable!(),
+            Self::Lang(_) | Self::Dir(_) => unreachable!(),
         })
     }
 }
@@ -527,7 +529,7 @@ impl NonTSPseudoClass {
             Self::UserValid => ElementState::USER_VALID,
             Self::Valid => ElementState::VALID,
             Self::Visited => ElementState::VISITED,
-            Self::CustomState(_) | Self::Lang(_) | Self::ServoNonZeroBorder => {
+            Self::CustomState(_) | Self::Lang(_) | Self::Dir(_) | Self::ServoNonZeroBorder => {
                 ElementState::empty()
             },
         }
@@ -676,6 +678,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             "lang" if !after_part => {
                 NonTSPseudoClass::Lang(parser.expect_ident_or_string()?.as_ref().into())
             },
+            "dir" if !after_part => NonTSPseudoClass::Dir(Direction::parse(parser)?),
             "state" => {
                 let result = AtomIdent::from(parser.expect_ident()?.as_ref());
                 NonTSPseudoClass::CustomState(CustomState(result))

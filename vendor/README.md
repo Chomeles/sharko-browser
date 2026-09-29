@@ -313,3 +313,66 @@ Patches so far:
     answers with the container's last laid-out content-box size and records it on the node;
     `resolve` loops style → layout (at most 4 extra passes, for nested containers) and restyles
     the descendants of every container whose size changed since style queried it.
+81. `blitz-dom/src/{document,mutator,iframe,config,svg_sprite,events/pointer}.rs`: the HTML
+    "document base URL" (`BaseDocument::document_base_url`), separate from the document URL
+    (`base_url`, what `location` reports): the first `<base href>` in tree order, parsed
+    against the fallback base URL; a failed parse or a `data:`/`javascript:` result gives the
+    fallback (Ladybird `Document::base_url`, `HTMLBaseElement::set_the_frozen_base_url`;
+    Chromium `Document::ProcessBaseElement`). It is recomputed when a `<base>` is inserted or
+    removed, its `href` changes, or the document URL changes, and is used for `<link>`, `<img>`
+    / `srcset`, preload, iframe `src`, form actions, link clicks, `<use>` and `url()` in inline
+    styles. The fallback base URL of a srcdoc / initial `about:blank` iframe document is its
+    parent's document base URL (`DocumentConfig::fallback_base_url`). Before, every
+    subresource of a page with `<base href>` pointing elsewhere (dwd.de) 404ed.
+81. `blitz-dom/src/document.rs`: Stylo pref `layout.css.content.alt-text.enabled` on, so
+    `content: "\e902" / ""` (CSS Generated Content 3 §2.1) parses instead of invalidating
+    the declaration (icon-font `::before` of stern.de). Layout already lays out only the
+    items before the slash (`pe_content_text`).
+82. `stylo/servo/media_features.rs`, `stylo_atoms/static_atoms.txt`: the media features
+    `prefers-reduced-motion`, `prefers-contrast`, `forced-colors`, `scripting`, `update`,
+    `color-gamut` and `display-mode` (servo's table lacked them, so every query naming one
+    was invalid). Fixed values of a desktop browser without user preferences (as Chromium
+    reports): no reduced motion, scripting enabled, forced colors none, no contrast
+    preference, update fast, sRGB, browser display mode; boolean forms follow the spec.
+83. `blitz-dom/src/stylo.rs`: `:lang()` (Selectors 4 §8.1) was hard-coded false. The element's
+    language is the closest `lang` attribute up the tree (none: the empty language), matched
+    with RFC 4647 extended filtering (Stylo's `extended_filtering`); `lang_attr` reports the
+    attribute so attribute changes restyle.
+84. `stylo/servo/selector_parser.rs`, `stylo/selector_parser.rs`,
+    `stylo/invalidation/element/invalidation_map.rs`, `blitz-dom/src/stylo.rs`: `:dir(ltr|rtl)`
+    (Selectors 4 §8.2; the servo build did not parse it). Stylo parses it into
+    `NonTSPseudoClass::Dir` and depends on the `dir` attribute; blitz matches the element's
+    directionality (HTML §3.2.6.1): `dir` ltr/rtl, `auto` and `<bdi>` by the first strong
+    character (Hebrew/Arabic/... blocks RTL), else the parent's, `ltr` at the root.
+85. `stylo/properties/longhands.toml`, `blitz-dom/src/layout/construct.rs`,
+    `script/js/30_html.js`: `content-visibility`. Stylo gated the longhand to gecko; it is now
+    parsed by the servo build behind `layout.unimplemented` (no animation). `hidden` skips the
+    contents (CSS Containment 2 §4.1): the box stays, its children and pseudo-elements get no
+    boxes, and `innerText` leaves them out. `auto` parses and computes but is not yet
+    skipped: it needs a relevance test (viewport distance) that has to run after the first
+    layout, so offscreen `auto` subtrees are still laid out.
+81. `blitz-dom/src/document.rs` (`process_style_element`, `is_connected_to_root`),
+    `mutator.rs` (test): a `<style>` applies only while connected (HTML §4.2.6 "update a
+    style block"). A detached one (created by script and given text, or handed to another
+    document's tree) registered its rules in the stylist anyway and kept them after removal.
+    airbnb.de builds `div { width: 1rem; height: 1rem }` for a `<browser-font-size>` probe
+    iframe; every `<div>` of the page became 16x16 and the whole react tree collapsed.
+82. `blitz-dom/src/document.rs` (`add_stylesheet_for_node`, `tree_path`): the sheet of a
+    `<style>`/`<link>` is inserted into the stylist before the first sheet of a node that
+    follows it in tree order (CSS Cascade 4 §6.4.1), not before the next larger node id. A
+    `<style>` that script created and put in front of an older one (`insertBefore`,
+    `prepend`, emotion's `prepend: true`) used to win the cascade against it: coursera.org's
+    `.cds-2 { padding-inline: 0 }` beat `.css-j55dmx { padding: 0 48px }` and the nav
+    container lost its padding.
+83. `parley/src/layout/{data,layout,line_break}.rs` (`base_text_wrap_mode`,
+    `set_base_text_wrap_mode`), `blitz-dom/src/layout/inline.rs`: inline boxes that come
+    before any text of the paragraph (or in a paragraph without text: a row of `inline-block`
+    tiles) followed `wrap` because the wrap mode was only ever taken from the previous text
+    cluster. Under `white-space: nowrap` they were break opportunities for the min-content
+    width (a `nowrap` carousel of `inline-block` tiles inside an `inline-block` was as wide as
+    its container, 1236px instead of 3880px on bing.com) and could wrap at line breaking. The
+    inline layout root now hands its own `text-wrap-mode` to the layout.
+84. `blitz-dom/src/document.rs` (`get_client_bounding_rect`, `union_of_child_rects`): the
+    rect of an inline element that has no fragment in a text layout because its content is
+    block-level (`<a><span><h2>..</h2></span></a>`) is the union of the boxes of its children
+    instead of `None` (0x0 at the origin in script).

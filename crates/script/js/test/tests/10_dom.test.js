@@ -309,6 +309,13 @@ test('selectors: querySelector(All), matches, closest, getElementsBy*, :scope', 
   assert.strictEqual(e.run("[].map.call(document.body.children, c => c.localName).join()").startsWith('div,ul,a,img'), true);
 });
 
+test('baseURI follows the engine base rules: first <base href>, data:/javascript: ignored, live', async () => {
+  const e = await env();
+  assert.strictEqual(e.run("document.querySelector('base').setAttribute('href', 'data:text/plain,x'); document.baseURI"), 'https://example.com/app/index.html');
+  assert.strictEqual(e.run("document.querySelector('base').setAttribute('href', ' /other/ '); document.baseURI"), 'https://example.com/other/');
+  assert.strictEqual(e.run("document.querySelector('base').removeAttribute('href'); document.baseURI"), 'https://example.com/app/index.html');
+});
+
 test('URL reflection (href/src with <base>), hyperlink utils, document props', async () => {
   const e = await env();
   assert.strictEqual(e.run("document.getElementById('lnk').href"), 'https://example.com/app/page?x=1#top');

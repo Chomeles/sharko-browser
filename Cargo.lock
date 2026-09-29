@@ -4859,8 +4859,6 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "706e5fd9b66b8c1aa1e73e2acecdbec7b274d5bba7fe8946139696184e54978b"
 dependencies = [
  "string_cache",
  "string_cache_codegen",

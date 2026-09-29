@@ -181,6 +181,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | function | returns |
 |---|---|
 | `N.location()` | current document URL (string) |
+| `N.baseURL()` | document base URL (string): first `<base href>` against the fallback base URL, else the fallback (HTML "document base URL"); same value the engine resolves subresources with |
 | `N.navigate(url, replace)` | begin navigation of this tab |
 | `N.reload()` | – |
 | `N.historyPush(url, replace)` | same-document URL change (pushState/replaceState). Rust updates the document URL; state objects are kept in JS |

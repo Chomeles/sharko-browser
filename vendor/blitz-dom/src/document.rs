@@ -27,13 +27,13 @@ use blitz_traits::node_id::NodeId;
 use blitz_traits::shell::{ColorScheme, DummyShellProvider, ShellProvider, Viewport};
 use cursor_icon::CursorIcon;
 use linebender_resource_handle::Blob;
-use markup5ever::{LocalName, local_name};
+use markup5ever::{LocalName, local_name, ns};
 use parley::{FontContext, PlainEditorDriver};
 use selectors::{Element, matching::QuirksMode};
 use smallvec::SmallVec;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, Bound, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -213,6 +213,12 @@ pub struct BaseDocument {
     // Config
     /// Base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub(crate) url: DocumentUrl,
+    /// PATCH: the HTML "document base URL" (the first `<base href>` resolved against the
+    /// fallback base URL, else the fallback). `url` stays the document URL (location).
+    pub(crate) document_base: DocumentUrl,
+    /// PATCH: the "fallback base URL" when it differs from `url` (about:srcdoc / about:blank
+    /// documents use their creator's base URL).
+    pub(crate) fallback_base: Option<DocumentUrl>,
     // Devtool settings. Currently used to render debug overlays
     pub(crate) devtool_settings: DevtoolSettings,
     // Viewport details such as the dimensions, HiDPI scale, and zoom factor,
@@ -482,6 +488,10 @@ impl BaseDocument {
         style_config::set_pref!("layout.css.nth-child-of.enabled", true);
         // PATCH 80: container queries (`container-type`, `@container`, `cq*` units).
         style_config::set_pref!("layout.container-queries.enabled", true);
+        // PATCH: parse `content: "x" / "alt"` (CSS Generated Content 3 §2.1); without
+        // the pref the whole declaration is invalid and icon-font `::before` vanish.
+        // Layout only uses the items before the slash (see `pe_content_text`).
+        style_config::set_pref!("layout.css.content.alt-text.enabled", true);
         style_config::set_pref!("layout.threads", -1);
 
         let viewport = config.viewport.unwrap_or_default();
@@ -497,6 +507,10 @@ impl BaseDocument {
             .base_url
             .and_then(|url| DocumentUrl::from_str(&url).ok())
             .unwrap_or_default();
+        let fallback_base = config
+            .fallback_base_url
+            .and_then(|url| DocumentUrl::from_str(&url).ok());
+        let document_base = fallback_base.clone().unwrap_or_else(|| base_url.clone());
 
         let net_provider = config
             .net_provider
@@ -535,6 +549,8 @@ impl BaseDocument {
             viewport_overflow: crate::ViewportOverflow::INITIAL,
             viewport_overflow_source: None,
             url: base_url,
+            document_base,
+            fallback_base,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
             adopted_stylesheets: Vec::new(),
@@ -651,11 +667,51 @@ impl BaseDocument {
     /// Set base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub fn set_base_url(&mut self, url: &str) {
         self.url = DocumentUrl::from(Url::parse(url).unwrap());
+        self.update_document_base();
     }
 
-    /// The base url used for resolving linked resources (stylesheets, images, fonts, etc)
+    /// The document URL (what `location` reports); not the base for relative URLs, see
+    /// [`Self::document_base_url`].
     pub fn base_url(&self) -> &Url {
         &self.url
+    }
+
+    /// PATCH: the HTML "document base URL", against which linked resources, navigations and
+    /// CSS `url()` in inline styles are resolved.
+    pub fn document_base_url(&self) -> &Url {
+        &self.document_base
+    }
+
+    /// PATCH: recompute the document base URL (HTML "document base URL"; same shape as
+    /// Ladybird `Document::base_url` / `HTMLBaseElement::set_the_frozen_base_url` and Chromium
+    /// `Document::ProcessBaseElement`): the first `<base>` with an `href` attribute, in tree
+    /// order, parsed against the fallback base URL; a failed parse or a `data:`/`javascript:`
+    /// result gives the fallback. Call when a `<base>` is inserted/removed, its `href`
+    /// changes, or the document URL changes.
+    pub(crate) fn update_document_base(&mut self) {
+        let fallback = self.fallback_base.clone().unwrap_or_else(|| self.url.clone());
+        let mut base = fallback.clone();
+        let mut stack = vec![self.root_node().id];
+        while let Some(id) = stack.pop() {
+            let Some(node) = self.get_node(id) else { continue };
+            if let Some(el) = node.element_data()
+                && el.name.local == local_name!("base")
+                && el.name.ns == ns!(html)
+                // Removal clears the flag before the node is detached from its parent.
+                && node.flags.is_in_document()
+                && let Some(href) = el.attr(local_name!("href"))
+            {
+                let href = href.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0c' | '\r'));
+                if let Some(u) = fallback.resolve_relative(href)
+                    && !matches!(u.scheme(), "data" | "javascript")
+                {
+                    base = DocumentUrl::from(u);
+                }
+                break;
+            }
+            stack.extend(node.children.iter().rev().copied());
+        }
+        self.document_base = base;
     }
 
     pub fn guard(&self) -> &SharedRwLock {
@@ -826,7 +882,7 @@ impl BaseDocument {
             name,
             value,
             &self.guard,
-            self.url.url_extra_data(),
+            self.document_base.url_extra_data(),
         );
         if did_change {
             node.mark_style_attr_updated();
@@ -838,7 +894,7 @@ impl BaseDocument {
         let did_change = node.element_data_mut().unwrap().remove_style_property(
             name,
             &self.guard,
-            self.url.url_extra_data(),
+            self.document_base.url_extra_data(),
         );
         if did_change {
             node.mark_style_attr_updated();
@@ -1184,10 +1240,10 @@ impl BaseDocument {
     }
 
     pub(crate) fn resolve_url(&self, raw: &str) -> url::Url {
-        self.url.resolve_relative(raw).unwrap_or_else(|| {
+        self.document_base.resolve_relative(raw).unwrap_or_else(|| {
             panic!(
                 "to be able to resolve {raw} with the base_url: {:?}",
-                *self.url
+                *self.document_base
             )
         })
     }
@@ -1236,6 +1292,16 @@ impl BaseDocument {
     }
 
     pub fn process_style_element(&mut self, target_id: NodeId) {
+        // PATCH: a `<style>` applies only while it is connected (HTML §4.2.6 "update a style
+        // block": the element must be connected). A detached one (created by script, text
+        // set, not inserted yet, or inserted into another document) used to register its
+        // rules in this document's stylist anyway: airbnb.de's `<browser-font-size>` probe
+        // builds `div { width: 1rem; height: 1rem }` for its iframe, and every `<div>` of
+        // the page became 16x16.
+        if !self.is_connected_to_root(target_id) {
+            self.remove_stylesheet_for_node(target_id);
+            return;
+        }
         let css = self.nodes[target_id].text_content();
         let css = html_escape::decode_html_entities(&css);
         let media = self.media_list_of(target_id);
@@ -1306,6 +1372,19 @@ impl BaseDocument {
 
     /// PATCH: where a `<style>`/`<link>` element's stylesheet applies: nowhere inside
     /// `<template>` contents, only to the host's subtree inside an emulated shadow tree.
+    /// PATCH: whether the parent chain of `node_id` ends at the document root node.
+    pub(crate) fn is_connected_to_root(&self, node_id: NodeId) -> bool {
+        let root = self.root_node().id;
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            if id == root {
+                return true;
+            }
+            cur = self.nodes.get(id).and_then(|n| n.parent);
+        }
+        false
+    }
+
     pub fn style_scope(&self, node_id: NodeId) -> StyleScope {
         let mut cur = self.nodes.get(node_id).and_then(|n| n.parent);
         while let Some(id) = cur {
@@ -1491,7 +1570,7 @@ impl BaseDocument {
         origin: Origin,
         media: MediaList,
     ) -> DocumentStyleSheet {
-        self.make_stylesheet_at(css, origin, media, self.url.url_extra_data())
+        self.make_stylesheet_at(css, origin, media, self.document_base.url_extra_data())
     }
 
     /// PATCH: a stylesheet whose relative URLs resolve against `url_data`.
@@ -1553,12 +1632,21 @@ impl BaseDocument {
         let element = &mut self.nodes[node_id].element_data_mut().unwrap();
         element.special_data = SpecialElementData::Stylesheet(stylesheet.clone());
 
-        // TODO: Nodes could potentially get reused so ordering by node_id might be wrong.
-        let insertion_point = self
-            .nodes_to_stylesheet
-            .range((Bound::Excluded(node_id), Bound::Unbounded))
-            .next()
-            .map(|(_, sheet)| sheet);
+        // PATCH: the sheet goes before the first sheet of a node that follows this one in
+        // tree order (the cascade orders author sheets by tree position, CSS Cascade 4
+        // §6.4.1). It used to be ordered by node id, i.e. by creation: a `<style>` that script
+        // created and inserted before an older one (emotion's `prepend`, `insertBefore`)
+        // won the cascade against it, e.g. coursera.org's padding of the nav container.
+        let mine = self.tree_path(node_id);
+        let insertion_point = mine.and_then(|mine| {
+            self.nodes_to_stylesheet
+                .iter()
+                .filter(|(other, _)| **other != node_id)
+                .filter_map(|(other, sheet)| Some((self.tree_path(*other)?, sheet)))
+                .filter(|(path, _)| *path > mine)
+                .min_by(|(a, _), (b, _)| a.cmp(b))
+                .map(|(_, sheet)| sheet)
+        });
 
         // PATCH: adopted stylesheets stay behind every node's sheet.
         let insertion_point = insertion_point.or_else(|| self.first_adopted_stylesheet());
@@ -1572,6 +1660,20 @@ impl BaseDocument {
             self.stylist
                 .append_stylesheet(stylesheet, &self.guard.read())
         }
+    }
+
+    /// PATCH: the child indices from the root down to `id` (`None` when detached).
+    fn tree_path(&self, id: NodeId) -> Option<Vec<usize>> {
+        let root = self.root_node().id;
+        let mut path = Vec::new();
+        let mut cur = id;
+        while cur != root {
+            let parent = self.nodes.get(cur)?.parent?;
+            path.push(self.nodes.get(parent)?.children.iter().position(|c| *c == cur)?);
+            cur = parent;
+        }
+        path.reverse();
+        Some(path)
     }
 
     fn first_adopted_stylesheet(&self) -> Option<&DocumentStyleSheet> {
@@ -1605,7 +1707,7 @@ impl BaseDocument {
                         .as_deref()
                         .and_then(|b| url::Url::parse(b).ok())
                         .map(|u| UrlExtraData(ServoArc::new(u)))
-                        .unwrap_or_else(|| self.url.url_extra_data());
+                        .unwrap_or_else(|| self.document_base.url_extra_data());
                     let css = match host {
                         Some(host) => crate::shadow_css::scope_shadow_css(css, &host.to_string()),
                         None => css.clone(),
@@ -2732,15 +2834,19 @@ impl BaseDocument {
                 .iter()
                 .map(|r| r.y + r.height)
                 .fold(f64::NEG_INFINITY, f64::max);
-            return match rects.is_empty() {
-                true => None,
-                false => Some(BoundingRect {
-                    x: x0,
-                    y: y0,
-                    width: x1 - x0,
-                    height: y1 - y0,
-                }),
-            };
+            if rects.is_empty() {
+                // PATCH: an inline element whose content is block-level (`<a><h2>..</h2></a>`,
+                // the block splits the inline) has no fragment in a text layout: its rect
+                // is the union of the boxes of its children (CSSOM: the boxes the element
+                // generates, and the block-level ones of its children belong to it).
+                return self.union_of_child_rects(node_id);
+            }
+            return Some(BoundingRect {
+                x: x0,
+                y: y0,
+                width: x1 - x0,
+                height: y1 - y0,
+            });
         }
 
         let node = self.get_node(node_id)?;
@@ -2804,6 +2910,36 @@ impl BaseDocument {
             width: x1 - x0,
             height: y1 - y0,
         })
+    }
+
+    /// PATCH: the union of the border boxes of the rendered element children of `node_id`
+    /// (`None` when there are none).
+    fn union_of_child_rects(&self, node_id: NodeId) -> Option<BoundingRect> {
+        let node = self.get_node(node_id)?;
+        let mut acc: Option<(f64, f64, f64, f64)> = None;
+        for &child in &node.children {
+            let Some(c) = self.get_node(child) else { continue };
+            if !c.is_element() {
+                continue;
+            }
+            let hidden = c
+                .primary_styles()
+                .is_none_or(|s| s.clone_display().is_none());
+            if hidden {
+                continue;
+            }
+            let Some(r) = self.get_client_bounding_rect(child) else { continue };
+            acc = Some(match acc {
+                Some((x0, y0, x1, y1)) => (
+                    x0.min(r.x),
+                    y0.min(r.y),
+                    x1.max(r.x + r.width),
+                    y1.max(r.y + r.height),
+                ),
+                None => (r.x, r.y, r.x + r.width, r.y + r.height),
+            });
+        }
+        acc.map(|(x0, y0, x1, y1)| BoundingRect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
     }
 
     /// Whether a layout ancestor of `node_id` is `position: fixed` or transformed (then a

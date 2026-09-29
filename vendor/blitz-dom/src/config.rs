@@ -35,6 +35,9 @@ pub struct DocumentConfig {
     pub viewport: Option<Viewport>,
     /// The base url which relative URLs are resolved against
     pub base_url: Option<String>,
+    /// PATCH: the fallback base URL when it is not `base_url` (a srcdoc document uses its
+    /// parent's document base URL).
+    pub fallback_base_url: Option<String>,
     /// User Agent stylesheets
     pub ua_stylesheets: Option<Vec<String>>,
     /// Net provider to handle network requests for resources
