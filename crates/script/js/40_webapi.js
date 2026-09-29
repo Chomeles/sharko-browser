@@ -194,13 +194,120 @@
     return cloneValue(value);
   }
 
+  // The entries of a `transfer` argument: a sequence, or the `transfer` member of an options dictionary.
+  const transferOf = (x) => (Array.isArray(x) ? x : (x !== null && typeof x === 'object' && Array.isArray(x.transfer) ? x.transfer : []));
+  const abTransfer = ArrayBuffer.prototype.transfer;
+  const isBuffer = (x) => Object.prototype.toString.call(x) === '[object ArrayBuffer]';
+  // A MessagePort of any realm of the page: a same-origin frame's objects are reachable, but
+  // their class (and so its private state) is another one, so they are recognized by their shape.
+  const isPort = (x) => x instanceof MessagePort || (Object.prototype.toString.call(x) === '[object MessagePort]'
+    && typeof x.postMessage === 'function' && typeof x.addEventListener === 'function' && typeof x.start === 'function');
+  // Only ports and ArrayBuffers can be transferred. Other transferables (ImageBitmap, streams, ...)
+  // don't exist here, so listing one is ignored rather than an error.
+  function transferables(list, self, iface) {
+    const ports = [], orig = [], buffers = [];
+    if (list.length === 0) return { ports, orig, buffers };
+    const seen = new Set();
+    for (let i = 0; i < list.length; i++) {
+      const x = list[i];
+      if (x === null || typeof x !== 'object') continue;
+      const port = isPort(x);
+      if (!port && !isBuffer(x)) continue;
+      const fail = (what) => new DOMException(`Failed to execute 'postMessage' on '${iface}': ${port ? 'Port' : 'ArrayBuffer'} at index ${i} ${what}.`, 'DataCloneError');
+      if (seen.has(x)) throw fail('is a duplicate');
+      seen.add(x);
+      if (port) {
+        const p = asLocalPort(x);
+        if (p === self) throw fail('contains the source port');
+        if (L.portDetached(p)) throw fail('is already neutered');
+        ports.push(p);
+        orig.push(x);
+      } else {
+        if (x.detached === true) throw fail('is already detached');
+        buffers.push(x);
+      }
+    }
+    return { ports, orig, buffers };
+  }
+  // The buffers of a transfer list are detached in the sender once the message is on its way.
+  // The receiver got a copy (the clone); `transfer()` hands the sender's memory to a buffer that is
+  // dropped right away, without another copy.
+  function detachBuffers(list) {
+    if (typeof abTransfer !== 'function') return;
+    for (const b of list) {
+      try { abTransfer.call(b); } catch (_) { /* not detachable */ }
+    }
+  }
+  // A transferred port is a plain object when the message is cloned, so where the message holds
+  // ports (`{ channel: port }`) is noted as paths from the root: a property name, or [index] for
+  // the value of the index-th entry of a Map. Sets and Map keys are not searched.
+  function portPaths(root, ports) {
+    const out = [];
+    const seen = new Set();
+    const walk = (v, path) => {
+      if (v === null || typeof v !== 'object') return;
+      const i = ports.indexOf(v);
+      if (i >= 0) { out.push([path, i]); return; }
+      if (seen.has(v)) return;
+      seen.add(v);
+      const tag = Object.prototype.toString.call(v);
+      if (tag === '[object Map]') {
+        let n = 0;
+        for (const x of v.values()) walk(x, [...path, [n++]]);
+      } else if (Array.isArray(v) || tag === '[object Object]') {
+        for (const k of Object.keys(v)) walk(v[k], [...path, k]);
+      }
+    };
+    walk(root, []);
+    return out;
+  }
+  // Puts `ports[i]` at each path of a clone made without them; returns the clone (the root itself
+  // may be a port). The paths of a message from another frame are not trusted.
+  function setPortPaths(data, paths, ports) {
+    if (!Array.isArray(paths)) return data;
+    for (const e of paths) {
+      if (!Array.isArray(e) || !Array.isArray(e[0]) || !(ports[e[1]] instanceof MessagePort)) continue;
+      const path = e[0], port = ports[e[1]];
+      if (path.length === 0) return port;
+      let cur = data;
+      for (let i = 0; i < path.length - 1 && cur !== null && typeof cur === 'object'; i++) {
+        const k = path[i];
+        if (Array.isArray(k)) cur = Object.prototype.toString.call(cur) === '[object Map]' ? [...cur.values()][k[0]] : null;
+        else cur = Object.prototype.hasOwnProperty.call(cur, k) ? cur[k] : null;
+      }
+      if (cur === null || typeof cur !== 'object') continue;
+      const last = path[path.length - 1];
+      if (Array.isArray(last)) {
+        if (Object.prototype.toString.call(cur) === '[object Map]') { const key = [...cur.keys()][last[0]]; if (cur.has(key)) cur.set(key, port); }
+      } else if (Object.prototype.hasOwnProperty.call(cur, last)) {
+        Object.defineProperty(cur, last, { value: port, writable: true, enumerable: true, configurable: true });
+      }
+    }
+    return data;
+  }
+  // The clone of `message` for a receiver in this realm; ports of the transfer list (`orig`) that
+  // it holds become `ports` (their stand-ins in this realm).
+  function cloneMessage(message, orig, ports) {
+    const paths = orig.length === 0 ? [] : portPaths(message, orig);
+    return setPortPaths(cloneValue(message), paths, ports);
+  }
+  // StructuredSerializeWithTransfer within this realm.
+  function serializeWithTransfer(message, transfer, self, iface) {
+    const t = transferables(transferOf(transfer), self, iface);
+    return { data: cloneMessage(message, t.orig, t.ports), ports: t.ports, buffers: t.buffers };
+  }
+
   class MessagePort extends EventTarget {
-    #other = null; #queue = []; #started = false; #closed = false;
+    // A port's peer is another port of this realm (#other) or, once its channel spans realms,
+    // a link that carries what is posted (#link). A port that has been transferred (#fwd) stays
+    // behind as a stub: it hands what it still receives on to the new owner.
+    #other = null; #link = null; #fwd = null; #queue = []; #started = false; #closed = false;
     constructor(token) { if (token !== INTERNAL) throw L.illegal(); super(); }
     static {
       L.entangle = (a, b) => { a.#other = b; b.#other = a; };
       L.portEnqueue = (port, data, ports) => {
         if (port.#closed) return;
+        if (port.#fwd !== null) { port.#fwd.send(data, ports); return; }
         port.#queue.push([data, ports]);
         if (port.#started) L.postTask(() => L.portDeliver(port));
       };
@@ -215,16 +322,48 @@
         port.#started = true;
         for (let i = 0; i < port.#queue.length; i++) L.postTask(() => L.portDeliver(port));
       };
+      // `port` posts towards its peer.
+      L.portSend = (port, data, ports) => {
+        if (port.#other !== null) L.portEnqueue(port.#other, data, ports);
+        else if (port.#link !== null) port.#link.send(data, ports);
+      };
+      // The peer is in another realm: `link.send(data, ports)` posts, `link.close()` closes.
+      L.portLink = (port, link) => { port.#other = null; port.#link = link; };
+      L.portUnlink = (port) => { port.#link = null; };
+      L.portDetached = (port) => port.#fwd !== null;
+      // Transfer: the port's undelivered messages leave with it and `fwd.send` gets what arrives
+      // later. `undo` puts everything back (the message could not be sent after all).
+      L.portDetach = (port, fwd) => {
+        const queue = port.#queue, closed = port.#closed;
+        port.#queue = [];
+        port.#fwd = fwd;
+        return { queue, closed, undo() { port.#fwd = null; port.#queue = queue; } };
+      };
+      // The peer of a stub closed its end.
+      L.portPeerClosed = (port) => {
+        if (port.#closed) return;
+        port.#closed = true;
+        const link = port.#link;
+        port.#link = null;
+        if (link !== null) link.close();
+      };
     }
     postMessage(message, transfer) {
-      const other = this.#other;
-      if (this.#closed || other === null) return;
-      const list = Array.isArray(transfer) ? transfer : (transfer && Array.isArray(transfer.transfer) ? transfer.transfer : []);
-      const ports = list.filter((x) => x instanceof MessagePort);
-      L.portEnqueue(other, cloneValue(message), ports);
+      // Like a detached port: nothing happens, not even a DataCloneError.
+      if (this.#closed || this.#fwd !== null || (this.#other === null && this.#link === null)) return;
+      const t = serializeWithTransfer(message, transfer, this, 'MessagePort');
+      L.portSend(this, t.data, t.ports);
+      detachBuffers(t.buffers);
     }
     start() { L.portStart(this); }
-    close() { this.#closed = true; }
+    close() {
+      if (this.#closed || this.#fwd !== null) return;
+      this.#closed = true;
+      const link = this.#link;
+      this.#link = null;
+      if (link !== null) link.close();
+      forgetPort(this);
+    }
     get onmessage() { return L.getHandlerIDL(this, 'message'); }
     set onmessage(v) { L.setHandlerIDL(this, 'message', v); L.portStart(this); }
   }
@@ -402,7 +541,17 @@
       if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
       t = p[10];
     }
-    N.framePost(st.path, message, t);
+    const { ports, orig, buffers } = transferables(transferArg(targetOrigin, transfer), null, 'Window');
+    // The ports move to the other realm with the message (see the port-control protocol below).
+    const undo = [];
+    try {
+      N.framePost(st.path, ports.length === 0 ? message
+        : { [PORT_CTL]: 'w', data: message, ports: exportPorts(ports, st.path, undo), paths: portPaths(message, orig) }, t);
+    } catch (e) {
+      for (const f of undo.reverse()) f();
+      throw L.fromNative(e);
+    }
+    detachBuffers(buffers);
   }
   const windowSelf = { get: (st) => L.windowAt(st.path) };
   const setHref = (st, v) => navigateFrame(st, `${v}`, false, 'href');
@@ -595,33 +744,171 @@
   L.childFrames = function () {
     try { return N.querySelectorAll(L.documentId, 'iframe,frame'); } catch (_) { return []; }
   };
+  // The `transfer` of window.postMessage(message, targetOrigin, transfer) or of postMessage(message, options).
+  const transferArg = (targetOrigin, transfer) => (targetOrigin !== null && typeof targetOrigin === 'object'
+    ? (Array.isArray(targetOrigin) ? [] : transferOf(targetOrigin)) : transferOf(transfer));
   L.onMessage = function (source, origin, data) {
+    if (data !== null && typeof data === 'object' && PORT_CTL in data) { portControl(source, origin, data); return; }
     L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports: [], lastEventId: '' }, L.MessageEvent);
   };
   // `source`: the caller's window (another realm of this page), null for this one.
   L.windowPostMessage = function (message, targetOrigin, transfer, source) {
     let target = '/';
-    let list = [];
     if (targetOrigin !== null && typeof targetOrigin === 'object') {
       target = targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`;
-      list = Array.isArray(targetOrigin.transfer) ? targetOrigin.transfer : [];
     } else {
       target = targetOrigin === undefined ? '/' : `${targetOrigin}`;
-      list = Array.isArray(transfer) ? transfer : [];
     }
     const origin = L.location.origin;
+    let elsewhere = false;
     if (target !== '*' && target !== '/') {
       const p = N.urlParse(target, null);
       if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${target}' in a call to 'postMessage'.`, 'SyntaxError');
-      if (p[10] !== origin) return;
+      elsewhere = p[10] !== origin;
     }
-    const data = cloneValue(message);
-    const ports = list.filter((x) => x instanceof MessagePort);
+    // The transfer happens even when the message is then dropped for its target origin.
+    const t = serializeWithTransfer(message, transferArg(targetOrigin, transfer), null, 'Window');
+    detachBuffers(t.buffers);
+    if (elsewhere) return;
     const src = source !== null && source !== undefined ? source : L.window;
     let srcOrigin = origin;
     if (src !== L.window) { try { srcOrigin = src.location.origin; } catch (_) { /* keep ours */ } }
-    L.postTask(() => L.fire(L.window, 'message', { data, origin: srcOrigin, source: src, ports }, L.MessageEvent));
+    L.postTask(() => L.fire(L.window, 'message', { data: t.data, origin: srcOrigin, source: src, ports: t.ports }, L.MessageEvent));
   };
+
+  // ---------------------------------------------------------------------------------------
+  // Ports across realms. Every frame is a realm of its own and a port's class keeps its state
+  // private, so a transferred port becomes a new port in the receiving realm and the two
+  // realms carry the channel between them:
+  //  - Frames of another origin are reached through N.framePost, which takes any frame path.
+  //    Port messages travel in envelopes (see PORT_CTL) that portControl unwraps on arrival;
+  //    the host just sees messages. A port is addressed by an id that its owner registered, and
+  //    only the frame it was handed to may use it.
+  //  - Same-origin frames hold each other's objects, so a foreign port is used through its
+  //    public API only (asLocalPort).
+  // The realm a port left keeps it as a stub (L.portDetach): a message posted to the old
+  // port is passed on, and what the new owner posts goes through the stub to the old peer.
+  // A channel whose ports both left therefore still runs through the realm that made it.
+  // ---------------------------------------------------------------------------------------
+  // Marks the envelopes. The key is a value that a page's own messages won't have; forging an
+  // envelope gains nothing, since the ports it names are only usable by their registered peer.
+  const PORT_CTL = '\u0001sharko:port';
+  const portReg = new Map(); // id -> { port, from, relay }: what a message with that id is for
+  const portIds = new WeakMap(); // port -> the ids registered for it
+  let idSalt = '', idCount = 0;
+  function newPortId() {
+    // Unique across documents of the same frame path (a navigated frame keeps its path)
+    if (idSalt === '') idSalt = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+    return `${idSalt}.${++idCount}`;
+  }
+  function registerPort(id, port, from, relay) {
+    portReg.set(id, { port, from: pathKey(from), relay });
+    const ids = portIds.get(port);
+    if (ids === undefined) portIds.set(port, [id]); else ids.push(id);
+  }
+  function unregisterPort(id) {
+    const e = portReg.get(id);
+    portReg.delete(id);
+    if (e === undefined) return;
+    const ids = portIds.get(e.port);
+    const i = ids === undefined ? -1 : ids.indexOf(id);
+    if (i >= 0) ids.splice(i, 1);
+  }
+  function forgetPort(port) {
+    const ids = portIds.get(port);
+    if (ids !== undefined) for (const id of ids.slice()) unregisterPort(id);
+  }
+  // A MessagePort of another realm of this page, as a port of this one.
+  const FOREIGN_PORTS = new WeakMap();
+  function asLocalPort(x) {
+    if (x instanceof MessagePort) return x;
+    let p = FOREIGN_PORTS.get(x);
+    if (p === undefined) {
+      p = new MessagePort(INTERNAL);
+      FOREIGN_PORTS.set(x, p);
+      L.portLink(p, { send: (data, ports) => x.postMessage(data, ports), close() { } });
+      x.addEventListener('message', (ev) => {
+        const orig = Array.from(ev.ports);
+        const ports = orig.map(asLocalPort);
+        L.portEnqueue(p, cloneMessage(ev.data, orig, ports), ports);
+      });
+      x.start();
+    }
+    return p;
+  }
+  // Moves `ports` to the frame at `dest`; returns their descriptions for the envelope. Undo
+  // steps are collected in `undo` and run if the envelope can't be sent.
+  function exportPorts(ports, dest, undo) {
+    return ports.map((port) => {
+      const id = newPortId(), relay = newPortId();
+      const st = L.portDetach(port, { send(data, moved) { portPost(dest, 'm', id, data, moved); } });
+      undo.push(st.undo);
+      if (st.closed) return { closed: true };
+      registerPort(relay, port, dest, true);
+      undo.push(() => unregisterPort(relay));
+      return {
+        id,
+        peer: relay,
+        queue: st.queue.map(([data, qports]) => ({ data, ports: exportPorts(qports, dest, undo), paths: qports.length === 0 ? [] : portPaths(data, qports) })),
+      };
+    });
+  }
+  // A port that came from the frame `from`. Its queue arrives with it.
+  function importPort(d, from) {
+    const port = new MessagePort(INTERNAL);
+    if (d === null || typeof d !== 'object' || d.closed === true || typeof d.id !== 'string' || typeof d.peer !== 'string' || portReg.has(d.id)) {
+      port.close();
+      return port;
+    }
+    L.portLink(port, {
+      send(data, ports) { portPost(from, 'm', d.peer, data, ports); },
+      close() { portPost(from, 'c', d.peer); },
+    });
+    registerPort(d.id, port, from, false);
+    if (Array.isArray(d.queue)) {
+      for (const m of d.queue) {
+        if (m === null || typeof m !== 'object') continue;
+        const ports = importPorts(m.ports, from);
+        L.portEnqueue(port, setPortPaths(m.data, m.paths, ports), ports);
+      }
+    }
+    return port;
+  }
+  const importPorts = (descs, from) => (Array.isArray(descs) ? descs.map((d) => importPort(d, from)) : []);
+  // A port-control message to the frame at `path`: 'm' delivers a message to the port `id`
+  // there (`ports` move with it), 'c' closes it.
+  function portPost(path, kind, id, data, ports) {
+    const undo = [];
+    try {
+      const list = ports === undefined ? [] : ports;
+      N.framePost(path, { [PORT_CTL]: kind, id, data, ports: exportPorts(list, path, undo), paths: list.length === 0 ? [] : portPaths(data, list) }, '*');
+    } catch (e) {
+      for (const f of undo.reverse()) f();
+      // (a close that can't be sent needs no report)
+      if (kind !== 'c') throw L.fromNative(e);
+    }
+  }
+  // An envelope from the frame at path `source`.
+  function portControl(source, origin, d) {
+    const kind = d[PORT_CTL];
+    if (kind === 'w') {
+      // window.postMessage that transferred ports
+      const ports = importPorts(d.ports, source);
+      const data = setPortPaths(d.data, d.paths, ports);
+      L.fire(L.window, 'message', { data, origin, source: L.windowAt(source), ports, lastEventId: '' }, L.MessageEvent);
+      return;
+    }
+    const e = typeof d.id === 'string' ? portReg.get(d.id) : undefined;
+    if (e === undefined || e.from !== pathKey(source)) return;
+    if (kind === 'm') {
+      const ports = importPorts(d.ports, source);
+      const data = setPortPaths(d.data, d.paths, ports);
+      // A stub relays what its new owner posts to the peer the port had.
+      if (e.relay) L.portSend(e.port, data, ports); else L.portEnqueue(e.port, data, ports);
+    } else if (kind === 'c') {
+      if (e.relay) { L.portPeerClosed(e.port); forgetPort(e.port); } else { unregisterPort(d.id); L.portUnlink(e.port); }
+    }
+  }
 
   // =======================================================================================
   // UTF-8 helpers (JS; used for URL encoding, multipart bodies, ...)
