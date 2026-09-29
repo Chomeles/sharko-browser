@@ -554,6 +554,7 @@
   const PromiseRejectionEvent = simpleEvent('PromiseRejectionEvent', Event, { promise: null, reason: undefined });
   const MediaQueryListEvent = simpleEvent('MediaQueryListEvent', Event, { media: '', matches: false });
   const ToggleEvent = simpleEvent('ToggleEvent', Event, { oldState: '', newState: '' });
+  const TrackEvent = simpleEvent('TrackEvent', Event, { track: null });
   const ClipboardEvent = simpleEvent('ClipboardEvent', Event, { clipboardData: null });
   const SecurityPolicyViolationEvent = simpleEvent('SecurityPolicyViolationEvent', Event, {
     documentURI: '', referrer: '', blockedURI: '', violatedDirective: '', effectiveDirective: '',
@@ -1179,14 +1180,14 @@
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
     HashChangeEvent, PageTransitionEvent, AnimationEvent, AnimationPlaybackEvent, TransitionEvent, SubmitEvent, FormDataEvent,
-    PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
+    PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, TrackEvent, ClipboardEvent, StorageEvent, MessageEvent,
     BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   });
   for (const [name, C] of Object.entries({
     Event, CustomEvent, UIEvent, MouseEvent, PointerEvent, WheelEvent, DragEvent, KeyboardEvent, FocusEvent,
     InputEvent, CompositionEvent, TouchEvent, Touch, TouchList, ErrorEvent, ProgressEvent, PopStateEvent,
     HashChangeEvent, PageTransitionEvent, AnimationEvent, AnimationPlaybackEvent, TransitionEvent, SubmitEvent, FormDataEvent,
-    PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, ClipboardEvent, StorageEvent, MessageEvent,
+    PromiseRejectionEvent, MediaQueryListEvent, ToggleEvent, TrackEvent, ClipboardEvent, StorageEvent, MessageEvent,
     BeforeUnloadEvent, SecurityPolicyViolationEvent, EventTarget, AbortSignal, AbortController, CloseEvent,
   })) L.expose(name, C);
   L.expose('DOMException', L.DOMException);

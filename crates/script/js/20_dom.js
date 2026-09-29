@@ -520,6 +520,8 @@
         L.scriptChildrenChanged(pid);
       } else if (ln === 'title' && titleIds.has(pid)) {
         titleChanged();
+      } else if ((ln === 'video' || ln === 'audio') && L.mediaChildrenChanged !== null) {
+        L.mediaChildrenChanged(w);
       }
     }
   }
@@ -666,6 +668,7 @@
   }
 
   L.optionsInserted = null; // installed by 30_html.js (select selectedness on option insertion)
+  L.mediaChildrenChanged = null; // installed by 30_html.js (a media element's <track> children changed)
   function afterInsertion(pid, parentW, insertedIds) {
     if (L.pendingScripts.size !== 0 && L.checkPendingScripts !== null) L.checkPendingScripts();
     if (L.optionsInserted !== null) {
