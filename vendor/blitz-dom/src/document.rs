@@ -488,6 +488,10 @@ impl BaseDocument {
         style_config::set_pref!("layout.css.nth-child-of.enabled", true);
         // PATCH 80: container queries (`container-type`, `@container`, `cq*` units).
         style_config::set_pref!("layout.container-queries.enabled", true);
+        // PATCH: parse `content: "x" / "alt"` (CSS Generated Content 3 §2.1); without
+        // the pref the whole declaration is invalid and icon-font `::before` vanish.
+        // Layout only uses the items before the slash (see `pe_content_text`).
+        style_config::set_pref!("layout.css.content.alt-text.enabled", true);
         style_config::set_pref!("layout.threads", -1);
 
         let viewport = config.viewport.unwrap_or_default();

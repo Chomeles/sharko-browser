@@ -324,3 +324,7 @@ Patches so far:
     styles. The fallback base URL of a srcdoc / initial `about:blank` iframe document is its
     parent's document base URL (`DocumentConfig::fallback_base_url`). Before, every
     subresource of a page with `<base href>` pointing elsewhere (dwd.de) 404ed.
+81. `blitz-dom/src/document.rs`: Stylo pref `layout.css.content.alt-text.enabled` on, so
+    `content: "\e902" / ""` (CSS Generated Content 3 §2.1) parses instead of invalidating
+    the declaration (icon-font `::before` of stern.de). Layout already lays out only the
+    items before the slash (`pe_content_text`).
