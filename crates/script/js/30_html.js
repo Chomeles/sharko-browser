@@ -1079,7 +1079,7 @@
   R.url(HTMLTrackElement.prototype, 'src'); R.str(HTMLTrackElement.prototype, 'srclang'); R.str(HTMLTrackElement.prototype, 'label');
   R.bool(HTMLTrackElement.prototype, 'default');
   def(HTMLTrackElement.prototype, 'readyState', function () { return 0; });
-  def(HTMLTrackElement.prototype, 'track', function () { return null; });
+  def(HTMLTrackElement.prototype, 'track', function () { return trackOfElement(this); });
   L.defineConstants([HTMLTrackElement, HTMLTrackElement.prototype], { NONE: 0, LOADING: 1, LOADED: 2, ERROR: 3 });
   const HTMLFontElement = htmlClass('HTMLFontElement', ['font']);
   R.strNE(HTMLFontElement.prototype, 'color'); R.str(HTMLFontElement.prototype, 'face'); R.str(HTMLFontElement.prototype, 'size');
@@ -2060,16 +2060,326 @@
     getTrackById() { return null; }
     *[Symbol.iterator]() { }
   }
-  const TextTrackList = { TextTrackList: class extends TrackListBase { } }.TextTrackList;
   const AudioTrackList = { AudioTrackList: class extends TrackListBase { } }.AudioTrackList;
   const VideoTrackList = { VideoTrackList: class extends TrackListBase { } }.VideoTrackList;
+
+  // --- text tracks (https://html.spec.whatwg.org/multipage/media.html#timed-text-tracks) ---
+  // A <track> child of a media element has a TextTrack of its own, and media.textTracks lists
+  // those (in tree order) followed by the tracks made with addTextTrack(). Nothing is loaded:
+  // a track element's `src` is never fetched, so its readiness state stays NONE and its cues
+  // are only those a script adds. There is no playback timeline either, so no cue ever
+  // becomes active and no cuechange/enter/exit event fires.
+  const TRACK_KINDS = ['subtitles', 'captions', 'descriptions', 'chapters', 'metadata'];
+  const TRACK_MODES = ['disabled', 'hidden', 'showing'];
+  let TT, TTL, CUE, cueListItems;
+  function cueTime(v, what) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) throw new TypeError(`Failed to ${what}: The provided double value is non-finite.`);
+    return n;
+  }
+  function badEnum(v, type, what) {
+    return new TypeError(`Failed to ${what}: The provided value '${v}' is not a valid enum value of type ${type}.`);
+  }
+  class TextTrackCue extends L.EventTarget {
+    #id = ''; #start; #end; #pauseOnExit = false; #track = null;
+    constructor(token, start, end) {
+      if (token !== INTERNAL) throw L.illegal();
+      super();
+      this.#start = start;
+      this.#end = end;
+    }
+    static {
+      CUE = {
+        is: (c) => typeof c === 'object' && c !== null && #track in c,
+        track: (c) => c.#track,
+        setTrack: (c, t) => { c.#track = t; },
+        start: (c) => c.#start,
+        end: (c) => c.#end,
+      };
+    }
+    get track() { return this.#track; }
+    get id() { return this.#id; }
+    set id(v) { this.#id = `${v}`; }
+    get startTime() { return this.#start; }
+    set startTime(v) {
+      this.#start = cueTime(v, "set the 'startTime' property on 'TextTrackCue'");
+      if (this.#track !== null) TT.reorder(this.#track, this);
+    }
+    get endTime() { return this.#end; }
+    set endTime(v) {
+      this.#end = cueTime(v, "set the 'endTime' property on 'TextTrackCue'");
+      if (this.#track !== null) TT.reorder(this.#track, this);
+    }
+    get pauseOnExit() { return this.#pauseOnExit; }
+    set pauseOnExit(v) { this.#pauseOnExit = !!v; }
+  }
+  L.defineEventHandlers(TextTrackCue.prototype, ['onenter', 'onexit']);
+
+  const VTT_ENUMS = {
+    vertical: ['', 'rl', 'lr'],
+    lineAlign: ['start', 'center', 'end'],
+    positionAlign: ['line-left', 'center', 'line-right', 'auto'],
+    align: ['start', 'center', 'end', 'left', 'right'],
+  };
+  class VTTCue extends TextTrackCue {
+    #text; #v = { vertical: '', snapToLines: true, line: 'auto', lineAlign: 'start', position: 'auto', positionAlign: 'auto', size: 100, align: 'center' };
+    constructor(startTime, endTime, text) {
+      if (arguments.length < 3) throw new TypeError(`Failed to construct 'VTTCue': 3 arguments required, but only ${arguments.length} present.`);
+      super(INTERNAL, cueTime(startTime, "construct 'VTTCue'"), cueTime(endTime, "construct 'VTTCue'"));
+      this.#text = `${text}`;
+    }
+    get text() { return this.#text; }
+    set text(v) { this.#text = `${v}`; }
+    get snapToLines() { return this.#v.snapToLines; }
+    set snapToLines(v) { this.#v.snapToLines = !!v; }
+    get line() { return this.#v.line; }
+    set line(v) { this.#v.line = v === 'auto' ? 'auto' : cueTime(v, "set the 'line' property on 'VTTCue'"); }
+    get position() { return this.#v.position; }
+    set position(v) { this.#v.position = v === 'auto' ? 'auto' : this.#percent(v, 'position'); }
+    get size() { return this.#v.size; }
+    set size(v) { this.#v.size = this.#percent(v, 'size'); }
+    #percent(v, name) {
+      const n = cueTime(v, `set the '${name}' property on 'VTTCue'`);
+      if (n < 0 || n > 100) throw new DOMException(`Failed to set the '${name}' property on 'VTTCue': The value provided (${n}) is outside the range (0, 100).`, 'IndexSizeError');
+      return n;
+    }
+    // WebVTT's cue text is markup; without its parser the tags are dropped, keeping the text.
+    getCueAsHTML() {
+      const frag = L.document.createDocumentFragment();
+      const t = this.#text.replace(/<[^>]*>/g, '').replace(/&(amp|lt|gt|nbsp|lrm|rlm);/g,
+        (m, e) => ({ amp: '&', lt: '<', gt: '>', nbsp: '\u00a0', lrm: '\u200e', rlm: '\u200f' })[e]);
+      if (t !== '') frag.appendChild(L.document.createTextNode(t));
+      return frag;
+    }
+    static {
+      for (const k of Object.keys(VTT_ENUMS)) {
+        Object.defineProperty(VTTCue.prototype, k, {
+          get() { return this.#v[k]; },
+          // Like any enumerated attribute, an invalid value is ignored.
+          set(x) { const s = `${x}`; if (VTT_ENUMS[k].includes(s)) this.#v[k] = s; },
+          enumerable: true, configurable: true,
+        });
+      }
+    }
+  }
+
+  // A live list over an array the owner keeps sorted (the "text track list of cues").
+  class TextTrackCueList {
+    #src;
+    constructor(token, src) {
+      if (token !== INTERNAL) throw L.illegal();
+      this.#src = src;
+    }
+    static { cueListItems = (o) => o.#src(); }
+    get length() {
+      const n = cueListItems(this).length;
+      if (n > 64) L.ensureIndexed(TextTrackCueList.prototype, n);
+      return n;
+    }
+    getCueById(id) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'getCueById' on 'TextTrackCueList': 1 argument required, but only 0 present.");
+      const s = `${id}`;
+      if (s === '') return null;
+      const c = cueListItems(this).find((x) => x.id === s);
+      return c === undefined ? null : c;
+    }
+  }
+  TextTrackCueList.prototype[Symbol.iterator] = Array.prototype.values;
+  L.makeIndexed(TextTrackCueList.prototype, (o, i) => cueListItems(o)[i], 64);
+
+  // Text track cue order: by start time, then the longer cue first; a cue equal to others in
+  // both goes after them.
+  function cueBefore(a, b) {
+    const sa = CUE.start(a), sb = CUE.start(b);
+    return sa < sb || (sa === sb && CUE.end(a) > CUE.end(b));
+  }
+  function insertCue(cues, cue) {
+    let i = 0;
+    while (i < cues.length && !cueBefore(cue, cues[i])) i++;
+    cues.splice(i, 0, cue);
+  }
+  function trackKindOf(id) {
+    const v = N.getAttr(id, 'kind');
+    if (v === null) return 'subtitles';
+    const k = L.asciiLower(v);
+    return TRACK_KINDS.includes(k) ? k : 'metadata';
+  }
+  // The media element whose <track> child `el` is, if any.
+  function trackParentMedia(el) {
+    const p = N.parent(idOf(el));
+    if (p === 0) return null;
+    const ln = N.localName(p);
+    if ((ln !== 'video' && ln !== 'audio') || L.nsCode(N.namespaceURI(p)) !== L.NS_HTML) return null;
+    return wrap(p);
+  }
+  class TextTrack extends L.EventTarget {
+    // `el`: the <track> element (kind, label, language and id then follow its attributes), or
+    // null for a track made by addTextTrack(), which keeps its own and belongs to `media`.
+    #el; #kind; #label; #language; #media; #mode; #cues = []; #cueList = null; #active = null;
+    constructor(token, el, kind, label, language, media) {
+      if (token !== INTERNAL) throw L.illegal();
+      super();
+      this.#el = el;
+      this.#kind = kind;
+      this.#label = label;
+      this.#language = language;
+      this.#media = media;
+      this.#mode = el === null ? 'hidden' : 'disabled';
+    }
+    static {
+      TT = {
+        media: (t) => (t.#el === null ? t.#media : trackParentMedia(t.#el)),
+        // A cue's time changed: keep the list in cue order.
+        reorder: (t, cue) => {
+          const i = t.#cues.indexOf(cue);
+          if (i < 0) return;
+          t.#cues.splice(i, 1);
+          insertCue(t.#cues, cue);
+        },
+        // A track element's `src` changed: its cues go away.
+        reset: (t) => {
+          for (const c of t.#cues) CUE.setTrack(c, null);
+          t.#cues.length = 0;
+        },
+      };
+    }
+    get kind() { return this.#el === null ? this.#kind : trackKindOf(idOf(this.#el)); }
+    get label() { return this.#el === null ? this.#label : attrOrEmpty(this.#el, 'label'); }
+    get language() { return this.#el === null ? this.#language : attrOrEmpty(this.#el, 'srclang'); }
+    get id() { return this.#el === null ? '' : attrOrEmpty(this.#el, 'id'); }
+    get inBandMetadataTrackDispatchType() { return ''; }
+    get mode() { return this.#mode; }
+    set mode(v) {
+      const m = `${v}`;
+      // Like any enumerated attribute, an invalid value is ignored.
+      if (!TRACK_MODES.includes(m) || m === this.#mode) return;
+      this.#mode = m;
+      const media = TT.media(this);
+      if (media !== null) textTrackModeChanged(media);
+    }
+    // Null while disabled; otherwise one live list (it stays empty until cues are added).
+    get cues() {
+      if (this.#mode === 'disabled') return null;
+      if (this.#cueList === null) this.#cueList = new TextTrackCueList(INTERNAL, () => this.#cues);
+      return this.#cueList;
+    }
+    get activeCues() {
+      if (this.#mode === 'disabled') return null;
+      if (this.#active === null) this.#active = new TextTrackCueList(INTERNAL, () => []);
+      return this.#active;
+    }
+    addCue(cue) {
+      if (!CUE.is(cue)) throw new TypeError("Failed to execute 'addCue' on 'TextTrack': parameter 1 is not of type 'TextTrackCue'.");
+      const owner = CUE.track(cue);
+      if (owner !== null) owner.removeCue(cue);
+      CUE.setTrack(cue, this);
+      insertCue(this.#cues, cue);
+    }
+    removeCue(cue) {
+      if (!CUE.is(cue)) throw new TypeError("Failed to execute 'removeCue' on 'TextTrack': parameter 1 is not of type 'TextTrackCue'.");
+      const i = CUE.track(cue) === this ? this.#cues.indexOf(cue) : -1;
+      if (i < 0) throw new DOMException("Failed to execute 'removeCue' on 'TextTrack': The specified cue is not listed in the TextTrack's list of cues.", 'NotFoundError');
+      this.#cues.splice(i, 1);
+      CUE.setTrack(cue, null);
+    }
+  }
+  L.defineEventHandlers(TextTrack.prototype, ['oncuechange']);
+  const elementTracks = new WeakMap();
+  function trackOfElement(el) {
+    idOf(el);
+    let t = elementTracks.get(el);
+    if (t === undefined) {
+      t = new TextTrack(INTERNAL, el, '', '', '', null);
+      elementTracks.set(el, t);
+    }
+    return t;
+  }
+  L.addAttrHook('src', (w, id, name, old, value) => {
+    if (lnOf(w) !== 'track' || nsOf(w) !== HTML) return;
+    const t = elementTracks.get(w);
+    if (t !== undefined) TT.reset(t);
+  });
+
+  class TextTrackList extends L.EventTarget {
+    #media; #elems = []; #added = []; #all = []; #tree = -1; #untracked = -1;
+    constructor(token, media) {
+      if (token !== INTERNAL) throw L.illegal();
+      super();
+      this.#media = media;
+    }
+    static {
+      TTL = {
+        // The tracks in list order. The track elements are read from the media element's
+        // children (only re-read after a DOM change); with `notify`, tracks that came or went
+        // since the last call are announced.
+        tracks: (o, notify) => {
+          if (o.#tree === state.tree && o.#untracked === state.untracked) return o.#all;
+          const cur = [];
+          for (const id of N.childIds(idOf(o.#media))) {
+            if (N.nodeType(id) === 1 && N.localName(id) === 'track' && L.nsCode(N.namespaceURI(id)) === L.NS_HTML) cur.push(trackOfElement(wrap(id)));
+          }
+          const prev = o.#elems;
+          o.#elems = cur;
+          o.#all = cur.concat(o.#added);
+          o.#tree = state.tree;
+          o.#untracked = state.untracked;
+          if (notify) {
+            for (const t of prev) if (!cur.includes(t)) trackEvent(o, 'removetrack', t);
+            for (const t of cur) if (!prev.includes(t)) trackEvent(o, 'addtrack', t);
+          }
+          return o.#all;
+        },
+        add: (o, t) => {
+          o.#added.push(t);
+          o.#tree = -1;
+          trackEvent(o, 'addtrack', t);
+        },
+      };
+    }
+    get length() {
+      const n = TTL.tracks(this, false).length;
+      if (n > 32) L.ensureIndexed(TextTrackList.prototype, n);
+      return n;
+    }
+    getTrackById(id) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'getTrackById' on 'TextTrackList': 1 argument required, but only 0 present.");
+      const s = `${id}`;
+      const t = TTL.tracks(this, false).find((x) => x.id === s);
+      return t === undefined ? null : t;
+    }
+  }
+  TextTrackList.prototype[Symbol.iterator] = Array.prototype.values;
+  L.makeIndexed(TextTrackList.prototype, (o, i) => TTL.tracks(o, false)[i], 32);
+  function trackEvent(list, type, track) {
+    L.postTask(() => L.fire(list, type, { track }, L.TrackEvent));
+  }
   for (const C of [TextTrackList, AudioTrackList, VideoTrackList]) L.defineEventHandlers(C.prototype, ['onchange', 'onaddtrack', 'onremovetrack']);
+
+  function textTracksOf(media) {
+    const s = ms(media);
+    if (s.text === null) {
+      s.text = new TextTrackList(INTERNAL, media);
+      TTL.tracks(s.text, false);
+    }
+    return s.text;
+  }
+  // Fires `change` at the list once for any number of mode changes before the task runs.
+  function textTrackModeChanged(media) {
+    const s = mediaState.get(media);
+    if (s === undefined || s.text === null || s.changePending) return;
+    s.changePending = true;
+    L.postTask(() => { s.changePending = false; L.fire(s.text, 'change', {}); });
+  }
+  L.mediaChildrenChanged = function (media) {
+    const s = mediaState.get(media);
+    if (s !== undefined && s.text !== null) TTL.tracks(s.text, true);
+  };
   const mediaState = new WeakMap();
   function ms(el) {
     let s = mediaState.get(el);
     if (s === undefined) {
       s = { currentTime: 0, volume: 1, muted: null, playbackRate: 1, defaultPlaybackRate: 1, srcObject: null, preservesPitch: true,
-        text: new TextTrackList(INTERNAL), audio: new AudioTrackList(INTERNAL), video: new VideoTrackList(INTERNAL) };
+        text: null, changePending: false, audio: new AudioTrackList(INTERNAL), video: new VideoTrackList(INTERNAL) };
       mediaState.set(el, s);
     }
     return s;
@@ -2120,10 +2430,17 @@
       },
       get muted() { const s = ms(this); return s.muted === null ? N.hasAttr(idOf(this), 'muted') : s.muted; },
       set muted(v) { ms(this).muted = !!v; },
-      get textTracks() { return ms(this).text; },
+      get textTracks() { return textTracksOf(this); },
       get audioTracks() { return ms(this).audio; },
       get videoTracks() { return ms(this).video; },
-      addTextTrack(kind, label = '', language = '') { return { kind, label, language, mode: 'hidden', cues: null, activeCues: null, addCue() { }, removeCue() { }, addEventListener() { }, removeEventListener() { } }; },
+      addTextTrack(kind, label = '', language = '') {
+        if (arguments.length < 1) throw new TypeError("Failed to execute 'addTextTrack' on 'HTMLMediaElement': 1 argument required, but only 0 present.");
+        const k = `${kind}`;
+        if (!TRACK_KINDS.includes(k)) throw badEnum(k, 'TextTrackKind', "execute 'addTextTrack' on 'HTMLMediaElement'");
+        const t = new TextTrack(INTERNAL, null, k, `${label}`, `${language}`, this);
+        TTL.add(textTracksOf(this), t);
+        return t;
+      },
       get sinkId() { return ''; },
       setSinkId() { return L.resolvedPromise(undefined); },
       get mediaKeys() { return null; },
@@ -3757,6 +4074,10 @@
   exposedHTML.TimeRanges = TimeRanges;
   exposedHTML.MediaError = MediaError;
   exposedHTML.TextTrackList = TextTrackList;
+  exposedHTML.TextTrack = TextTrack;
+  exposedHTML.TextTrackCue = TextTrackCue;
+  exposedHTML.VTTCue = VTTCue;
+  exposedHTML.TextTrackCueList = TextTrackCueList;
   exposedHTML.AudioTrackList = AudioTrackList;
   exposedHTML.VideoTrackList = VideoTrackList;
   exposedHTML.Image = Image;
