@@ -724,7 +724,19 @@ impl Node {
         {
             if !input_data.is_multiline {
                 let content_box_height = self.final_layout().content_box_height();
-                let input_height = input_data.editor.try_layout().unwrap().height() / scale as f32;
+                let mut layout_height = input_data.editor.try_layout().unwrap().height();
+                // PATCH: an empty layout has no height (its only line is the empty last one),
+                // but what shows there, the placeholder or the caret, is a line tall.
+                if layout_height == 0.0 && input_data.editor.raw_text().is_empty() {
+                    layout_height = match &input_data.placeholder {
+                        Some(placeholder) => placeholder.height(),
+                        None => input_data
+                            .editor
+                            .cursor_geometry(1.5)
+                            .map_or(0.0, |caret| (caret.y1 - caret.y0) as f32),
+                    };
+                }
+                let input_height = layout_height / scale as f32;
                 let y_offset = ((content_box_height - input_height) / 2.0).max(0.0);
 
                 return y_offset as f64;

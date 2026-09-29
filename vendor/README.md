@@ -291,3 +291,8 @@ Patches so far:
     markup handed to usvg also declares `xmlns:xlink` when it carries `xlink:` attributes:
     HTML parsing leaves the prefix unbound, usvg's XML parser rejected the whole `<svg>`, so
     `<use xlink:href="#icon">` drew nothing even for sprites inside the page.
+80. `blitz-dom/src/node/node.rs`: `text_input_v_centering_offset` centers a single-line input's
+    empty content by the height of its placeholder (else of the caret): an empty parley layout
+    has no height, so the placeholder and the caret were centered as a zero-height line, half
+    a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
+    `line-height` as tall as the box the placeholder was pushed out of it).
