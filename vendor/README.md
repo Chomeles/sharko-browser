@@ -296,3 +296,7 @@ Patches so far:
     has no height, so the placeholder and the caret were centered as a zero-height line, half
     a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
     `line-height` as tall as the box the placeholder was pushed out of it).
+81. `blitz-dom/src/document.rs`: Stylo pref `layout.css.content.alt-text.enabled` on, so
+    `content: "\e902" / ""` (CSS Generated Content 3 §2.1) parses instead of invalidating
+    the declaration (icon-font `::before` of stern.de). Layout already lays out only the
+    items before the slash (`pe_content_text`).

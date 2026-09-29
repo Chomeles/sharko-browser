@@ -480,6 +480,10 @@ impl BaseDocument {
         // PATCH: `:has()` and `:nth-child(An+B of S)` (see has_invalidation.rs).
         style_config::set_pref!("layout.css.has-selector.enabled", true);
         style_config::set_pref!("layout.css.nth-child-of.enabled", true);
+        // PATCH: parse `content: "x" / "alt"` (CSS Generated Content 3 §2.1); without
+        // the pref the whole declaration is invalid and icon-font `::before` vanish.
+        // Layout only uses the items before the slash (see `pe_content_text`).
+        style_config::set_pref!("layout.css.content.alt-text.enabled", true);
         style_config::set_pref!("layout.threads", -1);
 
         let viewport = config.viewport.unwrap_or_default();
