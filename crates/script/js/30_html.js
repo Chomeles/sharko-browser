@@ -280,6 +280,8 @@
   // Collect the items of `id`'s children. `visible`: the parent's box is rendered (its
   // visibility is visible); `mode`: 'html' | 'svg' | 'select' | 'optgroup'.
   function innerTextCollect(id, items, visible, mode) {
+    // `content-visibility: hidden` skips the contents; the box itself stays.
+    if (N.computedStyle(id, 'content-visibility', '') === 'hidden') return;
     const ws = N.computedStyle(id, 'white-space', '');
     const tt = N.computedStyle(id, 'text-transform', '');
     // Whitespace-only text directly in a table, row group or row gets no box.

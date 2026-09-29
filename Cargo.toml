@@ -56,3 +56,4 @@ taffy = { path = "vendor/taffy" }
 stylo_taffy = { path = "vendor/stylo_taffy" }
 # PATCH 80: container queries.
 stylo = { path = "vendor/stylo" }
+stylo_atoms = { path = "vendor/stylo_atoms" }

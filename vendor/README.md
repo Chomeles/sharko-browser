@@ -328,3 +328,26 @@ Patches so far:
     `content: "\e902" / ""` (CSS Generated Content 3 §2.1) parses instead of invalidating
     the declaration (icon-font `::before` of stern.de). Layout already lays out only the
     items before the slash (`pe_content_text`).
+82. `stylo/servo/media_features.rs`, `stylo_atoms/static_atoms.txt`: the media features
+    `prefers-reduced-motion`, `prefers-contrast`, `forced-colors`, `scripting`, `update`,
+    `color-gamut` and `display-mode` (servo's table lacked them, so every query naming one
+    was invalid). Fixed values of a desktop browser without user preferences (as Chromium
+    reports): no reduced motion, scripting enabled, forced colors none, no contrast
+    preference, update fast, sRGB, browser display mode; boolean forms follow the spec.
+83. `blitz-dom/src/stylo.rs`: `:lang()` (Selectors 4 §8.1) was hard-coded false. The element's
+    language is the closest `lang` attribute up the tree (none: the empty language), matched
+    with RFC 4647 extended filtering (Stylo's `extended_filtering`); `lang_attr` reports the
+    attribute so attribute changes restyle.
+84. `stylo/servo/selector_parser.rs`, `stylo/selector_parser.rs`,
+    `stylo/invalidation/element/invalidation_map.rs`, `blitz-dom/src/stylo.rs`: `:dir(ltr|rtl)`
+    (Selectors 4 §8.2; the servo build did not parse it). Stylo parses it into
+    `NonTSPseudoClass::Dir` and depends on the `dir` attribute; blitz matches the element's
+    directionality (HTML §3.2.6.1): `dir` ltr/rtl, `auto` and `<bdi>` by the first strong
+    character (Hebrew/Arabic/... blocks RTL), else the parent's, `ltr` at the root.
+85. `stylo/properties/longhands.toml`, `blitz-dom/src/layout/construct.rs`,
+    `script/js/30_html.js`: `content-visibility`. Stylo gated the longhand to gecko; it is now
+    parsed by the servo build behind `layout.unimplemented` (no animation). `hidden` skips the
+    contents (CSS Containment 2 §4.1): the box stays, its children and pseudo-elements get no
+    boxes, and `innerText` leaves them out. `auto` parses and computes but is not yet
+    skipped: it needs a relevance test (viewport distance) that has to run after the first
+    layout, so offscreen `auto` subtrees are still laid out.
