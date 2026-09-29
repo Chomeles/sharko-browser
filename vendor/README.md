@@ -381,3 +381,9 @@ Patches so far:
     rect of an inline element that has no fragment in a text layout because its content is
     block-level (`<a><span><h2>..</h2></span></a>`) is the union of the boxes of its children
     instead of `None` (0x0 at the origin in script).
+94. `stylo/values/specified/background.rs` (`BackgroundClip::Text` no longer gecko-only),
+    `blitz-paint/src/render/background.rs`, `text.rs` (`draw_text_clipped_background`,
+    `DrawTextContext::force_color`): `background-clip: text` (and `-webkit-`) was dropped at
+    parse time, so `color: transparent` gradient headings (bsky.app sign-up dialog) painted a
+    plain rectangle or nothing. Layers with that clip are painted into an isolated layer and
+    intersected (`DestIn`) with the opaque glyphs of the element's subtree, as in Blink/Gecko.

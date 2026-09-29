@@ -511,3 +511,16 @@ test('getElementsByTagNameNS: elements without a namespace in XML documents', as
   assert.strictEqual(count('document', null, 'body'), 0);
   assert.strictEqual(count('document', 'http://www.w3.org/1999/xhtml', 'body'), 1);
 });
+
+test('NodeList/HTMLCollection indices are own enumerable properties (Object.values, for-in, hasOwn)', async () => {
+  const e = await env();
+  assert.strictEqual(e.run("Object.keys(document.querySelectorAll('li')).join()"), '0,1,2');
+  assert.strictEqual(e.run("Object.values(document.querySelectorAll('li')).map(x => x.textContent).join()"), '1,2,3');
+  assert.strictEqual(e.run("Object.entries(document.getElementById('list').children).length"), 3);
+  assert.strictEqual(e.run("Object.keys(document.getElementById('list').childNodes).join()"), '0,1,2');
+  assert.strictEqual(e.run("(() => { const k = []; for (const i in document.querySelectorAll('li')) if (!isNaN(i)) k.push(i); return k.join(); })()"), '0,1,2');
+  assert.strictEqual(e.run("Object.hasOwn(document.getElementsByTagName('li'), 1) && !Object.hasOwn(document.getElementsByTagName('li'), 3)"), true);
+  // a live list follows mutations once its length is read
+  assert.strictEqual(e.run("(() => { const c = document.getElementById('list').children; c.length; document.getElementById('list').lastElementChild.remove(); c.length; return Object.keys(c).join(); })()"), '0,1');
+  assert.strictEqual(e.run("Object.keys(document.querySelectorAll('.none')).length"), 0);
+});

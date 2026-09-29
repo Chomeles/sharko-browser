@@ -218,7 +218,7 @@ pub enum BackgroundClip {
     #[value_info(skip)]
     NoClip,
     // TODO: text and border-area are supposed to combine in backgrounds-4...
-    #[cfg(feature = "gecko")]
+    // PATCH 94: also in the servo build (was gecko only), painted by blitz-paint.
     Text,
     #[parse(condition = "background_clip_border_area_enabled")]
     #[value_info(skip)]
@@ -249,7 +249,6 @@ impl BackgroundClip {
             Self::ViewBox => ClipValidity::MASK,
             #[cfg(feature = "gecko")]
             Self::NoClip => ClipValidity::MASK,
-            #[cfg(feature = "gecko")]
             Self::Text => ClipValidity::BACKGROUND,
             Self::BorderArea => ClipValidity::BACKGROUND,
         }
