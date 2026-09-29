@@ -1115,8 +1115,8 @@
   const HTMLSlotElement = htmlClass('HTMLSlotElement', ['slot']);
   R.str(HTMLSlotElement.prototype, 'name');
   L.mixin(HTMLSlotElement.prototype, {
-    assignedNodes(options) { return L.wrapAll(N.childIds(idOf(this))); },
-    assignedElements(options) { return L.wrapAll(N.childElementIds(idOf(this))); },
+    assignedNodes(options) { return L.slotAssigned(idOf(this)) ? L.wrapAll(N.childIds(idOf(this))) : []; },
+    assignedElements(options) { return L.slotAssigned(idOf(this)) ? L.wrapAll(N.childElementIds(idOf(this))) : []; },
     assign() { },
   });
   const HTMLMapElement = htmlClass('HTMLMapElement', ['map']);

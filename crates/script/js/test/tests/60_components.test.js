@@ -292,3 +292,30 @@ test('custom elements: template contents stay inert (innerHTML, cloneNode) and u
   `);
   assert.strictEqual(JSON.stringify(e.run('__ce')), JSON.stringify(['parsed:0', 'cloned:0:false', 'ctor', 'imported:1:true', 'src:1']));
 });
+
+test('shadow host: light-DOM getters show the light tree (comments, slotted parents, assignedSlot)', async () => {
+  const e = await createEnv();
+  e.run(`
+    class XCard extends HTMLElement {
+      constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<style>p{}</style><div class="wrap"><slot></slot><slot name="n"></slot></div>'; }
+    }
+    customElements.define('x-card', XCard);
+    document.body.insertAdjacentHTML('beforeend', '<x-card id="h"><!--a--><p id="p">t</p><i slot="n" id="i">n</i><!--b--></x-card>');
+    var h = document.getElementById('h'), p = document.getElementById('p'), i = document.getElementById('i');
+    var desc = (n) => n.nodeType === 8 ? '#c' : n.nodeName.toLowerCase();
+  `);
+  assert.strictEqual(e.run("Array.from(h.childNodes).map(desc).join()"), '#c,p,i,#c');
+  assert.strictEqual(e.run("Array.from(h.children).map(desc).join() + h.childElementCount"), 'p,i2');
+  assert.strictEqual(e.run("desc(h.firstChild) + desc(h.lastChild) + h.firstElementChild.id + h.lastElementChild.id"), '#c#cpi');
+  assert.strictEqual(e.run("p.parentNode === h && p.parentElement === h && i.parentNode === h"), true);
+  assert.strictEqual(e.run("desc(p.previousSibling) + p.nextSibling.id + desc(i.nextSibling) + (i.nextSibling.nextSibling === null)"), '#ci#ctrue');
+  assert.strictEqual(e.run("p.assignedSlot.localName + p.assignedSlot.getAttribute('name') + i.assignedSlot.getAttribute('name')"), 'slotnulln');
+  assert.strictEqual(e.run("h.shadowRoot.querySelector('slot').assignedNodes().map(desc).join()"), 'p');
+  assert.strictEqual(e.run("h.shadowRoot.querySelector('.wrap').parentNode === h.shadowRoot"), true);
+  // light insertion keeps order and reports the host as parent
+  e.run("var q = document.createElement('b'); h.insertBefore(q, i); h.appendChild(document.createElement('u'));");
+  assert.strictEqual(e.run("Array.from(h.childNodes).map(desc).join()"), '#c,p,b,i,#c,u');
+  e.run("p.remove();");
+  assert.strictEqual(e.run("Array.from(h.childNodes).map(desc).join() + (p.parentNode === null)"), '#c,b,i,#c,utrue');
+  assert.deepStrictEqual(e.errors(), []);
+});

@@ -276,9 +276,11 @@
     if (info.lightFrag !== 0) return;
     const hostId = idOf(info.host);
     const frag = N.createFragment();
+    info.list = N.childIds(hostId);
     let c;
     while ((c = N.firstChild(hostId)) !== 0) N.appendChild(frag, c);
     info.lightFrag = frag;
+    fragHost.set(frag, info);
     treeChanged();
   }
   function shadowDistribute(sr) {
@@ -286,6 +288,10 @@
     const frag = info.lightFrag;
     if (frag === 0 || N.firstChild(frag) === 0) return;
     const hostId = idOf(info.host);
+    // Light nodes still in the fragment are in arrival order: note it before slotting scatters them.
+    const known = new Set(info.list);
+    for (const c of N.childIds(frag)) if (!known.has(c)) info.list.push(c);
+    info.lc = null;
     const slots = N.querySelectorAll(hostId, 'slot');
     if (slots.length === 0) return;
     const byName = new Map();
@@ -302,11 +308,68 @@
       if (slot === undefined) continue;
       if (!info.cleared.has(slot)) {
         info.cleared.add(slot);
+        slotOwner.set(slot, info);
         N.setTextContent(slot, '');
       }
       N.appendChild(slot, c);
     }
     treeChanged();
+  }
+  // The light-DOM view of a shadow host. The native tree is the composed one (shadow content
+  // as the host's children, slotted nodes inside their <slot>), so the DOM getters rebuild what
+  // the page's own scripts must see: the host's light children in order, comments included.
+  // `info.list` remembers that order; it is healed against the native tree on every read
+  // (nodes that left are dropped, nodes that arrived by other paths are appended).
+  const fragHost = new Map(); // light fragment id -> shadow info
+  const slotOwner = new Map(); // slot id -> shadow info whose light nodes it holds
+  const shadowByHostId = new Map(); // host id -> shadow root
+  function lightOwner(id) {
+    const p = N.parent(id);
+    if (p === 0) return null;
+    let info = fragHost.get(p);
+    if (info !== undefined) return info;
+    info = slotOwner.get(p);
+    if (info !== undefined && info.cleared.has(p) && N.contains(idOf(info.host), p)) return info;
+    return null;
+  }
+  function lightIds(info) {
+    if (info.lcEpoch === state.tree && info.lc !== null) return info.lc;
+    const hostId = idOf(info.host);
+    const inLight = (id) => {
+      const p = N.parent(id);
+      return p !== 0 && (p === info.lightFrag || (info.cleared.has(p) && N.contains(hostId, p)));
+    };
+    const out = [], seen = new Set();
+    for (const id of info.list) if (!seen.has(id) && inLight(id)) { out.push(id); seen.add(id); }
+    for (const id of N.childIds(info.lightFrag)) if (!seen.has(id)) { out.push(id); seen.add(id); }
+    for (const slot of info.cleared) {
+      if (!N.contains(hostId, slot)) continue;
+      for (const id of N.childIds(slot)) if (!seen.has(id)) { out.push(id); seen.add(id); }
+    }
+    info.list = out;
+    info.lc = out;
+    info.lcEpoch = state.tree;
+    return out;
+  }
+  // The shadow info if `w` is a shadow host seen from the light side (not its shadow root).
+  function lightView(w) {
+    if (isShadowRoot(w)) return null;
+    const sr = shadowOfHost.get(w);
+    return sr === undefined ? null : shadowInfo.get(sr);
+  }
+  L.slotAssigned = (slotId) => {
+    const info = slotOwner.get(slotId);
+    return info !== undefined && info.cleared.has(slotId) && N.contains(idOf(info.host), slotId);
+  };
+  function lightSibling(id, info, dir) {
+    const list = lightIds(info);
+    const i = list.indexOf(id);
+    return i < 0 ? 0 : (list[i + dir] || 0);
+  }
+  function assignedSlotOf(w) {
+    const id = idOf(w), o = lightOwner(id);
+    const p = N.parent(id);
+    return o !== null && o.mode === 'open' && p !== o.lightFrag ? wrap(p) : null;
   }
   function lightFragOf(hostW) {
     const sr = shadowOfHost.get(hostW);
@@ -319,9 +382,12 @@
     shadowInfo.set(sr, {
       host, mode, delegatesFocus: !!init.delegatesFocus, clonable: !!init.clonable,
       serializable: !!init.serializable, slotAssignment: init.slotAssignment === 'manual' ? 'manual' : 'named',
-      lightFrag: 0, cleared: new Set(), declarative: !!init.declarative,
+      lightFrag: 0, cleared: new Set(), declarative: !!init.declarative, list: [], lc: null, lcEpoch: -1,
     });
     shadowOfHost.set(host, sr);
+    shadowByHostId.set(idOf(host), sr);
+    childNodesCache.delete(host);
+    childrenCache.delete(host);
     // Stylesheets inside the host are scoped to it from now on (native style scoping).
     if (typeof N.setShadowHost === 'function') N.setShadowHost(idOf(host), true);
     // The shadow root shares the host's node id, so its children ARE the host's until the
@@ -961,8 +1027,15 @@
     const target = refParent !== 0 ? refParent : info.lightFrag;
     const tw = wrap(target);
     ensurePreInsert(tw, target, nodeW, nid, refId, method);
+    const base = lightIds(info);
+    const added = typeOf(nodeW) === 11 ? N.childIds(nid) : [nid];
     insertCore(target, tw, nodeW, nid, refId);
     shadowDistribute(sr);
+    const list = base.filter((id) => !added.includes(id));
+    const at = refId === 0 ? -1 : list.indexOf(refId);
+    if (at < 0) list.push(...added); else list.splice(at, 0, ...added);
+    info.list = list;
+    info.lc = null;
     return nodeW;
   }
 
@@ -1246,33 +1319,55 @@
     },
     get parentNode() {
       if (isShadowRoot(this)) return null;
-      return wrap(N.parent(idOf(this)));
+      const id = idOf(this);
+      const o = lightOwner(id);
+      if (o !== null) return o.host;
+      const p = N.parent(id);
+      // Direct children of a host in the native tree are its shadow content.
+      return shadowByHostId.get(p) || wrap(p);
     },
     get parentElement() {
       if (isShadowRoot(this)) return null;
-      const p = N.parent(idOf(this));
-      if (p === 0) return null;
+      const id = idOf(this);
+      const o = lightOwner(id);
+      if (o !== null) return o.host;
+      const p = N.parent(id);
+      if (p === 0 || shadowByHostId.has(p)) return null;
       const w = wrap(p);
       return typeOf(w) === 1 ? w : null;
     },
-    hasChildNodes() { return N.firstChild(idOf(this)) !== 0; },
+    hasChildNodes() {
+      const info = lightView(this);
+      return info !== null ? lightIds(info).length !== 0 : N.firstChild(idOf(this)) !== 0;
+    },
     get childNodes() {
       let l = childNodesCache.get(this);
       if (l === undefined) {
-        l = new NodeList(INTERNAL, 1, idOf(this));
+        const info = lightView(this);
+        l = info !== null ? new NodeList(INTERNAL, 5, () => lightIds(info)) : new NodeList(INTERNAL, 1, idOf(this));
         childNodesCache.set(this, l);
       }
       return l;
     },
-    get firstChild() { return wrap(N.firstChild(idOf(this))); },
-    get lastChild() { return wrap(N.lastChild(idOf(this))); },
+    get firstChild() {
+      const info = lightView(this);
+      return info !== null ? wrap(lightIds(info)[0] || 0) : wrap(N.firstChild(idOf(this)));
+    },
+    get lastChild() {
+      const info = lightView(this);
+      if (info === null) return wrap(N.lastChild(idOf(this)));
+      const l = lightIds(info);
+      return wrap(l.length === 0 ? 0 : l[l.length - 1]);
+    },
     get previousSibling() {
       if (isShadowRoot(this)) return null;
-      return wrap(N.prevSibling(idOf(this)));
+      const id = idOf(this), o = lightOwner(id);
+      return wrap(o !== null ? lightSibling(id, o, -1) : N.prevSibling(id));
     },
     get nextSibling() {
       if (isShadowRoot(this)) return null;
-      return wrap(N.nextSibling(idOf(this)));
+      const id = idOf(this), o = lightOwner(id);
+      return wrap(o !== null ? lightSibling(id, o, 1) : N.nextSibling(id));
     },
     get nodeValue() {
       const t = typeOf(this);
@@ -1486,6 +1581,7 @@
           }
           return o.#ids;
         }
+        if (k === 5) return o.#src(); // light children of a shadow host
         if (k === 3) { // live query (getElementsByName)
           const ep = state.tree * 1048576 + state.attr;
           if (o.#epoch !== ep) {
@@ -2378,7 +2474,7 @@
       if (sr === undefined) return null;
       return shadowInfo.get(sr).mode === 'open' ? sr : null;
     },
-    get assignedSlot() { return null; },
+    get assignedSlot() { return assignedSlotOf(this); },
     closest(selectors) {
       if (arguments.length === 0) throw new TypeError("Failed to execute 'closest' on 'Element': 1 argument required, but only 0 present.");
       const sel = `${selectors}`;
@@ -2532,17 +2628,29 @@
     get children() {
       let c = childrenCache.get(this);
       if (c === undefined) {
-        c = L.makeHTMLCollection({ kind: 1, src: idOf(this) }, false);
+        const info = lightView(this);
+        c = info !== null
+          ? L.makeHTMLCollection({ kind: 3, compute: () => lightIds(info).filter((id) => N.nodeType(id) === 1) }, false)
+          : L.makeHTMLCollection({ kind: 1, src: idOf(this) }, false);
         childrenCache.set(this, c);
       }
       return c;
     },
-    get firstElementChild() { return wrap(firstElementChildId(idOf(this))); },
-    get lastElementChild() { return wrap(lastElementChildId(idOf(this))); },
-    get childElementCount() { return N.childElementIds(idOf(this)).length; },
+    get firstElementChild() {
+      const info = lightView(this);
+      return info === null ? wrap(firstElementChildId(idOf(this))) : (this.children[0] || null);
+    },
+    get lastElementChild() {
+      const info = lightView(this);
+      return info === null ? wrap(lastElementChildId(idOf(this))) : (this.children[this.children.length - 1] || null);
+    },
+    get childElementCount() {
+      const info = lightView(this);
+      return info === null ? N.childElementIds(idOf(this)).length : this.children.length;
+    },
     prepend(...nodes) {
       const node = convertNodes(nodes, 'prepend');
-      preInsert(this, node, wrap(N.firstChild(idOf(this))), 'prepend');
+      preInsert(this, node, lightView(this) === null ? wrap(N.firstChild(idOf(this))) : this.firstChild, 'prepend');
     },
     append(...nodes) {
       const node = convertNodes(nodes, 'append');
@@ -2697,7 +2805,7 @@
       for (let c = s; c !== 0 && N.nodeType(c) === 3; c = N.nextSibling(c)) out += N.getText(c);
       return out;
     },
-    get assignedSlot() { return null; },
+    get assignedSlot() { return assignedSlotOf(this); },
   });
   L.mixin(ProcessingInstruction.prototype, {
     get target() { return piTarget.get(this) || ''; },
