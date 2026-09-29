@@ -3314,6 +3314,75 @@
     XMLHttpRequestUpload, XMLHttpRequestEventTarget, IdleDeadline })) L.expose(k, v);
 
   // =======================================================================================
+  // Cookie Store API (https://cookiestore.spec.whatwg.org), secure contexts. A view of the
+  // document's cookies (what document.cookie shows: no HttpOnly ones) through promises.
+  // =======================================================================================
+  function cookieArgs(method, args, needValue) {
+    const a = args[0];
+    if (a !== null && typeof a === 'object') {
+      const o = { name: a.name === undefined ? undefined : `${a.name}` };
+      for (const k of ['value', 'path', 'domain', 'sameSite']) if (a[k] !== undefined) o[k] = `${a[k]}`;
+      if (a.expires !== undefined && a.expires !== null) o.expires = Number(a.expires);
+      if (a.partitioned) o.partitioned = true;
+      if (needValue && (o.name === undefined || o.value === undefined)) throw new TypeError(`Failed to execute '${method}' on 'CookieStore': Required member is undefined.`);
+      return o;
+    }
+    if (args.length === 0) return {};
+    const o = { name: `${a}` };
+    if (needValue) {
+      if (args.length < 2) throw new TypeError(`Failed to execute '${method}' on 'CookieStore': 2 arguments required, but only 1 present.`);
+      o.value = `${args[1]}`;
+    }
+    return o;
+  }
+  class CookieStore extends EventTarget {
+    constructor(key) { if (key !== INTERNAL) throw new TypeError('Illegal constructor'); super(); }
+    #list(o) {
+      const out = [];
+      for (const part of N.getCookie().split(';')) {
+        const t = part.trim();
+        if (t === '') continue;
+        const i = t.indexOf('=');
+        const name = i < 0 ? '' : t.slice(0, i), value = i < 0 ? t : t.slice(i + 1);
+        if (o.name === undefined || o.name === name) out.push({ name, value });
+      }
+      return out;
+    }
+    get(...args) {
+      try { const o = cookieArgs('get', args, false); if (args.length === 0) throw new TypeError("Failed to execute 'get' on 'CookieStore': At least one of name or url is required."); return Promise.resolve(this.#list(o)[0] || null); } catch (e) { return Promise.reject(e); }
+    }
+    getAll(...args) {
+      try { return Promise.resolve(this.#list(cookieArgs('getAll', args, false))); } catch (e) { return Promise.reject(e); }
+    }
+    set(...args) {
+      try {
+        const o = cookieArgs('set', args, true);
+        const enc = (v) => v.replace(/[;\u0000-\u001f\u007f]/g, '');
+        let c = `${enc(o.name)}=${enc(o.value)}; path=${o.path === undefined ? '/' : o.path}`;
+        if (o.domain !== undefined) c += `; domain=${o.domain}`;
+        if (o.expires !== undefined) c += `; expires=${new Date(o.expires).toUTCString()}`;
+        c += `; samesite=${(o.sameSite || 'strict').toLowerCase()}`;
+        if (L.location && L.location.protocol === 'https:') c += '; secure';
+        N.setCookie(c);
+        return Promise.resolve();
+      } catch (e) { return Promise.reject(e); }
+    }
+    delete(...args) {
+      try {
+        const o = cookieArgs('delete', args, false);
+        if (o.name === undefined) throw new TypeError("Failed to execute 'delete' on 'CookieStore': Required member is undefined.");
+        let c = `${o.name}=; path=${o.path === undefined ? '/' : o.path}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        if (o.domain !== undefined) c += `; domain=${o.domain}`;
+        N.setCookie(c);
+        return Promise.resolve();
+      } catch (e) { return Promise.reject(e); }
+    }
+  }
+  L.defineEventHandlers(CookieStore.prototype, ['onchange']);
+  L.expose('CookieStore', CookieStore);
+  L.cookieStore = new CookieStore(INTERNAL);
+
+  // =======================================================================================
   // crypto
   // =======================================================================================
   function randomUUID() {
