@@ -319,3 +319,10 @@ Patches so far:
     `NonTSPseudoClass::Dir` and depends on the `dir` attribute; blitz matches the element's
     directionality (HTML §3.2.6.1): `dir` ltr/rtl, `auto` and `<bdi>` by the first strong
     character (Hebrew/Arabic/... blocks RTL), else the parent's, `ltr` at the root.
+85. `stylo/properties/longhands.toml`, `blitz-dom/src/layout/construct.rs`,
+    `script/js/30_html.js`: `content-visibility`. Stylo gated the longhand to gecko; it is now
+    parsed by the servo build behind `layout.unimplemented` (no animation). `hidden` skips the
+    contents (CSS Containment 2 §4.1): the box stays, its children and pseudo-elements get no
+    boxes, and `innerText` leaves them out. `auto` parses and computes but is not yet
+    skipped: it needs a relevance test (viewport distance) that has to run after the first
+    layout, so offscreen `auto` subtrees are still laid out.

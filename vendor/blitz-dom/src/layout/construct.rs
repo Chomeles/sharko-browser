@@ -445,6 +445,19 @@ fn collect_layout_children_with_wrap(
         element_data.take_inline_layout();
     }
 
+    // PATCH: `content-visibility: hidden` skips the contents (CSS Containment 2 §4.1): the
+    // box stays, its children and pseudo-elements get no boxes (like `display: none`
+    // for the subtree), so they take no space and paint nothing.
+    if doc.nodes[container_node_id]
+        .primary_styles()
+        .is_some_and(|s| {
+            s.get_box().clone_content_visibility()
+                == style::values::specified::box_::ContentVisibility::Hidden
+        })
+    {
+        return;
+    }
+
     flush_pseudo_elements(doc, container_node_id);
 
     if let Some(el) = doc.nodes[container_node_id].data.downcast_element() {
