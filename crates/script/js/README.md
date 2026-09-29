@@ -52,5 +52,6 @@ Coverage:
 - **Dedicated workers run on the page's thread.** Each `Worker` has its own realm (globals, `importScripts`, `self`, timers, messages), but long-running worker code blocks the page, and `Atomics.wait` is unavailable.
 - **`window.open`** returns `null`, even when `N.openWindow` opens a tab. `alert`/`confirm`/`prompt` only log, returning `undefined`/`false`/`null`.
 - **The DOMParser XML parser is a small JS parser**: predefined and numeric entities only, no DTDs. XSLT and XPath are not implemented.
+- **Named properties of `Document`** (`document.loginForm` for forms, images, embeds, objects and iframes) never replace a real property, unlike the specification's `[LegacyOverrideBuiltIns]` (`<img name=body>` would clobber `document.body`, and the layer reads `document.*` itself). The lookup lives in a proxy between `Document.prototype` and `Node.prototype` (so `Object.getPrototypeOf(Document.prototype)` is not `Node.prototype`); `in` has no receiver and answers for the main document.
 - **`innerText` reads computed style element by element**, so it is correct but slow on very large subtrees.
 - **The JS-only template fallback** (a native without `N.templateContent`) cannot make native serialization see template contents.

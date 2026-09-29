@@ -73,6 +73,72 @@
     },
   });
   Object.setPrototypeOf(Window.prototype, WindowProperties);
+
+  // DocumentProperties: named access on Document (`document.loginForm`), see
+  // https://html.spec.whatwg.org/multipage/dom.html#dom-document-nameditem. The names come
+  // from the `name` of embed/form/iframe/img/object elements, the `id` of objects, and the
+  // `id` of images that also have a non-empty `name`. Unlike the spec's
+  // [LegacyOverrideBuiltIns], real properties win (`<img name=body>` must not replace
+  // `document.body`, and the layer itself reads `document.*`), so like the window's this only
+  // runs for names nothing else defines. As WebIDL's named properties object does, it sits
+  // between Document.prototype and Node.prototype, so every kind of document gets it.
+  const DOC_NAMED_SEL_CACHE = new Map();
+  const DOC_NAMED_COLLECTIONS = new Map();
+  function docNamedSelector(name) {
+    let sel = DOC_NAMED_SEL_CACHE.get(name);
+    if (sel === undefined) {
+      const v = L.cssString(name);
+      sel = ['embed', 'form', 'iframe', 'img', 'object'].map((t) => `${t}[name=${v}]`).join(',') +
+        `,object[id=${v}],img[id=${v}][name]:not([name=""])`;
+      if (DOC_NAMED_SEL_CACHE.size > 500) DOC_NAMED_SEL_CACHE.clear();
+      DOC_NAMED_SEL_CACHE.set(name, sel);
+    }
+    return sel;
+  }
+  function namedDocumentProp(doc, name) {
+    if (name === '' || name.length > 256) return undefined;
+    const did = idOf(doc);
+    const sel = docNamedSelector(name);
+    let ids;
+    try { ids = N.querySelectorAll(did, sel); } catch (_) { return undefined; }
+    if (ids.length === 0) return undefined;
+    // The selector engine ignores namespaces; only HTML elements are named elements.
+    ids = ids.filter((id) => L.nsOf(wrap(id)) === L.NS_HTML && (doc !== document || !notYetParsed(id)));
+    if (ids.length === 0) return undefined;
+    if (ids.length === 1) {
+      const el = wrap(ids[0]);
+      // An iframe with a browsing context stands for its window.
+      if (L.lnOf(el) === 'iframe') {
+        const w = el.contentWindow;
+        if (w !== null && w !== undefined) return w;
+      }
+      return el;
+    }
+    // Several named elements: one live collection per name, the same one each time.
+    const key = `${did}\u0000${name}`;
+    let c = DOC_NAMED_COLLECTIONS.get(key);
+    if (c === undefined) {
+      c = L.queryCollection(did, sel, true);
+      if (DOC_NAMED_COLLECTIONS.size > 500) DOC_NAMED_COLLECTIONS.clear();
+      DOC_NAMED_COLLECTIONS.set(key, c);
+    }
+    return c;
+  }
+  const DocumentProperties = new Proxy(Object.create(L.Node.prototype), {
+    get(t, p, r) {
+      if (typeof p === 'string' && !(p in t) && L.isDocument(r)) {
+        const v = namedDocumentProp(r, p);
+        if (v !== undefined) return v;
+      }
+      return Reflect.get(t, p, r);
+    },
+    // `in` has no receiver: it answers for the main document.
+    has(t, p) {
+      if (Reflect.has(t, p)) return true;
+      return typeof p === 'string' && namedDocumentProp(document, p) !== undefined;
+    },
+  });
+  Object.setPrototypeOf(L.Document.prototype, DocumentProperties);
   let protoOK = true;
   try { Object.setPrototypeOf(g, Window.prototype); } catch (_) { protoOK = false; }
   if (!protoOK || Object.getPrototypeOf(g) !== Window.prototype) {
