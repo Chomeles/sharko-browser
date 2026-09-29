@@ -302,3 +302,10 @@ Patches so far:
     document's tree) registered its rules in the stylist anyway and kept them after removal.
     airbnb.de builds `div { width: 1rem; height: 1rem }` for a `<browser-font-size>` probe
     iframe; every `<div>` of the page became 16x16 and the whole react tree collapsed.
+82. `blitz-dom/src/document.rs` (`add_stylesheet_for_node`, `tree_path`): the sheet of a
+    `<style>`/`<link>` is inserted into the stylist before the first sheet of a node that
+    follows it in tree order (CSS Cascade 4 §6.4.1), not before the next larger node id. A
+    `<style>` that script created and put in front of an older one (`insertBefore`,
+    `prepend`, emotion's `prepend: true`) used to win the cascade against it: coursera.org's
+    `.cds-2 { padding-inline: 0 }` beat `.css-j55dmx { padding: 0 48px }` and the nav
+    container lost its padding.

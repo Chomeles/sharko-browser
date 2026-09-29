@@ -33,7 +33,7 @@ use selectors::{Element, matching::QuirksMode};
 use smallvec::SmallVec;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, Bound, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -1573,12 +1573,21 @@ impl BaseDocument {
         let element = &mut self.nodes[node_id].element_data_mut().unwrap();
         element.special_data = SpecialElementData::Stylesheet(stylesheet.clone());
 
-        // TODO: Nodes could potentially get reused so ordering by node_id might be wrong.
-        let insertion_point = self
-            .nodes_to_stylesheet
-            .range((Bound::Excluded(node_id), Bound::Unbounded))
-            .next()
-            .map(|(_, sheet)| sheet);
+        // PATCH: the sheet goes before the first sheet of a node that follows this one in
+        // tree order (the cascade orders author sheets by tree position, CSS Cascade 4
+        // §6.4.1). It used to be ordered by node id, i.e. by creation: a `<style>` that script
+        // created and inserted before an older one (emotion's `prepend`, `insertBefore`)
+        // won the cascade against it, e.g. coursera.org's padding of the nav container.
+        let mine = self.tree_path(node_id);
+        let insertion_point = mine.and_then(|mine| {
+            self.nodes_to_stylesheet
+                .iter()
+                .filter(|(other, _)| **other != node_id)
+                .filter_map(|(other, sheet)| Some((self.tree_path(*other)?, sheet)))
+                .filter(|(path, _)| *path > mine)
+                .min_by(|(a, _), (b, _)| a.cmp(b))
+                .map(|(_, sheet)| sheet)
+        });
 
         // PATCH: adopted stylesheets stay behind every node's sheet.
         let insertion_point = insertion_point.or_else(|| self.first_adopted_stylesheet());
@@ -1592,6 +1601,20 @@ impl BaseDocument {
             self.stylist
                 .append_stylesheet(stylesheet, &self.guard.read())
         }
+    }
+
+    /// PATCH: the child indices from the root down to `id` (`None` when detached).
+    fn tree_path(&self, id: NodeId) -> Option<Vec<usize>> {
+        let root = self.root_node().id;
+        let mut path = Vec::new();
+        let mut cur = id;
+        while cur != root {
+            let parent = self.nodes.get(cur)?.parent?;
+            path.push(self.nodes.get(parent)?.children.iter().position(|c| *c == cur)?);
+            cur = parent;
+        }
+        path.reverse();
+        Some(path)
     }
 
     fn first_adopted_stylesheet(&self) -> Option<&DocumentStyleSheet> {
