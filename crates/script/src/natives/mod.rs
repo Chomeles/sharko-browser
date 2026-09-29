@@ -222,6 +222,7 @@ natives_table! {
     "abortFetch" => misc::n_abort_fetch,
     "workerCreate" => misc::n_worker_create,
     "workerEval" => misc::n_worker_eval,
+    "workerEvalModule" => misc::n_worker_eval_module,
     "cloneInto" => misc::n_clone_into,
     "wsOpen" => misc::n_ws_open,
     "wsSend" => misc::n_ws_send,
