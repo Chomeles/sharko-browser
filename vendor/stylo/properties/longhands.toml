@@ -700,7 +700,11 @@ affects = "layout"
 type = "ContentVisibility"
 initial = "computed::ContentVisibility::Visible"
 struct = "box"
-engine = "gecko"
+# PATCH: was `engine = "gecko"`; the servo build parses it behind `layout.unimplemented`
+# (on in blitz-dom) like `contain`. Blitz skips the contents of `hidden`.
+servo_pref = "layout.unimplemented"
+servo_restyle_damage = "rebuild_box"
+animation_type = "none"
 spec = "https://drafts.csswg.org/css-contain/#content-visibility"
 affects = "layout"
 

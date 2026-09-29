@@ -375,6 +375,18 @@ impl BaseDocument {
             },
         );
 
+        // PATCH: inline boxes before any text follow the container's `white-space: nowrap`.
+        inline_layout.layout.set_base_text_wrap_mode(
+            match self.nodes[node_id]
+                .primary_styles()
+                .map(|s| s.get_inherited_text().text_wrap_mode) {
+                Some(style::computed_values::text_wrap_mode::T::Nowrap) => {
+                    parley::TextWrapMode::NoWrap
+                }
+                _ => parley::TextWrapMode::Wrap,
+            },
+        );
+
         let pbw = container_pb.horizontal_components().sum() * scale;
         let width = known_dimensions
             .width

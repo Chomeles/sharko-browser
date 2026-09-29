@@ -812,6 +812,16 @@ class MockNative {
       now: () => M.clock,
       timeOrigin: () => M.origin,
       location: () => M.url,
+      // Mirrors blitz-dom's document base URL: first <base href> against the fallback,
+      // a failed parse or a data:/javascript: result gives the document URL.
+      baseURL: () => {
+        const bid = nat.querySelector(nat.documentId(), 'base[href]');
+        if (!bid) return M.url;
+        try {
+          const u = new URL(String(nat.getAttr(bid, 'href')).trim(), M.url);
+          return /^(data|javascript):$/.test(u.protocol) ? M.url : u.href;
+        } catch (e) { return M.url; }
+      },
       navigate: (url, replace) => { M.navigations.push({ url: String(url), replace: !!replace }); },
       reload: () => { M.navigations.push({ reload: true }); },
       historyPush: (url, replace) => {

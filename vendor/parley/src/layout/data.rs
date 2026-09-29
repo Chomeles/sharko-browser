@@ -312,6 +312,9 @@ pub(crate) struct LayoutData<B: Brush> {
     pub(crate) indent_amount: f32,
     /// Options controlling text-indent behavior (each-line, hanging).
     pub(crate) indent_options: IndentOptions,
+    /// PATCH: the `text-wrap-mode` of the block container, the mode inline boxes get before
+    /// any text has set one.
+    pub(crate) base_text_wrap_mode: TextWrapMode,
 }
 
 impl<B: Brush> Default for LayoutData<B> {
@@ -340,6 +343,7 @@ impl<B: Brush> Default for LayoutData<B> {
             layout_max_advance: 0.0,
             indent_amount: 0.0,
             indent_options: IndentOptions::default(),
+            base_text_wrap_mode: TextWrapMode::Wrap,
         }
     }
 }
@@ -363,6 +367,7 @@ impl<B: Brush> LayoutData<B> {
         self.glyphs.clear();
         self.lines.clear();
         self.line_items.clear();
+        self.base_text_wrap_mode = TextWrapMode::Wrap;
     }
 
     /// Push an inline box to the list of items
@@ -567,7 +572,9 @@ impl<B: Brush> LayoutData<B> {
 
         let mut running_min_width = 0.0;
         let mut running_max_width = 0.0;
-        let mut text_wrap_mode = TextWrapMode::Wrap;
+        // PATCH: boxes before the first text (or in a paragraph without text) take the
+        // wrap mode of the block container, not always `wrap`.
+        let mut text_wrap_mode = self.base_text_wrap_mode;
         let mut prev_cluster: Option<&ClusterData> = None;
         let is_rtl = self.base_level & 1 == 1;
         for item in &self.items {

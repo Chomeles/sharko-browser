@@ -919,23 +919,8 @@ pub(crate) fn subtree(doc: &BaseDocument, root: NodeId) -> Vec<NodeId> {
     out
 }
 
-/// The document's base URL: the first `<base href>` resolved against the document URL.
-pub(crate) fn base_url(doc: &BaseDocument, doc_url: &url::Url) -> url::Url {
-    let mut stack = vec![doc.root_node().id];
-    let mut visited = 0;
-    while let Some(id) = stack.pop() {
-        visited += 1;
-        if visited > 2000 {
-            break; // <base> lives in <head>; don't scan huge documents.
-        }
-        let Some(n) = doc.get_node(id) else { continue };
-        if is_html(n, &local_name!("base"))
-            && let Some(href) = n.element_data().and_then(|e| e.attr(local_name!("href")))
-            && let Ok(u) = doc_url.join(href)
-        {
-            return u;
-        }
-        stack.extend(n.children.iter().rev().copied());
-    }
-    doc_url.clone()
+/// The document's base URL: blitz-dom's "document base URL" (first `<base href>` against the
+/// fallback base URL), kept current on `<base>` changes, so the engine and scripts agree.
+pub(crate) fn base_url(doc: &BaseDocument, _doc_url: &url::Url) -> url::Url {
+    doc.document_base_url().clone()
 }

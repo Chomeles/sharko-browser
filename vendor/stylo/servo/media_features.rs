@@ -8,6 +8,7 @@ use crate::derives::*;
 use crate::queries::feature::{AllowsRanges, Evaluator, FeatureFlags, QueryFeatureDescription};
 use crate::queries::values::{Orientation, PrefersColorScheme};
 use crate::values::computed::{CSSPixelLength, Context, Ratio, Resolution};
+use crate::values::specified::color::ForcedColors;
 use std::fmt::Debug;
 
 /// https://drafts.csswg.org/mediaqueries-4/#width
@@ -159,8 +160,114 @@ fn eval_aspect_ratio(context: &Context) -> Ratio {
     Ratio::new(size.width.0 as f32, size.height.0 as f32)
 }
 
+
+// PATCH: Media Queries 5 features that the servo table lacked. An unknown feature makes the
+// whole query invalid (never matches), so `(prefers-reduced-motion: no-preference)` and
+// friends were false. The values are those of a desktop browser without user preferences
+// (Chromium, Gecko): no reduced motion, scripting on, no forced colors, no contrast
+// preference, a fast-updating sRGB screen, a plain browser tab.
+
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, ToCss)]
+#[repr(u8)]
+enum PrefersReducedMotion {
+    NoPreference,
+    Reduce,
+}
+
+/// https://drafts.csswg.org/mediaqueries-5/#prefers-reduced-motion
+fn eval_prefers_reduced_motion(_: &Context, query_value: Option<PrefersReducedMotion>) -> bool {
+    // The boolean form matches when the user prefers reduced motion.
+    matches!(query_value, Some(PrefersReducedMotion::NoPreference))
+}
+
+/// https://drafts.csswg.org/mediaqueries-5/#prefers-contrast
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
+#[repr(u8)]
+enum PrefersContrast {
+    More,
+    Less,
+    Custom,
+    NoPreference,
+}
+
+fn eval_prefers_contrast(_: &Context, query_value: Option<PrefersContrast>) -> bool {
+    matches!(query_value, Some(PrefersContrast::NoPreference))
+}
+
+/// https://drafts.csswg.org/mediaqueries-5/#forced-colors
+fn eval_forced_colors(_: &Context, query_value: Option<ForcedColors>) -> bool {
+    matches!(query_value, Some(ForcedColors::None))
+}
+
+/// https://drafts.csswg.org/mediaqueries-5/#scripting
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
+#[repr(u8)]
+enum Scripting {
+    None,
+    // Parsed but never matched: it is meant for non-browser user agents.
+    InitialOnly,
+    Enabled,
+}
+
+fn eval_scripting(_: &Context, query_value: Option<Scripting>) -> bool {
+    match query_value {
+        Some(v) => v == Scripting::Enabled,
+        None => true,
+    }
+}
+
+/// https://drafts.csswg.org/mediaqueries-4/#update
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, ToCss)]
+#[repr(u8)]
+enum Update {
+    None,
+    Slow,
+    Fast,
+}
+
+fn eval_update(_: &Context, query_value: Option<Update>) -> bool {
+    match query_value {
+        Some(v) => matches!(v, Update::Fast),
+        None => true,
+    }
+}
+
+/// Lower values match higher capabilities.
+/// https://drafts.csswg.org/mediaqueries-4/#color-gamut
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, PartialOrd, ToCss)]
+#[repr(u8)]
+enum ColorGamut {
+    Srgb,
+    P3,
+    Rec2020,
+}
+
+fn eval_color_gamut(_: &Context, query_value: Option<ColorGamut>) -> bool {
+    match query_value {
+        Some(v) => v <= ColorGamut::Srgb,
+        None => false,
+    }
+}
+
+/// https://w3c.github.io/manifest/#the-display-mode-media-feature
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
+#[repr(u8)]
+enum DisplayMode {
+    Browser,
+    MinimalUi,
+    Standalone,
+    Fullscreen,
+}
+
+fn eval_display_mode(_: &Context, query_value: Option<DisplayMode>) -> bool {
+    match query_value {
+        Some(v) => v == DisplayMode::Browser,
+        None => true,
+    }
+}
+
 /// A list with all the media features that Servo supports.
-pub static MEDIA_FEATURES: [QueryFeatureDescription; 15] = [
+pub static MEDIA_FEATURES: [QueryFeatureDescription; 22] = [
     feature!(
         atom!("width"),
         AllowsRanges::Yes,
@@ -249,6 +356,48 @@ pub static MEDIA_FEATURES: [QueryFeatureDescription; 15] = [
         atom!("prefers-color-scheme"),
         AllowsRanges::No,
         keyword_evaluator!(eval_prefers_color_scheme, PrefersColorScheme),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("prefers-reduced-motion"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_prefers_reduced_motion, PrefersReducedMotion),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("prefers-contrast"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_prefers_contrast, PrefersContrast),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("forced-colors"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_forced_colors, ForcedColors),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("scripting"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_scripting, Scripting),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("update"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_update, Update),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("color-gamut"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_color_gamut, ColorGamut),
+        FeatureFlags::empty(),
+    ),
+    feature!(
+        atom!("display-mode"),
+        AllowsRanges::No,
+        keyword_evaluator!(eval_display_mode, DisplayMode),
         FeatureFlags::empty(),
     ),
 ];
