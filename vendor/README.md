@@ -296,3 +296,9 @@ Patches so far:
     has no height, so the placeholder and the caret were centered as a zero-height line, half
     a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
     `line-height` as tall as the box the placeholder was pushed out of it).
+81. `blitz-dom/src/document.rs` (`process_style_element`, `is_connected_to_root`),
+    `mutator.rs` (test): a `<style>` applies only while connected (HTML §4.2.6 "update a
+    style block"). A detached one (created by script and given text, or handed to another
+    document's tree) registered its rules in the stylist anyway and kept them after removal.
+    airbnb.de builds `div { width: 1rem; height: 1rem }` for a `<browser-font-size>` probe
+    iframe; every `<div>` of the page became 16x16 and the whole react tree collapsed.

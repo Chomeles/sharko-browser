@@ -1234,6 +1234,16 @@ impl BaseDocument {
     }
 
     pub fn process_style_element(&mut self, target_id: NodeId) {
+        // PATCH: a `<style>` applies only while it is connected (HTML §4.2.6 "update a style
+        // block": the element must be connected). A detached one (created by script, text
+        // set, not inserted yet, or inserted into another document) used to register its
+        // rules in this document's stylist anyway: airbnb.de's `<browser-font-size>` probe
+        // builds `div { width: 1rem; height: 1rem }` for its iframe, and every `<div>` of
+        // the page became 16x16.
+        if !self.is_connected_to_root(target_id) {
+            self.remove_stylesheet_for_node(target_id);
+            return;
+        }
         let css = self.nodes[target_id].text_content();
         let css = html_escape::decode_html_entities(&css);
         let media = self.media_list_of(target_id);
@@ -1304,6 +1314,19 @@ impl BaseDocument {
 
     /// PATCH: where a `<style>`/`<link>` element's stylesheet applies: nowhere inside
     /// `<template>` contents, only to the host's subtree inside an emulated shadow tree.
+    /// PATCH: whether the parent chain of `node_id` ends at the document root node.
+    pub(crate) fn is_connected_to_root(&self, node_id: NodeId) -> bool {
+        let root = self.root_node().id;
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            if id == root {
+                return true;
+            }
+            cur = self.nodes.get(id).and_then(|n| n.parent);
+        }
+        false
+    }
+
     pub fn style_scope(&self, node_id: NodeId) -> StyleScope {
         let mut cur = self.nodes.get(node_id).and_then(|n| n.parent);
         while let Some(id) = cur {

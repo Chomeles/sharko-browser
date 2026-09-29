@@ -1429,6 +1429,31 @@ mod test {
     }
 
     #[test]
+    fn detached_style_element_has_no_stylesheet_until_inserted() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let mut mutator = document.mutate();
+        let style = mutator.create_element(qual_name!("style"), vec![]);
+        let text = mutator.create_text_node("div { width: 1rem }");
+        mutator.append_children(style, &[text]);
+        drop(mutator);
+        assert!(
+            !document.nodes_to_stylesheet.contains_key(&style),
+            "a detached <style> must not register its rules"
+        );
+
+        let root = document.root_node().id;
+        let mut mutator = document.mutate();
+        mutator.append_children(root, &[style]);
+        drop(mutator);
+        assert!(document.nodes_to_stylesheet.contains_key(&style));
+
+        let mut mutator = document.mutate();
+        mutator.remove_node(style);
+        drop(mutator);
+        assert!(!document.nodes_to_stylesheet.contains_key(&style));
+    }
+
+    #[test]
     fn set_media_type_updates_stylist_device() {
         let mut document = BaseDocument::new(DocumentConfig::default());
         assert_eq!(document.stylist_device().media_type(), MediaType::screen());
