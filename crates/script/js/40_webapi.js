@@ -775,7 +775,7 @@
     const src = source !== null && source !== undefined ? source : L.window;
     let srcOrigin = origin;
     // (the document's origin, not the Location's: an about:srcdoc frame has its parent's)
-    if (src !== L.window) { try { srcOrigin = src.origin; } catch (_) { /* keep ours */ } }
+    if (src !== L.window) { try { const o = src.origin; if (typeof o === 'string') srcOrigin = o; } catch (_) { /* keep ours */ } }
     L.postTask(() => L.fire(L.window, 'message', { data: t.data, origin: srcOrigin, source: src, ports: t.ports }, L.MessageEvent));
   };
 
