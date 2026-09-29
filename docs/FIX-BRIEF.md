@@ -1,5 +1,7 @@
 # Fix brief: repair one root cause in the engine
 
+Rules: `docs/RULES.md` (authoritative; this brief must not contradict it).
+
 You work alone on your own machine and clone. Fix the causes named in your task at engine level and spec-driven, so that every site with that cause is repaired; never a per-site hack (no hostname checks, no special-casing a library).
 
 ## Method (in this order)
