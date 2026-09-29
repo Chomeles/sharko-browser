@@ -1115,8 +1115,22 @@
   const HTMLSlotElement = htmlClass('HTMLSlotElement', ['slot']);
   R.str(HTMLSlotElement.prototype, 'name');
   L.mixin(HTMLSlotElement.prototype, {
-    assignedNodes(options) { return L.wrapAll(N.childIds(idOf(this))); },
-    assignedElements(options) { return L.wrapAll(N.childElementIds(idOf(this))); },
+    // Slotted light nodes sit physically inside the slot; anything else there is fallback
+    // content (returned only for flatten:true when nothing is assigned).
+    assignedNodes(options) {
+      const flatten = !!(options && options.flatten);
+      const out = [];
+      (function collect(slotId) {
+        const kids = N.childIds(slotId);
+        const assigned = kids.filter((k) => L.assignedSlotOf(wrap(k), true) !== null);
+        const use = assigned.length ? assigned : (flatten ? kids : []);
+        for (const k of use) {
+          if (flatten && N.nodeType(k) === 1 && N.localName(k) === 'slot' && L.inShadowTree(k)) collect(k); else out.push(k);
+        }
+      })(idOf(this));
+      return L.wrapAll(out);
+    },
+    assignedElements(options) { return this.assignedNodes(options).filter((n) => n.nodeType === 1); },
     assign() { },
   });
   const HTMLMapElement = htmlClass('HTMLMapElement', ['map']);
