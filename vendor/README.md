@@ -296,7 +296,3 @@ Patches so far:
     has no height, so the placeholder and the caret were centered as a zero-height line, half
     a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
     `line-height` as tall as the box the placeholder was pushed out of it).
-80. `blitz-dom/src/node/node.rs`: the vertical centering of a single-line text input takes the
-    height of the placeholder (or the caret) while the value is empty; an empty editor layout
-    has no height, so the offset was that of a zero-height line and the placeholder (mydealz.de
-    search field) was painted half a line too low.
