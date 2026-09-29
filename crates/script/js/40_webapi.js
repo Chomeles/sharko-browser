@@ -3164,16 +3164,21 @@
     }
     #start(src, module) {
       if (this.#terminated) return;
-      if (module && /^\s*(import|export)\b/m.test(src)) {
-        L.console.error(`Module workers are not supported yet ('${this.#url}').`);
-        L.fire(this, 'error', { cancelable: true }, L.ErrorEvent);
-        return;
-      }
       const g = N.workerCreate();
       this.#global = g;
       this.#scope = new WorkerScopeTarget();
       this.#install(g);
-      this.#run(() => N.workerEval(g, src, this.#url));
+      if (module && typeof N.workerEvalModule === 'function') {
+        const r = N.workerEvalModule(g, src, this.#url);
+        if (r === 'imports') {
+          L.console.error(`Module workers with static imports are not supported yet ('${this.#url}').`);
+          L.fire(this, 'error', { cancelable: true }, L.ErrorEvent);
+          return;
+        }
+        if (Array.isArray(r)) this.#uncaught(r[4], r);
+      } else {
+        this.#run(() => N.workerEval(g, src, this.#url));
+      }
       this.#ready = true;
       const queued = this.#queue;
       this.#queue = [];

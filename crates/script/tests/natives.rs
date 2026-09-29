@@ -1232,6 +1232,24 @@ fn modules_static_dynamic_and_meta() {
     e.eval("import('/js/html.js').catch(e => globalThis.mimeErr = e.message); 1");
     e.serve_fetches();
     assert!(e.eval("mimeErr").contains("MIME"), "{}", e.eval("mimeErr"));
+    // blob: modules come from the blob registry, not the network (also as dependencies).
+    e.eval(
+        "N.registerBlobURL('blob:https://example.com/m1', Uint8Array.from('export const v = 42;', c => c.charCodeAt(0)), 'text/javascript');\
+         N.registerBlobURL('blob:https://example.com/m2', Uint8Array.from('import {v} from \"blob:https://example.com/m1\"; export const w = v + 1;', c => c.charCodeAt(0)), 'text/javascript');\
+         import('blob:https://example.com/m2').then(m => globalThis.blobW = m.w, e => globalThis.blobW = String(e)); 1",
+    );
+    assert_eq!(e.serve_fetches(), 0, "blob modules are not fetched");
+    assert_eq!(e.eval("blobW"), "43");
+    e.eval("import('blob:https://example.com/gone').catch(e => globalThis.blobErr = e.message); 1");
+    assert!(e.eval("blobErr").contains("blob"), "{}", e.eval("blobErr"));
+    // A module worker realm runs a module without static imports (import.meta works).
+    e.eval(
+        "const g = N.workerCreate(); globalThis.wr = [N.workerEvalModule(g, 'globalThis.u = import.meta.url', 'https://example.com/w.js'), g.u, N.workerEvalModule(g, 'import \"./x.js\"', 'https://example.com/w2.js')]; 1",
+    );
+    assert_eq!(
+        e.eval("wr"),
+        "[null,\"https://example.com/w.js\",\"imports\"]"
+    );
     assert!(!e.rt.is_busy());
 }
 
