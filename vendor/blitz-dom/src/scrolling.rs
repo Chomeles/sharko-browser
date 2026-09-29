@@ -670,6 +670,38 @@ impl BaseDocument {
         }
     }
 
+    /// PATCH: whether the box is `position: fixed` with the viewport as its containing block
+    /// (no transformed ancestor, as in `layout/abspos.rs`).
+    fn is_fixed_to_viewport(&self, node_id: NodeId) -> bool {
+        use style::computed_values::position::T as Position;
+        let is_fixed = |id: NodeId| {
+            self.nodes
+                .get(id)
+                .and_then(|node| node.primary_styles())
+                .is_some_and(|styles| styles.clone_position() == Position::Fixed)
+        };
+        if !is_fixed(node_id) {
+            return false;
+        }
+        let mut ancestor = self
+            .nodes
+            .get(node_id)
+            .and_then(|node| node.layout_parent.get());
+        while let Some(id) = ancestor {
+            let Some(node) = self.nodes.get(id) else {
+                break;
+            };
+            if node
+                .primary_styles()
+                .is_some_and(|styles| !styles.get_box().transform.0.is_empty())
+            {
+                return false;
+            }
+            ancestor = node.layout_parent.get();
+        }
+        true
+    }
+
     /// Scroll the element's scrolling ancestors and the viewport so that it has the
     /// requested alignment in each axis (CSSOM View "scroll a target into view").
     ///
@@ -691,11 +723,26 @@ impl BaseDocument {
         let Some(node) = self.nodes.get(node_id) else {
             return scrolled;
         };
+        // PATCH: a box fixed to the viewport stays where it is when anything scrolls, so the
+        // scrolling ends at the first one (the target itself, or a scroller around it), and
+        // the viewport is not scrolled (the focused dialog of a consent banner, positioned
+        // below the fold until the banner styles it, scrolled the page to its bottom).
+        let fixed_boundary =
+            std::iter::successors(Some(node_id), |&id| self.nodes.get(id)?.layout_parent.get())
+                .find(|&id| self.is_fixed_to_viewport(id));
+        if fixed_boundary == Some(node_id) {
+            return scrolled;
+        }
         let mut ancestor = node.layout_parent.get();
+        let mut past_boundary = false;
         while let Some(container_id) = ancestor {
             let Some(container) = self.nodes.get(container_id) else {
                 break;
             };
+            if past_boundary {
+                break;
+            }
+            past_boundary = fixed_boundary == Some(container_id);
             ancestor = container.layout_parent.get();
             if container_id == root_id
                 || !container.is_element()
@@ -754,6 +801,9 @@ impl BaseDocument {
             }
         }
 
+        if fixed_boundary.is_some() {
+            return scrolled;
+        }
         let Some(node) = self.nodes.get(node_id) else {
             return scrolled;
         };

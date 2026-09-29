@@ -305,6 +305,37 @@ mod tests {
     }
 
     #[test]
+    fn revealing_a_box_fixed_to_the_viewport_scrolls_nothing() {
+        use crate::{ScrollBehavior, ScrollLogicalPosition};
+        // Both with the page locked and free to scroll.
+        for body_style in ["overflow:hidden", ""] {
+            let mut p = page("", body_style);
+            let tall = p.tall;
+            let reveal = |p: &mut Page| {
+                p.doc.scroll_into_view(
+                    tall,
+                    ScrollBehavior::Instant,
+                    ScrollLogicalPosition::End,
+                    ScrollLogicalPosition::Nearest,
+                )
+            };
+            reveal(&mut p);
+            assert_eq!(scroll_y(&p), 700.0, "{body_style}");
+
+            // Below the fold at `top: 900px`, the box stays there whatever scrolls.
+            let html = p.html;
+            p.doc.scroll_to(html, 0.0, 0.0, ScrollBehavior::Instant);
+            set_style(
+                &mut p,
+                tall,
+                "position:fixed;top:900px;width:10px;height:50px",
+            );
+            reveal(&mut p);
+            assert_eq!(scroll_y(&p), 0.0, "{body_style}");
+        }
+    }
+
+    #[test]
     fn a_change_of_the_source_is_laid_out_again() {
         let mut p = page("", "overflow:auto");
         assert_eq!(p.doc.nodes[p.html].scroll_height(), 1000.0);

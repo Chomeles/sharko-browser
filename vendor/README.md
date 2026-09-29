@@ -275,3 +275,7 @@ Patches so far:
     full-page captures saw a page as tall as the window, and a locked `<html>` could still be
     scrolled by the user. User scrolling along a `hidden` viewport axis is blocked (an offset
     that scripts set stays), programmatic scrolling is not.
+78. `blitz-dom/src/scrolling.rs`: `scroll_into_view` stops at the first box that is
+    `position: fixed` with the viewport as its containing block (the target or a scroller
+    around it) and does not scroll the viewport for it; the focused dialog of a consent
+    banner, still below the fold, used to scroll wetter.com to its bottom.
