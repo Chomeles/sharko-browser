@@ -540,6 +540,17 @@ pub(crate) fn n_location(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// `N.baseURL()`: the document base URL (blitz-dom's, so the engine and scripts share one).
+pub(crate) fn n_base_url(cx: &mut Cx) -> NResult {
+    let doc_url = cx.st.url.borrow().clone();
+    let base = match cx.st.doc() {
+        Ok(doc) => dom::base_url(doc, &doc_url).to_string(),
+        Err(_) => doc_url.to_string(),
+    };
+    cx.ret_str(&base);
+    Ok(())
+}
+
 /// `N.navigate(url, replace)`. Returns true if the navigation was handled within the
 /// document (fragment navigation or `javascript:` URL).
 pub(crate) fn n_navigate(cx: &mut Cx) -> NResult {

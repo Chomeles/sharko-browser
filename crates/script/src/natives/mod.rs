@@ -244,6 +244,7 @@ natives_table! {
     "timeOrigin" => misc::n_time_origin,
     // Location / history / navigation
     "location" => misc::n_location,
+    "baseURL" => misc::n_base_url,
     "navigate" => misc::n_navigate,
     "reload" => misc::n_reload,
     "historyPush" => misc::n_history_push,

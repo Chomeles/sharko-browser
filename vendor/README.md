@@ -296,3 +296,14 @@ Patches so far:
     has no height, so the placeholder and the caret were centered as a zero-height line, half
     a line too low (mydealz's search box showed "Suche…" clipped by the bottom edge, and with a
     `line-height` as tall as the box the placeholder was pushed out of it).
+81. `blitz-dom/src/{document,mutator,iframe,config,svg_sprite,events/pointer}.rs`: the HTML
+    "document base URL" (`BaseDocument::document_base_url`), separate from the document URL
+    (`base_url`, what `location` reports): the first `<base href>` in tree order, parsed
+    against the fallback base URL; a failed parse or a `data:`/`javascript:` result gives the
+    fallback (Ladybird `Document::base_url`, `HTMLBaseElement::set_the_frozen_base_url`;
+    Chromium `Document::ProcessBaseElement`). It is recomputed when a `<base>` is inserted or
+    removed, its `href` changes, or the document URL changes, and is used for `<link>`, `<img>`
+    / `srcset`, preload, iframe `src`, form actions, link clicks, `<use>` and `url()` in inline
+    styles. The fallback base URL of a srcdoc / initial `about:blank` iframe document is its
+    parent's document base URL (`DocumentConfig::fallback_base_url`). Before, every
+    subresource of a page with `<base href>` pointing elsewhere (dwd.de) 404ed.

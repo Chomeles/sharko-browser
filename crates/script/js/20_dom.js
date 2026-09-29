@@ -165,21 +165,15 @@
   };
   L.invalidateDocumentURL = function () { docURL = null; baseCache.epoch = -1; };
 
-  // Base URL: first <base href> in the document, resolved against the document URL.
+  // Base URL: the engine's document base URL (HTML "document base URL"), so scripts and
+  // subresource loading agree on <base href>, data:/javascript: bases and srcdoc fallbacks.
   const baseCache = { epoch: -1, url: '' };
   L.baseURL = function () {
     const ep = state.tree * 65536 + state.attr;
     if (baseCache.epoch === ep) return baseCache.url;
-    const du = L.documentURL();
-    let url = du;
-    const b = N.querySelector(mainDocId, 'base[href]');
-    if (b !== 0) {
-      const p = N.urlParse(N.getAttr(b, 'href') || '', du);
-      if (p !== null) url = p[0];
-    }
     baseCache.epoch = ep;
-    baseCache.url = url;
-    return url;
+    baseCache.url = N.baseURL();
+    return baseCache.url;
   };
   // Resolve a URL against the document base; returns the input on failure.
   const urlCache = new Map();
