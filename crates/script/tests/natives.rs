@@ -610,7 +610,8 @@ fn computed_style() {
     );
     assert_eq!(
         e.eval("N.computedStyle(N.getElementById('deep'), 'display', '')"),
-        "\"none\""
+        // its own computed value, as in Blink (only the .hidden ancestor is 'none')
+        "\"block\""
     );
     // Style changes are visible immediately (forced style flush).
     assert_eq!(
@@ -1678,4 +1679,25 @@ fn foreign_xmlns_attribute_has_no_empty_prefix() {
     assert_eq!(e.eval("N.attrNames(N.getElementById('s'))"), "[\"id\",\"xmlns\",\"xmlns:xlink\"]");
     assert_eq!(e.eval("N.getAttr(N.getElementById('s'), 'xmlns')"), "\"http://www.w3.org/2000/svg\"");
     assert!(!e.eval("N.outerHTML(N.getElementById('s'))").contains(" :xmlns"));
+}
+
+#[test]
+fn computed_style_in_display_none_subtree() {
+    // getComputedStyle resolves styles on demand inside a display:none subtree (Blink does):
+    // the element's own computed values, not 'none'/''.
+    let mut e = Env::new(
+        r#"<html><body>
+        <style>#gone{display:none} .item{display:flex; margin-inline-end:40px; font-size:20px}</style>
+        <div id="gone"><div id="wrap"><div class="item" id="it"><b id="deep">x</b></div></div></div>
+        </body></html>"#,
+    );
+    e.eval("globalThis.N = __native; 1");
+    let cs = |e: &mut Env, id: &str, p: &str| {
+        e.eval(&format!("N.computedStyle(N.getElementById('{id}'), '{p}', '')"))
+    };
+    assert_eq!(cs(&mut e, "gone", "display"), "\"none\"");
+    assert_eq!(cs(&mut e, "it", "display"), "\"flex\"");
+    assert_eq!(cs(&mut e, "it", "margin-inline-end"), "\"40px\"");
+    // inherited through the unstyled chain
+    assert_eq!(cs(&mut e, "deep", "font-size"), "\"20px\"");
 }

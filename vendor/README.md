@@ -387,3 +387,9 @@ Patches so far:
     parse time, so `color: transparent` gradient headings (bsky.app sign-up dialog) painted a
     plain rectangle or nothing. Layers with that clip are painted into an isolated layer and
     intersected (`DestIn`) with the opaque glyphs of the element's subtree, as in Blink/Gecko.
+95. `blitz-dom/src/stylo.rs` (`resolve_undisplayed_style`), `crates/script/src/style.rs`:
+    `getComputedStyle` of an element inside a `display: none` subtree returned `none`/empty
+    because Stylo does not traverse such subtrees. The style is now resolved on demand with
+    `style::traversal::resolve_style` (Servo's recipe for resolved-style requests), without
+    storing it. wordpress.com's logo marquee sums `margin-inline-end` of hidden items; with 0
+    its width loop ran until `Invalid string length` and aborted the page's DOMContentLoaded.
