@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>innerText inline-block repro</title>
+<style>li{display:inline-block;width:120px} h2{margin:0;font-size:14px} .tile{display:inline-block} .cap{display:block}</style></head>
+<body>
+<ul id="u"><li><a href="#"><h2>Storm uncovers shipwreck</h2></a></li><li><a href="#"><h2>AEW star dies</h2></a></li><li><a href="#"><h2>Makes emergency landing</h2></a></li></ul>
+<div id="w"><span class="tile"><span class="cap">Wolken</span><span class="cap">Di</span></span><span class="tile"><span class="cap">45</span><span class="cap">Das</span></span></div>
+<div id="f"><div style="display:inline-flex"><p>para one</p></div><div style="display:inline-flex"><p>para two</p></div></div>
+<script>window.__probe=()=>JSON.stringify({u:document.getElementById('u').innerText,w:document.getElementById('w').innerText,f:document.getElementById('f').innerText,body:document.body.innerText});</script>
+</body></html>

@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>misc repro: track, named form, blob module, module worker</title></head>
+<body>
+<video id="v" muted playsinline>
+  <track id="tr" kind="captions" src="/captions.vtt" srclang="en" label="English" default>
+</video>
+<form name="loginForm" id="lf"><input name="q"></form>
+<pre id="out"></pre>
+<script>
+window.__results = { done: false };
+const R = window.__results;
+// 1. <track>.track and video.textTracks (svelte.dev homepage video)
+try {
+  const tr = document.getElementById('tr'), v = document.getElementById('v');
+  R.track = { trackIsNull: tr.track === null, textTracksLength: v.textTracks.length,
+    trackCues: tr.track ? (tr.track.cues === null ? 'null' : 'cues:' + tr.track.cues.length) : 'n/a',
+    mode: v.textTracks[0] ? v.textTracks[0].mode : 'n/a' };
+} catch (e) { R.track = 'threw: ' + e.message; }
+// 2. document.<formName> (login.live.com DoSubmit uses document.f.submit())
+try { R.namedForm = { typeofDocLoginForm: typeof document.loginForm, sameAsById: document.loginForm === document.getElementById('lf'), formsNamed: typeof document.forms.loginForm }; } catch (e) { R.namedForm = 'threw: ' + e.message; }
+// 3. dynamic import() of a blob: URL module (bing.com)
+const blobUrl = URL.createObjectURL(new Blob(['export const answer = 42; window.__blobModRan = true;'], { type: 'text/javascript' }));
+const p3 = import(blobUrl).then(m => { R.blobImport = 'ok:' + m.answer; }, e => { R.blobImport = 'rejected: ' + (e && e.message); });
+// 4. module worker whose bundled source uses import.meta but has no top-level import/export (svelte.dev search worker)
+const p4 = new Promise((resolve) => {
+  try {
+    const w = new Worker('/worker-im.js', { type: 'module' });
+    const t = setTimeout(() => { R.moduleWorker = 'no message within 3s'; resolve(); }, 3000);
+    w.onmessage = (e) => { clearTimeout(t); R.moduleWorker = 'ok: ' + JSON.stringify(e.data); resolve(); };
+    w.onerror = (e) => { clearTimeout(t); R.moduleWorker = 'error: ' + (e.message || 'error event'); resolve(); };
+  } catch (e) { R.moduleWorker = 'threw: ' + e.message; resolve(); }
+});
+const p5 = new Promise((resolve) => {
+  try {
+    const wu = URL.createObjectURL(new Blob(['var b = import.meta.url; self.postMessage({ok:true});'], { type: 'text/javascript' }));
+    const w = new Worker(wu, { type: 'module' });
+    const t = setTimeout(() => { R.blobWorker = 'no message within 3s'; resolve(); }, 3000);
+    w.onmessage = (e) => { clearTimeout(t); R.blobWorker = 'ok'; resolve(); };
+    w.onerror = (e) => { clearTimeout(t); R.blobWorker = 'error: ' + (e.message || 'error event'); resolve(); };
+  } catch (e) { R.blobWorker = 'threw: ' + e.message; resolve(); }
+});
+Promise.allSettled([p3, p4, p5]).then(() => { R.done = true; document.getElementById('out').textContent = JSON.stringify(R, null, 1); });
+</script>
+</body></html>

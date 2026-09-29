@@ -1,0 +1,96 @@
+{
+ "cluster": "content-missing-a",
+ "rootCauses": [
+  {
+   "id": "base-href-ignored-for-subresources",
+   "title": "<base href> is ignored when blitz-dom resolves stylesheet/image/preload URLs, so they 404 (dwd.de has 15 stylesheets with 0 rules)",
+   "kind": "sharko-bug",
+   "area": "vendor/blitz-dom/src/document.rs (resolve_url ~1162, set_base_url ~638), vendor/blitz-dom/src/mutator.rs (load_linked_stylesheet ~1108-1150, image src ~1266), image_source.rs:344; crates/script/src/dom.rs:923 (base_url helper, only used by script-side code)",
+   "mechanism": "blitz-dom resolves every <link href>, <img src> and srcset URL against doc.url (the document URL) and never sees <base>. set_base_url is called only on same-document navigation (state.rs:397, runtime.rs:1021). The script layer (modules.rs, forms.rs, natives/misc.rs) uses dom::base_url() which does honour <base>, so classic scripts load but CSS and images do not. dwd.de has <base href=\"https://www.dwd.de/\"> and the document URL is /DE/Home/home_node.html, so href=\"SiteGlobals/StyleBundles/CSS/screen/styles.css\" becomes /DE/Home/SiteGlobals/... and returns 404. The 404 is turned into an empty stylesheet, so cssRules.length is 0. Same for imagemap_deutschland.png (the broken image).",
+   "evidence": [
+    "RUST_LOG=netstack=debug on dwd.de -> GET https://www.dwd.de/DE/Home/SiteGlobals/StyleBundles/CSS/_libs/_all.css?v=1 -> 404, x15 sheets; diff.json stylesheets sharko rules=0 vs chromium 3134",
+    "curl of dwd HTML -> <base href=\"https://www.dwd.de/\"/> and relative link hrefs",
+    "sync XHR to link.href from the page -> 200 (base was applied by script-side resolution), yet link.sheet.cssRules.length == 0",
+    "Redirect on CSS is NOT the cause: local server repro with 302/301 CSS, jsessionid URL, JS and PNG redirects all applied correctly (rules=3, h1 red)",
+    "dwd sharko.png shows unstyled page, page height 7600 vs 2942"
+   ],
+   "repro": {"path": "<scratch>/rc/content-missing-a/repro-base.html (create: <base href=\"/sub/../\"> in a page served from /a/b/page.html with <link href=\"x.css\">; server logs the requested path)", "expected": "requests /x.css", "actual": "requests /a/b/x.css (404)"},
+   "sites": ["dwd.de"],
+   "estimatedImpact": "medium - any site with <base href> pointing to a different directory than the document (CMS sites, older portals, some SPAs using <base href=\"/\"> on deep routes)",
+   "fixSketch": "Give blitz-dom a separate document base URL, distinct from the document URL. Recompute it from the first <base href> on parse and on <base> insert/attribute change (call the same logic as crates/script/src/dom.rs base_url), and use it in resolve_url, the image/srcset resolver and pointer.rs link resolution. Keep doc.url for the document URL and location.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.9
+  },
+  {
+   "id": "html-track-and-texttracks-stubs",
+   "title": "HTMLTrackElement.track is null and media.textTracks is always empty, so Svelte's <track> action throws and svelte.dev shows its 500 error page",
+   "kind": "sharko-bug",
+   "area": "crates/script/js/30_html.js:1082 (track getter), :2057-2066 (TrackListBase length 0), :2123",
+   "mechanism": "svelte.dev's home-page video calls e.track.cues in a use: action (5.*.js x()) and textTracks[0].mode. Sharko returns null for <track>.track and an empty TextTrackList, so 'Cannot read properties of null (reading cues)' is thrown inside Svelte's flush and the app renders its error boundary ('Yikes! Something went wrong', title 500).",
+   "evidence": [
+    "sharko.log svelte.dev: TypeError: Cannot read properties of null (reading 'cues') at nodes/5.*.js x; chunk source: let t=e.track.cues; ... a.textTracks[0].mode=...",
+    "repro-misc.html: Sharko track.trackIsNull=true, textTracks.length=0; Chromium trackIsNull=false, length=1, mode=disabled, cues=null",
+    "Sharko DOM has 'Yikes!' text where Chromium has hero content (21 images, height 3012 vs 800)"
+   ],
+   "repro": {"path": "<scratch>/rc/content-missing-a/repro-misc.html (track section)", "expected": "textTracks.length==1, track.cues===null, mode 'disabled'", "actual": "track===null, textTracks empty"},
+   "sites": ["svelte.dev"],
+   "estimatedImpact": "low-medium - any page with <video><track> whose script touches .track/.textTracks (video players, docs sites)",
+   "fixSketch": "Implement a minimal TextTrack per <track> element (kind,label,language,mode='disabled', cues=null until loaded, activeCues=null, add/removeCue) and keep media.textTracks in sync with child <track> elements; return the same TextTrack from HTMLTrackElement.track. Loading VTT can stay a stub.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.7
+  },
+  {
+   "id": "module-worker-and-blob-module-import",
+   "title": "Module workers whose source uses import.meta (no top-level import/export) are evaluated as classic scripts, and import() of blob: URLs is unsupported",
+   "kind": "sharko-bug",
+   "area": "crates/script/js/40_webapi.js:2693-2714 (Worker #start), crates/script/src/modules.rs:352-368 (start_fetch sends blob: to netstack -> ERR_UNKNOWN_URL_SCHEME, netstack/src/error.rs:31); JS blobURLs map at 40_webapi.js:1025",
+   "mechanism": "(a) Worker only treats a module worker as unsupported when the text starts with import/export, otherwise runs it with workerEval as a classic script; bundled workers using import.meta.url throw 'Cannot use import.meta outside a module' (svelte.dev search-worker, reported as an uncaught page error). (b) modules.rs fetches every module through the host net stack; the blobURLs registry in the JS layer is not consulted, so import(blobUrl) rejects (bing.com x2).",
+   "evidence": [
+    "repro-misc.html: Sharko moduleWorker='error: Uncaught SyntaxError: Cannot use import.meta outside a module'; blobWorker same; blobImport rejected 'Failed to fetch module blob:... ERR_UNKNOWN_URL_SCHEME'",
+    "Chromium: blobImport ok:42 (module workers loaded over http work)",
+    "sharko.log svelte.dev second error; bing.com 'Failed to fetch module blob:https://www.bing.com/...' x2",
+    "svelte chunk mf4J78rW.js: new Worker(new URL(search-worker...,import.meta.url),{type:'module'})"
+   ],
+   "repro": {"path": "<scratch>/rc/content-missing-a/repro-misc.html + worker-im.js", "expected": "worker posts message; import(blob) resolves", "actual": "SyntaxError / ERR_UNKNOWN_URL_SCHEME"},
+   "sites": ["svelte.dev (search box only, secondary)", "bing.com (feature scripts, secondary)"],
+   "estimatedImpact": "medium - blob module imports and module workers are common in modern bundles, but usually degrade features rather than blank the page",
+   "fixSketch": "In modules.rs resolve blob: (and data:) URLs from the JS blobURLs registry (expose a native to read blob bytes) instead of net fetch. For module workers, compile the worker source as an ES module (V8 module API already used by modules.rs) rather than the import/export regex heuristic.",
+   "effort": "M",
+   "risk": "medium",
+   "confidence": 0.8
+  },
+  {
+   "id": "document-named-form-access",
+   "title": "document.<formName> named property access is missing (window named access exists, document's does not)",
+   "kind": "sharko-bug",
+   "area": "crates/script/js/90_bootstrap.js:21 (WindowProperties named access) / 20_dom.js Document",
+   "mechanism": "Chromium's Document has named getters for <form>, <img>, <embed>, <object> by name (and id for object/img with name). Sharko returns undefined, so legacy code like document.fmHF.submit() throws.",
+   "evidence": ["repro-misc.html: Sharko typeof document.loginForm = 'undefined', Chromium 'object' (same as getElementById)", "bing.com log: login.live.com DoSubmit: Cannot read properties of undefined (reading 'submit')"],
+   "repro": {"path": "<scratch>/rc/content-missing-a/repro-misc.html", "expected": "document.loginForm === the form", "actual": "undefined"},
+   "sites": ["bing.com (login iframe only; not the missing content)"],
+   "estimatedImpact": "low-medium - legacy sites and auth pages",
+   "fixSketch": "Add a Proxy or named-property interceptor on Document following the WindowProperties pattern: look up form/img/embed/object by name attribute (visible-tree order), skip names shadowing real properties.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.85
+  },
+  {
+   "id": "innertext-inline-block-blocks",
+   "title": "innerText drops line breaks around block children of inline-block/inline-flex boxes, merging words (probe artifact behind bing/wetter 'extra/missing words')",
+   "kind": "test-artifact",
+   "area": "crates/script/js/30_html.js:326-332 (atomic branch: innerTextConcat(inner) trims breaks at start/end, then pushes a plain atomic item)",
+   "mechanism": "For inline-block, inline-flex etc. the inner text is concatenated on its own and edge line breaks are removed, so <li style=inline-block><h2>A</h2></li><li>...<h2>B</h2></li> yields 'AB' where Chromium yields 'A\\nB'. Words fuse ('shipwreckaew', 'wolkendi', 'anzeigeedelstahlschornstein'), which the probe counts as missing plus extra words. Not missing content.",
+   "evidence": ["repro-innertext.html: Sharko 'Storm uncovers shipwreckAEW star diesMakes emergency landing' vs Chromium newline-separated; inline-flex <p> gives 'para onepara two' vs 'para one\\n\\npara two'", "diff.json extraSample bing: shipwreckaew, diesmakes, landingsuspended; wetter: wolkendi, 45das"],
+   "repro": {"path": "<scratch>/rc/content-missing-a/repro-innertext.html", "expected": "newlines between blocks inside inline-blocks", "actual": "words concatenated"},
+   "sites": ["bing.com", "wetter.com (text part)"],
+   "estimatedImpact": "medium for innerText consumers (scrapers, a11y-ish scripts, tests); low for rendering",
+   "fixSketch": "Chromium keeps the required line breaks of block children at the edges of an inline-block's inner text (the block boundary inside the atomic box still separates lines from neighbours). Emit the inner items' leading/trailing required breaks into the outer item list instead of stripping them.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.7
+  }
+ ],
+ "notes": "Known causes, handed over: o2online.de and finn.no = NotFoundError 'reference node is not a child' from ShadowRoot.insertBefore in Lit (310 and 33 errors); vercel.com and zdf.de = document.currentScript null (Next.js turbopack); bsky.app = indexedDB undefined (react-query persister). LAYOUT hand-over: airbnb.de has zero script errors but the React tree lays out at 16px width (resized 16x800 vs 1265x1166), 5 stylesheets with 36 rules vs 14435 in Chromium, so a stylesheet/CSS-in-JS insertion problem (insertRule on adoptable/dynamic sheets) or layout is the suspect - not diagnosed; bing.com trending carousel: Chromium 3880x124 single row, Sharko wraps (1236x496) and inline <a> with block h2 has 0x0 box; bsky.app Sharko renders 4314 elements/24957px feed vs 4260px in Chromium (no virtualisation limit or lazy content differences); wetter.com content is present (735 visible elements) but body.scrollTop=9405 (body is overflow:hidden via cmp-prevent-scroll) so the page is scrolled off-screen (page top -9400) and the screenshot shows only the footer; Chromium keeps body 800px at scroll 0. Suspect: focus() of the fixed #cmp-wetter dialog (position:fixed, static-position top 10205px) scrolls the overflow:hidden body in Sharko; my simple focus repro (repro-adopt-focus.html, fixed at top:0) did not reproduce, so the trigger needs fixed+top:auto. Hand to layout/scroll agent. excalidraw.com = environment: the sweep run hit ERR_CONNECTION_TIMED_OUT; a re-run rendered the app text fine. stepstone.de: Chromium shows the #explicit_consent dialog, Sharko does not (ConsentManagement object has no keys, localStorage empty, ccm.js 200 and runs); DOMParser adoption and requestAnimationFrame checks passed in repros; root cause NOT found - remaining ideas: ccm.js awaits something (rAF/load handler, iframe, consent JSON fetch chain) that stalls. bing.com '_w is not defined' (2x) and 'sj_be' appear only in Sharko; the _w definition is in a later inline script, ordering vs Chromium not confirmed. Redirects (302/301) for CSS, JS and images verified working in Sharko, so jsessionid-style redirect URLs are not a cause."
+}

@@ -1,0 +1,74 @@
+{
+ "cluster": "bot-walls",
+ "rootCauses": [
+  {
+   "id": "tls-h2-fingerprint-not-equalised",
+   "title": "Origins see Sharko's own rustls ClientHello and h2 SETTINGS; the proxy does not equalise fingerprints, so Akamai/Cloudflare/DataDome classify Sharko as a bot",
+   "kind": "sharko-bug",
+   "area": "crates/netstack/src/core.rs (build_client: rustls/reqwest config, http2_* settings), Cargo features of reqwest/rustls",
+   "mechanism": "tls.peet.ws through the proxy shows the origin receives the client's own TLS/HTTP2 fingerprint. curl gets curl's JA3 0149f47e (OpenSSL), Sharko gets JA3 993e83../568dde.. (JA4 t13d1011h2: 10 ciphers, no GREASE, no signature_algorithms_cert, no ALPS, no compress_certificate, extension order randomised) and h2 akamai fp '2:0;4:6291456;5:16384;6:16384|15663105|0|m,s,a,p'. Chromium arrives as JA3 9b7dcdf3 with HTTP/1.1 (a different path through the proxy, issuer 'CCR Upstream Proxy CA (staging)', Chromium's real ClientHello). So the premise that TLS is equalised is false here: Chromium passes as a real Chromium, Sharko as a rustls client. Header sets alone do not change the outcome (see evidence).",
+   "evidence": [
+    "curl with Sharko's exact header set: ndtv 200, microsoft 200, idealo 200 (real page), aldi 200 first / 403 later. Sharko headless with the same headers: ndtv Access Denied, microsoft 'request has been blocked', idealo 'Sorry! Something has gone wrong', aldi Access Denied, reproducible also with a fresh profile (no stale cookies). => same headers, different outcome; only the TLS/h2 fingerprint (and JS afterwards) differ.",
+    "curl with Chrome-140-identical headers (sec-ch-ua*, priority, avif Accept, Chrome order) got the same walls as with Sharko's headers on nytimes (DataDome 403), doctolib (403) and made idealo WORSE (1 KB Akamai sensor page, real page with Sharko/Chromium-observed headers). => a Chrome header set is not what lets Chromium through.",
+    "ing.de 403 'Geheimnisträger' flips randomly between rounds for every header variant, including byte-identical repeats (3 interleaved rounds, 8 variants): it is per-egress-IP/random rate gating, not header driven. Same for aldi: 200/403 alternate across identical requests.",
+    "Egress IPs rotate (160.79.106.x) for curl and Sharko; curl --noproxy gives 34.57.188.202."
+   ],
+   "repro": {
+    "path": "cd /home/user/sharko-has && target/profiling/browser --headless --eval='document.body.textContent' https://tls.peet.ws/api/all   (compare with: node .../sitediff/chrome.js https://tls.peet.ws/api/all --eval='document.body.textContent')",
+    "expected": "Chrome 140 fingerprint (GREASE, 15 ciphers, ALPS, cert compression, h2 SETTINGS 1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p)",
+    "actual": "JA4 t13d1011h2_61a7ad8aa9b6_0d308c48d2a3, h2 fp 2:0;4:6291456;5:16384;6:16384|15663105|0|m,s,a,p"
+   },
+   "sites": ["aldi-sued.de", "ndtv.com", "microsoft.com_de-de", "idealo.de"],
+   "estimatedImpact": "high — Akamai Bot Manager, Cloudflare and DataDome sit in front of a large share of top sites and all fingerprint TLS/h2 first.",
+   "fixSketch": "Move the TLS stack to a BoringSSL-based client (e.g. wreq/rquest or boring) with a Chrome 140 profile: cipher/extension order incl. GREASE, ALPS, brotli cert compression, signature_algorithms_cert, X25519MLKEM768 key share; h2 SETTINGS 1:65536, 2:0, 4:6291456, 6:262144, WINDOW_UPDATE 15663105, pseudo-header order m,a,s,p and Chrome header order. Cheap partial mitigation: pin ALPN to http/1.1 (Chromium reaches origins over HTTP/1.1 here) to avoid the distinctive h2 fingerprint.",
+   "effort": "L",
+   "risk": "medium",
+   "confidence": 0.55
+  },
+  {
+   "id": "headers-not-chrome-identical",
+   "title": "Default request headers differ from Chrome: no sec-ch-ua*, no Priority, no avif in Accept, header order, missing Sec-Fetch-Site/Referer/Origin on parser-initiated subresources, wrong Sec-Fetch-Dest/Mode for script and iframe",
+   "kind": "sharko-bug",
+   "area": "crates/netstack/src/headers.rs (apply_defaults, apply_sec_fetch, accept_for), crates/netstack/src/provider.rs (infer_destination, to_net_request), crates/script/js/90_bootstrap.js:354 + crates/script/src/natives/misc.rs:253 (mode->Destination), vendor/blitz-dom/src/net.rs:29 & iframe.rs:140 (no referrer), crates/netstack/src/config.rs:71-72",
+   "mechanism": "Measured with an echo server (raw headers in scratch: sharko-raw-headers.txt vs chromium-raw-headers.txt). Navigation: Sharko sends UA, Accept (no image/avif, no application/signed-exchange), Accept-Language, Accept-Encoding, UIR, Sec-Fetch-* and never sec-ch-ua/-mobile/-platform or 'priority: u=0, i'; Chrome order is sec-ch-ua, mobile, platform, UIR, UA, Accept, Sec-Fetch-Site/Mode/User/Dest, Accept-Encoding, Accept-Language, priority. Subresources loaded by blitz (css, img, font, iframe) carry no Referer, no Sec-Fetch-Site (headers.rs:212 gives None when referrer absent for non-documents) and fonts have no Origin. <script src> goes through the JS layer as Destination::Fetch (misc.rs:253-256), so it is sent as sec-fetch-dest: empty, mode: cors, Accept */* instead of script/no-cors. iframes are fetched as Destination::Other via infer_destination fallback: sec-fetch-dest: empty, mode no-cors, no UIR, Accept */*, no Referer instead of iframe/navigate. Video lacks 'Accept-Encoding: identity;q=1, *;q=0'. Cookie/credential handling matched Chrome (omit sends none, include/same-origin send jar, redirects keep headers). Bot-manager sensor JS and Akamai check these consistency signals, but curl tests show headers alone are not what flips the walls (see other cause).",
+   "evidence": [
+    "echo server: Sharko CSS/img/font requests have no referer and no sec-fetch-site; Chromium sends same-origin + Referer.",
+    "echo server: script.js from Sharko: sec-fetch-dest: empty, mode: cors; Chromium: script / no-cors.",
+    "echo server: frame.html from Sharko: dest empty / no-cors / no upgrade-insecure-requests; Chromium: iframe / navigate.",
+    "tls.peet.ws (h1 view): Chromium sends Sec-Ch-Ua, -Mobile, -Platform and Accept with image/avif + signed-exchange; Sharko sends none of them.",
+    "curl bisect on ing.de was inconclusive (random gating), so no single header was proven to unblock a site."
+   ],
+   "repro": {
+    "path": "/tmp/claude-0/-home-user-sharko-browser/8d979774-b495-516b-a198-458f7b9b0b92/scratchpad/rc/bot-walls/echo-server.js (node echo-server.js 8787 LOG; load http://localhost:8787/ in both browsers)",
+    "expected": "Chromium raw header lists in chromium-raw-headers.txt",
+    "actual": "sharko-raw-headers.txt"
+   },
+   "sites": ["ing.de (unproven)", "idealo.de (unproven)"],
+   "estimatedImpact": "medium — correctness of Fetch metadata for every site, and a prerequisite for passing fingerprint-consistent bot checks.",
+   "fixSketch": "Chrome 140 Windows defaults. Navigation (document, in this order): sec-ch-ua: \"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\"; sec-ch-ua-mobile: ?0; sec-ch-ua-platform: \"Windows\"; upgrade-insecure-requests: 1; user-agent; accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7; sec-fetch-site; sec-fetch-mode: navigate; sec-fetch-user: ?1; sec-fetch-dest: document|iframe; [referer]; accept-encoding: gzip, deflate, br, zstd; accept-language; [cookie]; priority: u=0, i. Subresources: sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform, user-agent, accept (css: text/css,*/*;q=0.1; image: image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8; else */*), sec-fetch-site (always), sec-fetch-mode, sec-fetch-dest (script|style|image|font|video|empty), referer, [origin for cors/POST], accept-encoding, accept-language, cookie, priority (u=0 css, u=1 script, u=2 image, u=1 font). Advertise AVIF only if the decoder supports it. Add Sharko-wide referrer plumbing so blitz requests carry the document URL (blitz-dom net.rs/iframe.rs stamped_request) and pass a real Destination (Script/Iframe) from the JS layer; emit headers as an ordered Vec, not a HeaderMap (reqwest/http2 order). Accept-Language should be de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7 (Chrome-in-Playwright here sends bare de-DE).",
+   "effort": "M",
+   "risk": "low",
+   "confidence": 0.8
+  },
+  {
+   "id": "load-failed-proxy-policy",
+   "title": "load-failed sites are proxy/upstream failures, not Sharko faults",
+   "kind": "environment",
+   "area": "none (test environment)",
+   "mechanism": "curl through the same proxy fails identically: rayjump/youversionapi/rr.com reset after ~11 s (proxy status: ws_closed_mid_exchange to those hosts), oddspark and 1drv.com give a certificate-name mismatch, bancodevenezuela a TLS handshake_failure. Chromium 'loaded' only a 502 error page (5 elements, title empty, 'Failed to load resource: 502'), i.e. also failed. excalidraw.com was a transient connect timeout: curl 200 and a Sharko re-run loaded the full page (325 elements). Sharko does use the proxy (same egress IP range as curl).",
+   "evidence": [
+    "curl -x proxy: rayjump/youversionapi/rr.com Connection reset; oddspark/1drv cert error (with -k 301 comes back); bancodevenezuela sslv3 handshake failure.",
+    "chromium.json for these: 5 elements and 502 errors.",
+    "Sharko re-run excalidraw.com: title 'Excalidraw Whiteboard', 325 elements."
+   ],
+   "repro": {"path": "curl -sS -x \"$HTTPS_PROXY\" --cacert /root/.ccr/ca-bundle.crt https://rr.com/", "expected": "n/a", "actual": "reset by proxy path"},
+   "sites": ["rayjump.com", "oddspark.com", "youversionapi.com", "1drv.com", "rr.com", "bancodevenezuela.com", "excalidraw.com"],
+   "estimatedImpact": "low",
+   "fixSketch": "None for the engine; drop from sweep scoring. Optional: surface the certificate error page instead of a generic Error title.",
+   "effort": "S",
+   "risk": "low",
+   "confidence": 0.85
+  }
+ ],
+ "notes": "Not header/wall problems: reddit.com (Sharko passes the JS challenge and follows ?js_challenge=1&solution=..., then the shreddit app dies with 'reference node is not a child of the parent' - belongs to the dom-notfound cluster) and nzz.ch (curl gets 200 with any headers; Sharko gets the document, the 429 was not reproduced; the blank page is JS: React Router 'router prop' error and document.evaluate missing). nytimes (DataDome captcha-delivery 403) and doctolib (Cloudflare 403 + Turnstile which fails in Sharko with NaN console output) return the wall to curl for every header set, so they depend on IP/TLS fingerprint and JS challenge execution; doctolib's Turnstile needs a JS follow-up. ing.de and aldi-sued.de block randomly per request/egress IP even for identical requests, so their sweep result is partly noise. Caveat: I could not rebuild Sharko, so I could not test forcing HTTP/1.1 or a Chrome header set inside Sharko itself; the claim that fingerprint (not headers) explains ndtv/microsoft/idealo rests on curl-with-Sharko-headers passing while Sharko fails. microsoft's blocked page also produced a JSON.parse control-character error (separate JS bug). substack.com ignored."
+}
