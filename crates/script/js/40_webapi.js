@@ -44,6 +44,8 @@
     N.setTimer(id, normDelay(delay));
     return id;
   };
+  // The id the next timer gets: it changes when a timer is set in between (IndexedDB looks at this).
+  L.timerSeq = function () { return nextTimerId; };
   L.clearInternalTimeout = function (id) {
     if (internalTimers.delete(id)) N.clearTimer(id);
   };
@@ -180,9 +182,10 @@
     try {
       return N.structuredClone(value);
     } catch (e) {
+      // A DataCloneError from the serializer, or else what a getter of the value threw (rethrown as is).
       const c = L.fromNative(e);
-      if (c instanceof DOMException) throw c;
-      throw new DOMException(`Failed to execute 'structuredClone' on 'Window': ${e && e.message ? e.message : 'value could not be cloned.'}`, 'DataCloneError');
+      if (c === undefined || c === null) throw new DOMException("Failed to execute 'structuredClone' on 'Window': value could not be cloned.", 'DataCloneError');
+      throw c;
     }
   }
   L.cloneValue = cloneValue;
@@ -2652,7 +2655,9 @@
     'BroadcastChannel', 'DOMException', 'crypto', 'Crypto', 'CryptoKey', 'SubtleCrypto', 'performance', 'console',
     'atob', 'btoa', 'structuredClone', 'queueMicrotask', 'ReadableStream', 'ReadableStreamDefaultReader',
     'ReadableStreamDefaultController', 'WritableStream', 'TransformStream', 'TextEncoderStream', 'TextDecoderStream',
-    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBKeyRange', 'caches', 'isSecureContext', 'origin',
+    'CompressionStream', 'DecompressionStream', 'indexedDB', 'IDBFactory', 'IDBDatabase', 'IDBObjectStore', 'IDBIndex',
+    'IDBTransaction', 'IDBRequest', 'IDBOpenDBRequest', 'IDBCursor', 'IDBCursorWithValue', 'IDBKeyRange', 'IDBRecord',
+    'IDBVersionChangeEvent', 'caches', 'isSecureContext', 'origin',
     'requestAnimationFrame', 'cancelAnimationFrame', 'ImageData', 'createImageBitmap', 'OffscreenCanvas'];
   const WORKER_BRAND = Symbol('WorkerGlobalScope');
   class WorkerScopeTarget extends EventTarget { }
@@ -4267,7 +4272,12 @@
     *[Symbol.iterator]() { yield* this.#list; }
   }
   L.makeIndexed(DOMStringList.prototype, (o, i) => L.dslItems(o)[i], 8);
-  L.makeDOMStringList = (list) => new DOMStringList(INTERNAL, list);
+  // The indexed properties are own properties of the list (not only prototype getters), as for a platform object.
+  L.makeDOMStringList = (list) => {
+    const d = new DOMStringList(INTERNAL, list);
+    for (let i = 0; i < list.length; i++) Object.defineProperty(d, i, { value: list[i], enumerable: true, configurable: true });
+    return d;
+  };
 
   // states/urls are keyed by session history index (N.historyIndex()); urls let us notice a
   // new entry created by a Rust-side fragment navigation at an index that had a (pruned) state.

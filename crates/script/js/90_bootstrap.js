@@ -185,6 +185,7 @@
   defGetter('customElements', () => L.customElements);
   defGetter('localStorage', () => L.localStorage);
   defGetter('sessionStorage', () => L.sessionStorage);
+  defGetter('indexedDB', () => L.indexedDB);
   defGetter('performance', () => L.performance, { replaceable: true });
   defGetter('crypto', () => L.crypto);
   defGetter('visualViewport', () => L.visualViewport, { replaceable: true });
