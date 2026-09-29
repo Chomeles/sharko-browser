@@ -34,6 +34,7 @@ pub const BULLET_FONT: &[u8] = include_bytes!("../assets/moz-bullet-font.otf");
 /// The DOM implementation.
 ///
 /// This is the primary entry point for this crate.
+mod container_query;
 mod document;
 
 /// The nodes themsleves, and their data.

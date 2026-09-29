@@ -148,6 +148,9 @@ pub struct Node {
     pub sticky_offset: Cell<(f32, f32)>,
     /// PATCH: the parent's absolute position used when this node's layout was last rounded.
     pub round_origin: Cell<(f32, f32)>,
+    /// PATCH 80 (container queries): content-box size (packed `Au` pair, see
+    /// `container_query.rs`) that style last saw when it queried this node as a container.
+    pub cq_used: std::sync::atomic::AtomicU64,
     /// PATCH: last known index in the parent's `children` (validated on use), so sibling
     /// lookups during selector matching are O(1) instead of a scan of the child list.
     child_idx_hint: std::sync::atomic::AtomicUsize,
@@ -340,6 +343,7 @@ impl Node {
             stacking_context: None,
             sticky_offset: Cell::new((0.0, 0.0)),
             round_origin: Cell::new((f32::NAN, f32::NAN)),
+            cq_used: std::sync::atomic::AtomicU64::new(crate::container_query::NEVER_QUERIED),
             child_idx_hint: std::sync::atomic::AtomicUsize::new(0),
 
             flags: NodeFlags::empty(),

@@ -54,3 +54,5 @@ anyrender_vello = { path = "vendor/anyrender_vello" }
 parley = { path = "vendor/parley" }
 taffy = { path = "vendor/taffy" }
 stylo_taffy = { path = "vendor/stylo_taffy" }
+# PATCH 80: container queries.
+stylo = { path = "vendor/stylo" }
