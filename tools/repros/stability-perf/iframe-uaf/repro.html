@@ -1,0 +1,44 @@
+<!doctype html>
+<title>detached iframe window repro</title>
+<body>
+<pre id="log"></pre>
+<script>
+  // What bot-detection sensors do from a timer: create an iframe, keep its contentWindow,
+  // change/remove the iframe, then probe properties on that window (w.chrome, ...).
+  // Variants via ?v=:
+  //   attached       : probe w.chrome while the iframe is untouched (baseline)
+  //   remove-sync    : remove the iframe, probe in the same task
+  //   remove-task    : remove the iframe, probe in a later task
+  //   src-sync       : set src=about:blank?2 after taking contentWindow, probe in the same task
+  //   srcdoc-sync    : set srcdoc after taking contentWindow, probe in the same task
+  //   srcdoc-task    : set srcdoc, probe in a later task
+  //   open-sync      : w.document.open()/write()/close(), probe in the same task
+  //   reinsert-sync  : re-append the iframe (move), probe in the same task
+  // Chromium: every variant logs "chrome: object" and never throws or crashes.
+  window.__results = [];
+  const log = (m) => { window.__results.push(m); document.getElementById('log').textContent += m + '\n'; };
+  const v = new URLSearchParams(location.search).get('v') || 'srcdoc-sync';
+  const probe = (w) => {
+    try { log(v + ' chrome: ' + typeof w.chrome); } catch (e) { log(v + ' threw: ' + e); }
+    try { log(v + ' "chrome" in w: ' + ('chrome' in w)); } catch (e) { log(v + ' in threw: ' + e); }
+    try { log(v + ' w.foo: ' + typeof w.foo); } catch (e) { log(v + ' foo threw: ' + e); }
+  };
+  const finish = () => { log('done'); window.__done = true; };
+  setTimeout(() => {
+    const f = document.createElement('iframe');
+    f.style.display = 'none';
+    document.body.appendChild(f);
+    const w = f.contentWindow;
+    switch (v) {
+      case 'attached': probe(w); finish(); return;
+      case 'remove-sync': f.remove(); probe(w); finish(); return;
+      case 'remove-task': f.remove(); setTimeout(() => { probe(w); finish(); }, 0); return;
+      case 'src-sync': f.src = 'about:blank?2'; probe(w); finish(); return;
+      case 'srcdoc-sync': f.srcdoc = '<p>x</p>'; probe(w); finish(); return;
+      case 'srcdoc-task': f.srcdoc = '<p>x</p>'; setTimeout(() => { probe(w); finish(); }, 0); return;
+      case 'open-sync': { const d = w.document; d.open(); d.write('<p>y</p>'); d.close(); probe(w); finish(); return; }
+      case 'reinsert-sync': document.body.appendChild(f); probe(w); finish(); return;
+    }
+    log('unknown variant'); finish();
+  }, 0);
+</script>

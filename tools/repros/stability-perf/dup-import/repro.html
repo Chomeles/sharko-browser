@@ -1,0 +1,14 @@
+<!doctype html>
+<title>dup import repro</title>
+<body>
+<pre id="log"></pre>
+<script>
+  // Two concurrent import()s of the same not-yet-loaded module whose top level
+  // itself calls import(). Chromium: both promises resolve with the namespace.
+  // Sharko: V8 fatal "Check failed: module_status == kLinked || ..." (exit 3).
+  window.__results = [];
+  const log = (m) => { window.__results.push(m); document.getElementById('log').textContent += m + '\n'; };
+  const p1 = import('./a.js').then((ns) => log('p1 ok x=' + ns.x), (e) => log('p1 err ' + e));
+  const p2 = import('./a.js').then((ns) => log('p2 ok x=' + ns.x), (e) => log('p2 err ' + e));
+  Promise.allSettled([p1, p2]).then(() => { log('done'); window.__done = true; });
+</script>
