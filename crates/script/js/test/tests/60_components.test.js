@@ -274,3 +274,21 @@ test('a new shadow root is empty even when the host has light children (Lit rend
   `);
   assert.strictEqual(e.run("sr.childNodes.length + ':' + (anchor === null) + ':' + sr.innerHTML"), '1:true:<!--m-->');
 });
+
+test('custom elements: template contents stay inert (innerHTML, cloneNode) and upgrade on importNode', async () => {
+  const e = await createEnv({ html: '<!DOCTYPE html><html><head></head><body></body></html>' });
+  e.run(`
+    window.__ce = [];
+    class XR extends HTMLElement { constructor() { super(); __ce.push('ctor'); this.textContent = ''; } }
+    customElements.define('x-r', XR);
+    const t = document.createElement('template');
+    t.innerHTML = '<div><x-r><b>kid</b></x-r></div>';
+    __ce.push('parsed:' + __ce.filter((x) => x === 'ctor').length);
+    const c = t.content.cloneNode(true);
+    __ce.push('cloned:' + __ce.filter((x) => x === 'ctor').length + ':' + (c.querySelector('x-r') instanceof XR));
+    const i = document.importNode(t.content, true);
+    __ce.push('imported:' + __ce.filter((x) => x === 'ctor').length + ':' + (i.querySelector('x-r') instanceof XR));
+    __ce.push('src:' + t.content.querySelector('x-r').childNodes.length);
+  `);
+  assert.strictEqual(JSON.stringify(e.run('__ce')), JSON.stringify(['parsed:0', 'cloned:0:false', 'ctor', 'imported:1:true', 'src:1']));
+});

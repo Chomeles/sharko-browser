@@ -522,3 +522,20 @@ test('TextEncoderStream / TextDecoderStream and resource timing for fetch', asyn
   `);
   assert.deepStrictEqual(Array.from(r), ['104,195,169,240,159,152,128,33', 'hé😀!', 'fetch', true, true, 1]);
 });
+
+test('Cookie Store API: set/get/getAll/delete over document.cookie', async () => {
+  const e = await env();
+  const r = await settle(e, `
+    const out = [];
+    out.push(typeof cookieStore, cookieStore instanceof EventTarget, String(await cookieStore.get('a')));
+    await cookieStore.set('a', '1');
+    await cookieStore.set({ name: 'b', value: '2' });
+    out.push(JSON.stringify(await cookieStore.get('a')), (await cookieStore.getAll()).length, document.cookie.includes('b=2'));
+    await cookieStore.delete('a');
+    out.push(String(await cookieStore.get('a')), JSON.stringify((await cookieStore.getAll()).map((c) => c.name)));
+    let err; try { await cookieStore.set('x'); } catch (x) { err = x instanceof TypeError; }
+    out.push(err);
+    return out.join('|');
+  `);
+  assert.strictEqual(String(r), 'object|true|null|{"name":"a","value":"1"}|2|true|null|["b"]|true');
+});

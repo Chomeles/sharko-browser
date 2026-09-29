@@ -188,6 +188,7 @@
   defGetter('indexedDB', () => L.indexedDB);
   defGetter('performance', () => L.performance, { replaceable: true });
   defGetter('crypto', () => L.crypto);
+  defGetter('cookieStore', () => (g.isSecureContext === false ? undefined : L.cookieStore));
   defGetter('visualViewport', () => L.visualViewport, { replaceable: true });
   defGetter('event', () => L.currentEvent, { replaceable: true });
   defGetter('origin', () => L.docOrigin(), { replaceable: true });
