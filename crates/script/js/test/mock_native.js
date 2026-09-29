@@ -47,6 +47,8 @@ class MockNative {
     this.scrollIntoViewArgs = [];
     this.ws = [];
     this.opened = [];
+    this.framePosts = []; // N.framePost calls: {path, message, targetOrigin}
+    this.frameNavigations = []; // N.frameNavigate calls: {path, url, replace}
     this.storage = [new Map(), new Map()];
     this.cookies = new Map();
     this.vp = { w: 1280, h: 720, dpr: 1, sx: 0, sy: 0, sw: 1920, sh: 1080 };
@@ -507,6 +509,15 @@ class MockNative {
       templateContent: (id) => (M.isTemplate(M.n(id)) ? M.templateContentOf(id) : 0),
       setShadowHost: (id, on) => { M.n(id); if (on) M.shadowHosts.add(id); else M.shadowHosts.delete(id); },
       foreignNodeType: () => 0,
+      // Frames: opts.framePath is this document's path, opts.frameLists[pathKey] the frames of other documents.
+      // Other realms and cross-origin windows don't exist here (no N.realmGlobal): every frame is a stand-in.
+      framePath: () => M.arr(M.opts.framePath || []),
+      framePost: (path, message, targetOrigin) => { M.framePosts.push({ path: Array.from(path), message, targetOrigin }); },
+      frameList: (path) => {
+        const list = (M.opts.frameLists || {})[Array.from(path).join(',')];
+        return list === undefined ? null : M.arr(list.map((e) => M.arr(e)));
+      },
+      frameNavigate: (path, url, replace) => { M.frameNavigations.push({ path: Array.from(path), url, replace }); },
       windowPostMessage: function (message, targetOrigin, transfer) {
         if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
         return M.hooks.windowPostMessage(message, targetOrigin, transfer, null);

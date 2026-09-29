@@ -266,19 +266,16 @@
   // Windows of other frames. The documents of a page and its frames run in one isolate,
   // each in its own realm (context): a same-origin frame's window is its real global
   // object (`N.realmGlobal`), so its document and functions are reachable. A cross-origin
-  // frame gets a stand-in for its WindowProxy (only postMessage reaches it). A window is
-  // named by its frame path: the <iframe> node ids from the page down (the page is []).
-  const REMOTE = new WeakMap(); // RemoteWindow -> frame path
-  const remoteByPath = new Map(); // path key -> RemoteWindow
+  // frame gets a stand-in for its WindowProxy (only the CrossOriginProperties reach it, see
+  // below). A window is named by its frame path: the <iframe> node ids from the page down
+  // (the page is []).
+  const REMOTE = new WeakMap(); // stand-in Proxy and its target -> state {kind, path, props, ...}
+  const remoteByPath = new Map(); // path key -> stand-in window
   const pathKey = (p) => p.join(',');
   let ownPath = null;
   function selfPath() {
     if (ownPath === null) ownPath = typeof N.framePath === 'function' ? N.framePath() : [];
     return ownPath;
-  }
-  function remoteTarget(w) {
-    if (!REMOTE.has(w)) throw L.illegal();
-    return REMOTE.get(w);
   }
   // The real window of a same-origin frame (its realm is created on demand), else null.
   function realmGlobal(path) {
@@ -299,8 +296,7 @@
     if (g !== null) return g;
     let w = remoteByPath.get(key);
     if (w === undefined) {
-      w = new Proxy(new RemoteWindow(INTERNAL, path), remoteHandler);
-      REMOTE.set(w, path);
+      w = newCrossOrigin('Window', path);
       remoteByPath.set(key, w);
     }
     return w;
@@ -321,77 +317,248 @@
     const e = INDEX_RE.test(name) ? list[+name] : (name === '' ? undefined : list.find((f) => f[1] === name));
     return e === undefined ? undefined : L.windowAt([...path, e[0]]);
   }
-  const crossOriginErr = (what) => new DOMException(`Failed to read a named property '${what}' from 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
+  // ---------------------------------------------------------------------------------------
+  // Cross-origin objects. The window of another origin and its Location are exotic objects
+  // (HTML "cross-origin objects"): only the CrossOriginProperties are visible, anything else
+  // is a SecurityError, and the prototype is null. Each of those properties is one function
+  // (or accessor pair) per stand-in, created in the current realm, so `w.postMessage ===
+  // w.postMessage`. Like the operations of a [Global] interface they act on their `this`,
+  // where null/undefined stands for the realm's own window: `const post = parent.postMessage;
+  // post(msg, '*')` posts to the calling window, as in browsers.
+  // ---------------------------------------------------------------------------------------
+  // In spec order. m: method, g: getter, gs: getter and setter, s: setter only.
+  const CROSS_ORIGIN_PROPS = {
+    Window: [['window', 'g'], ['self', 'g'], ['location', 'gs'], ['close', 'm'], ['closed', 'g'], ['focus', 'm'], ['blur', 'm'],
+      ['frames', 'g'], ['length', 'g'], ['top', 'g'], ['opener', 'g'], ['parent', 'g'], ['postMessage', 'm']],
+    Location: [['href', 's'], ['replace', 'm']],
+  };
+  // CrossOriginPropertyFallback: "then" and these symbols read as undefined on any cross-origin object.
+  const CROSS_ORIGIN_FALLBACK = Object.freeze({ value: undefined, writable: false, enumerable: false, configurable: true });
+  const isFallbackKey = (p) => p === 'then' || p === Symbol.toStringTag || p === Symbol.hasInstance || p === Symbol.isConcatSpreadable;
+  const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  // The location of a lenient stand-in (see sameOriginChild): its URL isn't known here.
   const remoteLocation = Object.freeze({ replace() { }, set href(v) { }, toString() { return ''; } });
-  class RemoteWindow {
-    constructor(token, path) {
-      if (token !== INTERNAL) throw L.illegal();
-      REMOTE.set(this, path);
-    }
-    postMessage(message, targetOrigin, transfer) {
-      const path = remoteTarget(this);
-      if (arguments.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
-      let t = targetOrigin !== null && typeof targetOrigin === 'object'
-        ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
-        : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
-      if (t === '/') t = L.location.origin;
-      else if (t !== '*') {
-        const p = N.urlParse(t, null);
-        if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
-        t = p[10];
-      }
-      N.framePost(path, message, t);
-    }
-    get window() { remoteTarget(this); return this; }
-    get self() { remoteTarget(this); return this; }
-    get frames() { remoteTarget(this); return this; }
-    get parent() { const p = remoteTarget(this); return p.length === 0 ? this : L.windowAt(p.slice(0, -1)); }
-    get top() { remoteTarget(this); return L.windowAt([]); }
-    get opener() { remoteTarget(this); return null; }
-    get closed() { remoteTarget(this); return false; }
-    get length() { return framesOf(remoteTarget(this)).length; }
-    get location() { remoteTarget(this); return remoteLocation; }
-    set location(v) { remoteTarget(this); }
-    get document() {
-      const p = remoteTarget(this);
-      // A child frame of this document that isn't cross-origin: not scriptable from here
-      // yet (null rather than a SecurityError).
-      const own = selfPath();
-      if (p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(p[p.length - 1])) return null;
-      throw crossOriginErr('document');
-    }
-    focus() { remoteTarget(this); }
-    blur() { remoteTarget(this); }
-    close() { remoteTarget(this); }
-    // Listeners on a same-origin child window (its document isn't scriptable from here, so
-    // they never fire); a cross-origin window blocks them, as in browsers.
-    addEventListener(type, listener, options) { remoteEventTarget(this, 'addEventListener').addEventListener(type, listener, options); }
-    removeEventListener(type, listener, options) { remoteEventTarget(this, 'removeEventListener').removeEventListener(type, listener, options); }
-    dispatchEvent(event) { return remoteEventTarget(this, 'dispatchEvent').dispatchEvent(event); }
+  // The state of this realm's own window, which the properties above act on for `this === window`.
+  let ownWindow = null;
+  function ownState() {
+    if (ownWindow === null) ownWindow = { kind: 'Window', path: selfPath() };
+    return ownWindow;
   }
-  const REMOTE_TARGETS = new WeakMap();
-  function remoteEventTarget(w, what) {
-    const p = remoteTarget(w);
+  // A stand-in Proxy for the window (or Location) of the frame at `path`. Its state: `props` caches the
+  // descriptors, `location` the window's cross-origin Location, `events` and `expando` serve the
+  // lenient case.
+  function newCrossOrigin(kind, path) {
+    const target = {};
+    const st = { kind, path, props: new Map(), location: null, events: null, expando: false };
+    const proxy = new Proxy(target, crossOriginHandler);
+    REMOTE.set(target, st);
+    REMOTE.set(proxy, st);
+    return proxy;
+  }
+  // The window (Location) a cross-origin property acts on: its `this`. For a window a null or undefined
+  // `this` is this realm's own window; anything else that isn't one fails the brand check.
+  function windowThis(v) {
+    if (v === undefined || v === null || v === L.window) return ownState();
+    const st = REMOTE.get(v);
+    if (st === undefined || st.kind !== 'Window') throw new TypeError('Illegal invocation');
+    return st;
+  }
+  function locationThis(v) {
+    if (v === L.location) return ownState();
+    const st = REMOTE.get(v);
+    if (st === undefined || st.kind !== 'Location') throw new TypeError('Illegal invocation');
+    return st;
+  }
+  function parentOf(st) {
+    if (st === ownState()) return L.parentWindow();
+    return L.windowAt(st.path.length === 0 ? st.path : st.path.slice(0, -1));
+  }
+  // `window.location` of `st`: the real one, or its cross-origin Location (one per window).
+  function locationOf(st) {
+    if (st === ownState()) return L.location;
+    if (isLenient(st)) return remoteLocation;
+    if (st.location === null) st.location = newCrossOrigin('Location', st.path);
+    return st.location;
+  }
+  // `top.location = url`, `parent.location.replace(url)`: the host navigates the frame (if it can).
+  function navigateFrame(st, url, replace, method) {
+    if (st === ownState()) { L.navigateTo(url, replace, method); return; }
+    const p = N.urlParse(L.toUSV(url), L.baseURL());
+    if (p === null) throw new DOMException(`Failed to execute '${method}' on 'Location': '${url}' is not a valid URL.`, 'SyntaxError');
+    // (a javascript: URL would run in the other origin's document)
+    if (p[1] === 'javascript:' || typeof N.frameNavigate !== 'function') return;
+    N.frameNavigate(st.path, p[0], replace);
+  }
+  function postMessageTo(st, ...args) {
+    if (args.length === 0) throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+    const [message, targetOrigin, transfer] = args;
+    if (st === ownState()) { L.windowPostMessage(message, targetOrigin, transfer, null); return; }
+    let t = targetOrigin !== null && typeof targetOrigin === 'object'
+      ? (targetOrigin.targetOrigin === undefined ? '/' : `${targetOrigin.targetOrigin}`)
+      : (targetOrigin === undefined ? '/' : `${targetOrigin}`);
+    if (t === '/') t = L.location.origin;
+    else if (t !== '*') {
+      const p = N.urlParse(t, null);
+      if (p === null) throw new DOMException(`Failed to execute 'postMessage' on 'Window': Invalid target origin '${t}' in a call to 'postMessage'.`, 'SyntaxError');
+      t = p[10];
+    }
+    N.framePost(st.path, message, t);
+  }
+  const windowSelf = { get: (st) => L.windowAt(st.path) };
+  const setHref = (st, v) => navigateFrame(st, `${v}`, false, 'href');
+  const noop = { call() { }, length: 0 };
+  // What each property does to the window (Location) it is invoked on.
+  const WINDOW_OPS = {
+    window: windowSelf,
+    self: windowSelf,
+    frames: windowSelf,
+    location: { get: locationOf, set: setHref },
+    close: noop,
+    closed: { get: () => false },
+    focus: noop,
+    blur: noop,
+    length: { get: (st) => framesOf(st.path).length },
+    top: { get: (st) => (st === ownState() ? L.windowTop() : L.windowAt([])) },
+    opener: { get: () => null },
+    parent: { get: parentOf },
+    postMessage: { call: postMessageTo, length: 1 },
+  };
+  const LOCATION_OPS = {
+    href: { set: setHref },
+    replace: {
+      call(st, ...args) {
+        if (args.length === 0) throw new TypeError("Failed to execute 'replace' on 'Location': 1 argument required, but only 0 present.");
+        navigateFrame(st, `${args[0]}`, true, 'replace');
+      },
+      length: 1,
+    },
+  };
+  function crossOriginFn(name, length, thisOf, run) {
+    const fn = { [name](...args) { return run(thisOf(this), ...args); } }[name];
+    Object.defineProperty(fn, 'length', { value: length, configurable: true });
+    L.nativeFns.add(fn);
+    return fn;
+  }
+  // The descriptor of one of CrossOriginProperties (cached: identity is stable per stand-in).
+  function crossOriginProperty(st, name, kind) {
+    let d = st.props.get(name);
+    if (d !== undefined) return d;
+    const thisOf = st.kind === 'Window' ? windowThis : locationThis;
+    const op = (st.kind === 'Window' ? WINDOW_OPS : LOCATION_OPS)[name];
+    if (kind === 'm') {
+      d = { value: crossOriginFn(name, op.length, thisOf, op.call), writable: false, enumerable: false, configurable: true };
+    } else {
+      d = {
+        get: kind.includes('g') ? crossOriginFn(`get ${name}`, 0, thisOf, op.get) : undefined,
+        set: kind.includes('s') ? crossOriginFn(`set ${name}`, 1, thisOf, op.set) : undefined,
+        enumerable: false, configurable: true,
+      };
+    }
+    st.props.set(name, d);
+    return d;
+  }
+  // [[GetOwnProperty]] without the SecurityError: the descriptor, or undefined for what a cross-origin
+  // object hides. Child frames are the window's indexed (enumerable) and named properties.
+  function crossOriginOwn(st, p) {
+    if (typeof p === 'string') {
+      const e = CROSS_ORIGIN_PROPS[st.kind].find((x) => x[0] === p);
+      if (e !== undefined) return crossOriginProperty(st, e[0], e[1]);
+      if (st.kind === 'Window') {
+        const w = childWindow(st.path, p);
+        if (w !== undefined) return { value: w, writable: false, enumerable: INDEX_RE.test(p), configurable: true };
+      }
+    }
+    return isFallbackKey(p) ? CROSS_ORIGIN_FALLBACK : undefined;
+  }
+  function crossOriginErr(st, verb, p) {
+    const blocked = `Blocked a frame with origin "${L.location.origin}" from accessing a cross-origin frame.`;
+    if (verb === undefined) return new DOMException(blocked, 'SecurityError');
+    const index = typeof p === 'string' && INDEX_RE.test(p);
+    const what = index ? `an indexed property [${p}]` : `a named property${typeof p === 'string' ? ` '${p}'` : ''}`;
+    return new DOMException(`Failed to ${verb} ${what} ${verb === 'read' ? 'from' : 'on'} '${st.kind}': ${blocked}`, 'SecurityError');
+  }
+  // A direct child frame that is not cross-origin but whose real window isn't available (not
+  // loaded yet, ...). Its stand-in is lenient: plain expandos, `document` is null, and it takes
+  // event listeners that never fire.
+  function sameOriginChild(path) {
     const own = selfPath();
-    const child = p.length === own.length + 1 && pathKey(p.slice(0, -1)) === pathKey(own);
-    if (!child || frameIsCrossOrigin(p[p.length - 1])) throw new DOMException(`Failed to execute '${what}' on 'Window': Blocked a frame from accessing a cross-origin frame.`, 'SecurityError');
-    let t = REMOTE_TARGETS.get(w);
-    if (t === undefined) { t = new EventTarget(); REMOTE_TARGETS.set(w, t); }
-    return t;
+    return path.length === own.length + 1 && pathKey(path.slice(0, -1)) === pathKey(own) && !frameIsCrossOrigin(path[path.length - 1]);
   }
-  Object.defineProperty(RemoteWindow.prototype, Symbol.toStringTag, { value: 'Window', configurable: true });
-  // Named and indexed access to a remote window's child frames (`parent.frames['__tcfapiLocator']`, `top[0]`).
-  const remoteHandler = {
-    get(t, p, r) {
-      if (typeof p === 'string' && !(p in t)) {
-        const w = childWindow(REMOTE.get(t), p);
-        if (w !== undefined) return w;
-      }
-      return Reflect.get(t, p, r);
+  const isLenient = (st) => st.kind === 'Window' && sameOriginChild(st.path);
+  function lenientEvents(w) {
+    const st = REMOTE.get(w);
+    if (st === undefined || st.kind !== 'Window') throw new TypeError('Illegal invocation');
+    if (st.events === null) st.events = new EventTarget();
+    return st.events;
+  }
+  const lenientMethods = {
+    addEventListener(type, listener, options) { lenientEvents(this).addEventListener(type, listener, options); },
+    removeEventListener(type, listener, options) { lenientEvents(this).removeEventListener(type, listener, options); },
+    dispatchEvent(event) { return lenientEvents(this).dispatchEvent(event); },
+  };
+  // The essential internal methods of the cross-origin WindowProxy and Location (7.2.3.x).
+  const crossOriginHandler = {
+    getOwnPropertyDescriptor(t, p) {
+      const st = REMOTE.get(t);
+      if (st.expando && hasOwn(t, p)) return Reflect.getOwnPropertyDescriptor(t, p);
+      const d = crossOriginOwn(st, p);
+      if (d !== undefined) return d;
+      if (isLenient(st)) return undefined;
+      throw crossOriginErr(st, 'read', p);
+    },
+    defineProperty(t, p, d) {
+      const st = REMOTE.get(t);
+      if (!isLenient(st)) throw crossOriginErr(st);
+      st.expando = true;
+      return Reflect.defineProperty(t, p, d);
     },
     has(t, p) {
-      return Reflect.has(t, p) || (typeof p === 'string' && childWindow(REMOTE.get(t), p) !== undefined);
+      const st = REMOTE.get(t);
+      if ((st.expando && hasOwn(t, p)) || crossOriginOwn(st, p) !== undefined) return true;
+      if (!isLenient(st)) throw crossOriginErr(st);
+      return p === 'document' || (typeof p === 'string' && hasOwn(lenientMethods, p)) || Reflect.has(t, p);
     },
+    get(t, p, receiver) {
+      const st = REMOTE.get(t);
+      if (st.expando && hasOwn(t, p)) return Reflect.get(t, p, receiver);
+      if (p === Symbol.toStringTag && isLenient(st)) return 'Window';
+      const d = crossOriginOwn(st, p);
+      if (d !== undefined) {
+        if ('value' in d) return d.value;
+        if (d.get !== undefined) return Reflect.apply(d.get, receiver, []);
+        throw crossOriginErr(st, 'read', p);
+      }
+      if (!isLenient(st)) throw crossOriginErr(st, 'read', p);
+      if (p === 'document') return null;
+      if (typeof p === 'string' && hasOwn(lenientMethods, p)) return lenientMethods[p];
+      return Reflect.get(t, p);
+    },
+    set(t, p, v, receiver) {
+      const st = REMOTE.get(t);
+      const d = st.expando && hasOwn(t, p) ? undefined : crossOriginOwn(st, p);
+      if (d !== undefined && d.set !== undefined) { Reflect.apply(d.set, receiver, [v]); return true; }
+      if (!isLenient(st)) throw crossOriginErr(st, 'set', p);
+      st.expando = true;
+      return Reflect.set(t, p, v);
+    },
+    deleteProperty(t, p) {
+      const st = REMOTE.get(t);
+      if (!isLenient(st)) throw crossOriginErr(st);
+      return Reflect.deleteProperty(t, p);
+    },
+    ownKeys(t) {
+      const st = REMOTE.get(t);
+      const keys = [];
+      const n = st.kind === 'Window' ? framesOf(st.path).length : 0;
+      for (let i = 0; i < n; i++) keys.push(`${i}`);
+      for (const e of CROSS_ORIGIN_PROPS[st.kind]) keys.push(e[0]);
+      keys.push('then', Symbol.toStringTag, Symbol.hasInstance, Symbol.isConcatSpreadable);
+      if (st.expando) for (const k of Reflect.ownKeys(t)) if (!keys.includes(k)) keys.push(k);
+      return keys;
+    },
+    getPrototypeOf(t) { return isLenient(REMOTE.get(t)) ? Reflect.getPrototypeOf(t) : null; },
+    setPrototypeOf(t, v) { return v === crossOriginHandler.getPrototypeOf(t); },
+    preventExtensions() { return false; },
   };
   // The window of this document's <iframe> `id`.
   L.remoteWindowFor = (id) => L.windowAt([...selfPath(), id]);
@@ -3614,6 +3781,7 @@
     try {
       if (isNode(v)) return inspectNode(v);
       if (v === L.window) return 'Window';
+      if (REMOTE.has(v)) return REMOTE.get(v).kind;
       if (v instanceof Error || (typeof v.stack === 'string' && typeof v.message === 'string' && 'name' in v)) return L.errToString(v);
       if (v instanceof Date) return isNaN(v) ? 'Invalid Date' : v.toISOString();
       if (v instanceof RegExp) return String(v);
