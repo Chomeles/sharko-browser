@@ -145,7 +145,7 @@ impl DocumentMutator<'_> {
 
     pub fn create_element(&mut self, name: QualName, attrs: Vec<Attribute>) -> NodeId {
         let mut data = ElementData::new(name, attrs);
-        data.flush_style_attribute(self.doc.guard(), &self.doc.url.url_extra_data());
+        data.flush_style_attribute(self.doc.guard(), &self.doc.document_base.url_extra_data());
 
         let id = self.doc.create_node(NodeData::Element(Box::new(data)));
         let node = self.doc.get_node_mut(id).unwrap();
@@ -236,6 +236,20 @@ impl DocumentMutator<'_> {
     }
 
     pub fn set_attribute(&mut self, node_id: NodeId, name: QualName, value: &str) {
+        let base_href = self.is_base_href(node_id, &name);
+        self.set_attribute_inner(node_id, name, value);
+        if base_href {
+            self.doc.update_document_base();
+        }
+    }
+
+    /// PATCH: is this the `href` of a `<base>` (its change moves the document base URL)?
+    fn is_base_href(&self, node_id: NodeId, name: &QualName) -> bool {
+        name.local == local_name!("href")
+            && self.doc.nodes[node_id].data.is_element_with_tag_name(&local_name!("base"))
+    }
+
+    fn set_attribute_inner(&mut self, node_id: NodeId, name: QualName, value: &str) {
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         if node_is_in_document {
             self.doc.snapshot_node(node_id);
@@ -330,7 +344,7 @@ impl DocumentMutator<'_> {
         }
 
         if *attr == local_name!("style") {
-            element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
+            element.flush_style_attribute(&self.doc.guard, &self.doc.document_base.url_extra_data());
             node.mark_style_attr_updated();
             return;
         }
@@ -389,6 +403,14 @@ impl DocumentMutator<'_> {
     }
 
     pub fn clear_attribute(&mut self, node_id: NodeId, name: QualName) {
+        let base_href = self.is_base_href(node_id, &name);
+        self.clear_attribute_inner(node_id, name);
+        if base_href {
+            self.doc.update_document_base();
+        }
+    }
+
+    fn clear_attribute_inner(&mut self, node_id: NodeId, name: QualName) {
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         if node_is_in_document {
             self.doc.snapshot_node(node_id);
@@ -474,7 +496,7 @@ impl DocumentMutator<'_> {
         }
 
         if *attr == local_name!("style") {
-            element.flush_style_attribute(&self.doc.guard, &self.doc.url.url_extra_data());
+            element.flush_style_attribute(&self.doc.guard, &self.doc.document_base.url_extra_data());
             node.mark_style_attr_updated();
         } else if *tag == local_name!("img") && is_img_source_attr(attr) {
             self.load_image(node_id);
@@ -943,6 +965,7 @@ impl<'doc> DocumentMutator<'doc> {
     }
 
     fn process_added_subtree(&mut self, node_id: NodeId) {
+        let mut base_changed = false;
         self.doc.iter_subtree_mut(node_id, |node_id, doc| {
             let node = &mut doc.nodes[node_id];
             node.flags.set(NodeFlags::IS_IN_DOCUMENT, true);
@@ -962,6 +985,8 @@ impl<'doc> DocumentMutator<'doc> {
             let tag = element.name.local.as_ref();
             match tag {
                 "title" => self.title_node = Some(node_id),
+                // PATCH: the base URL must be current before the links queued below load.
+                "base" => base_changed = true,
                 "link" => self.eager_op_queue.push(SpecialOp::LoadStylesheet(node_id)),
                 "img" => self.eager_op_queue.push(SpecialOp::LoadImage(node_id)),
                 // PATCH: a `<source>` added to a `<picture>` can change its image.
@@ -1012,11 +1037,18 @@ impl<'doc> DocumentMutator<'doc> {
             }
         });
 
+        if base_changed {
+            self.doc.update_document_base();
+        }
         self.flush_eager_ops();
     }
 
     fn process_removed_subtree(&mut self, node_id: NodeId) {
+        let mut base_changed = false;
         self.doc.iter_subtree_mut(node_id, |node_id, doc| {
+            base_changed |= doc.nodes[node_id]
+                .data
+                .is_element_with_tag_name(&local_name!("base"));
             doc.nodes[node_id]
                 .flags
                 .set(NodeFlags::IS_IN_DOCUMENT, false);
@@ -1080,6 +1112,9 @@ impl<'doc> DocumentMutator<'doc> {
             }
         });
 
+        if base_changed {
+            self.doc.update_document_base();
+        }
         self.flush_eager_ops();
     }
 
@@ -1263,7 +1298,7 @@ impl<'doc> DocumentMutator<'doc> {
             }
             return;
         }
-        let Some(url) = self.doc.url.resolve_relative(raw_src) else {
+        let Some(url) = self.doc.document_base.resolve_relative(raw_src) else {
             #[cfg(feature = "tracing")]
             tracing::warn!("Not loading iframe: could not resolve url {raw_src}");
             return;

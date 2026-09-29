@@ -231,7 +231,7 @@ impl BaseDocument {
         if raw.starts_with('#') {
             return UseTarget::Unavailable;
         }
-        let Some(mut url) = self.url.resolve_relative(raw) else {
+        let Some(mut url) = self.document_base.resolve_relative(raw) else {
             return UseTarget::Unavailable;
         };
         let Some(id) = url.fragment() else {

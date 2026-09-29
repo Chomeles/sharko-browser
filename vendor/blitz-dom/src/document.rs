@@ -27,7 +27,7 @@ use blitz_traits::node_id::NodeId;
 use blitz_traits::shell::{ColorScheme, DummyShellProvider, ShellProvider, Viewport};
 use cursor_icon::CursorIcon;
 use linebender_resource_handle::Blob;
-use markup5ever::{LocalName, local_name};
+use markup5ever::{LocalName, local_name, ns};
 use parley::{FontContext, PlainEditorDriver};
 use selectors::{Element, matching::QuirksMode};
 use smallvec::SmallVec;
@@ -213,6 +213,12 @@ pub struct BaseDocument {
     // Config
     /// Base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub(crate) url: DocumentUrl,
+    /// PATCH: the HTML "document base URL" (the first `<base href>` resolved against the
+    /// fallback base URL, else the fallback). `url` stays the document URL (location).
+    pub(crate) document_base: DocumentUrl,
+    /// PATCH: the "fallback base URL" when it differs from `url` (about:srcdoc / about:blank
+    /// documents use their creator's base URL).
+    pub(crate) fallback_base: Option<DocumentUrl>,
     // Devtool settings. Currently used to render debug overlays
     pub(crate) devtool_settings: DevtoolSettings,
     // Viewport details such as the dimensions, HiDPI scale, and zoom factor,
@@ -497,6 +503,10 @@ impl BaseDocument {
             .base_url
             .and_then(|url| DocumentUrl::from_str(&url).ok())
             .unwrap_or_default();
+        let fallback_base = config
+            .fallback_base_url
+            .and_then(|url| DocumentUrl::from_str(&url).ok());
+        let document_base = fallback_base.clone().unwrap_or_else(|| base_url.clone());
 
         let net_provider = config
             .net_provider
@@ -535,6 +545,8 @@ impl BaseDocument {
             viewport_overflow: crate::ViewportOverflow::INITIAL,
             viewport_overflow_source: None,
             url: base_url,
+            document_base,
+            fallback_base,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
             adopted_stylesheets: Vec::new(),
@@ -651,11 +663,51 @@ impl BaseDocument {
     /// Set base url for resolving linked resources (stylesheets, images, fonts, etc)
     pub fn set_base_url(&mut self, url: &str) {
         self.url = DocumentUrl::from(Url::parse(url).unwrap());
+        self.update_document_base();
     }
 
-    /// The base url used for resolving linked resources (stylesheets, images, fonts, etc)
+    /// The document URL (what `location` reports); not the base for relative URLs, see
+    /// [`Self::document_base_url`].
     pub fn base_url(&self) -> &Url {
         &self.url
+    }
+
+    /// PATCH: the HTML "document base URL", against which linked resources, navigations and
+    /// CSS `url()` in inline styles are resolved.
+    pub fn document_base_url(&self) -> &Url {
+        &self.document_base
+    }
+
+    /// PATCH: recompute the document base URL (HTML "document base URL"; same shape as
+    /// Ladybird `Document::base_url` / `HTMLBaseElement::set_the_frozen_base_url` and Chromium
+    /// `Document::ProcessBaseElement`): the first `<base>` with an `href` attribute, in tree
+    /// order, parsed against the fallback base URL; a failed parse or a `data:`/`javascript:`
+    /// result gives the fallback. Call when a `<base>` is inserted/removed, its `href`
+    /// changes, or the document URL changes.
+    pub(crate) fn update_document_base(&mut self) {
+        let fallback = self.fallback_base.clone().unwrap_or_else(|| self.url.clone());
+        let mut base = fallback.clone();
+        let mut stack = vec![self.root_node().id];
+        while let Some(id) = stack.pop() {
+            let Some(node) = self.get_node(id) else { continue };
+            if let Some(el) = node.element_data()
+                && el.name.local == local_name!("base")
+                && el.name.ns == ns!(html)
+                // Removal clears the flag before the node is detached from its parent.
+                && node.flags.is_in_document()
+                && let Some(href) = el.attr(local_name!("href"))
+            {
+                let href = href.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0c' | '\r'));
+                if let Some(u) = fallback.resolve_relative(href)
+                    && !matches!(u.scheme(), "data" | "javascript")
+                {
+                    base = DocumentUrl::from(u);
+                }
+                break;
+            }
+            stack.extend(node.children.iter().rev().copied());
+        }
+        self.document_base = base;
     }
 
     pub fn guard(&self) -> &SharedRwLock {
@@ -826,7 +878,7 @@ impl BaseDocument {
             name,
             value,
             &self.guard,
-            self.url.url_extra_data(),
+            self.document_base.url_extra_data(),
         );
         if did_change {
             node.mark_style_attr_updated();
@@ -838,7 +890,7 @@ impl BaseDocument {
         let did_change = node.element_data_mut().unwrap().remove_style_property(
             name,
             &self.guard,
-            self.url.url_extra_data(),
+            self.document_base.url_extra_data(),
         );
         if did_change {
             node.mark_style_attr_updated();
@@ -1184,10 +1236,10 @@ impl BaseDocument {
     }
 
     pub(crate) fn resolve_url(&self, raw: &str) -> url::Url {
-        self.url.resolve_relative(raw).unwrap_or_else(|| {
+        self.document_base.resolve_relative(raw).unwrap_or_else(|| {
             panic!(
                 "to be able to resolve {raw} with the base_url: {:?}",
-                *self.url
+                *self.document_base
             )
         })
     }
@@ -1491,7 +1543,7 @@ impl BaseDocument {
         origin: Origin,
         media: MediaList,
     ) -> DocumentStyleSheet {
-        self.make_stylesheet_at(css, origin, media, self.url.url_extra_data())
+        self.make_stylesheet_at(css, origin, media, self.document_base.url_extra_data())
     }
 
     /// PATCH: a stylesheet whose relative URLs resolve against `url_data`.
@@ -1605,7 +1657,7 @@ impl BaseDocument {
                         .as_deref()
                         .and_then(|b| url::Url::parse(b).ok())
                         .map(|u| UrlExtraData(ServoArc::new(u)))
-                        .unwrap_or_else(|| self.url.url_extra_data());
+                        .unwrap_or_else(|| self.document_base.url_extra_data());
                     let css = match host {
                         Some(host) => crate::shadow_css::scope_shadow_css(css, &host.to_string()),
                         None => css.clone(),

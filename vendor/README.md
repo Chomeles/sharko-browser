@@ -313,3 +313,14 @@ Patches so far:
     answers with the container's last laid-out content-box size and records it on the node;
     `resolve` loops style → layout (at most 4 extra passes, for nested containers) and restyles
     the descendants of every container whose size changed since style queried it.
+81. `blitz-dom/src/{document,mutator,iframe,config,svg_sprite,events/pointer}.rs`: the HTML
+    "document base URL" (`BaseDocument::document_base_url`), separate from the document URL
+    (`base_url`, what `location` reports): the first `<base href>` in tree order, parsed
+    against the fallback base URL; a failed parse or a `data:`/`javascript:` result gives the
+    fallback (Ladybird `Document::base_url`, `HTMLBaseElement::set_the_frozen_base_url`;
+    Chromium `Document::ProcessBaseElement`). It is recomputed when a `<base>` is inserted or
+    removed, its `href` changes, or the document URL changes, and is used for `<link>`, `<img>`
+    / `srcset`, preload, iframe `src`, form actions, link clicks, `<use>` and `url()` in inline
+    styles. The fallback base URL of a srcdoc / initial `about:blank` iframe document is its
+    parent's document base URL (`DocumentConfig::fallback_base_url`). Before, every
+    subresource of a page with `<base href>` pointing elsewhere (dwd.de) 404ed.
