@@ -1,0 +1,34 @@
+<!doctype html><html><head><title>t</title></head><body>
+<!-- iframe appended into a shadow host / a shadowed body: contentDocument must exist. Expected: <name>.expected.json (Chromium). -->
+<script>
+var out = {};
+function name(n) { return n === null ? 'null' : n === undefined ? 'undef' : n.nodeName; }
+function test(label, mount) {
+  var ifr = document.createElement('iframe');
+  mount(ifr);
+  var idoc = null, iwin = null;
+  try { idoc = ifr.contentDocument; iwin = ifr.contentWindow; } catch (e) { out[label + '_err'] = e.message; }
+  var r = { conn: ifr.isConnected, cd: idoc ? 'doc' : String(idoc), cw: iwin ? 'win' : String(iwin) };
+  if (idoc) {
+    r.body = name(idoc.body);
+    r.head = name(idoc.head);
+    r.readyState = idoc.readyState;
+    if (idoc.body) {
+      var ph = idoc.createElement('div'); idoc.body.appendChild(ph);
+      r.phParent = name(ph.parentNode);
+      var svg = idoc.createElementNS('http://www.w3.org/2000/svg', 'svg'); var g = idoc.createElementNS('http://www.w3.org/2000/svg', 'g'); var tx = idoc.createElementNS('http://www.w3.org/2000/svg', 'text'); tx.textContent = 'Hello'; g.appendChild(tx); svg.appendChild(g); ph.appendChild(svg);
+      try { r.bbox = JSON.stringify([tx.getBBox().width > 0, typeof tx.getComputedTextLength(), typeof tx.getExtentOfChar]); } catch (e) { r.bbox = 'ERR ' + e.message; }
+    }
+  }
+  out[label] = JSON.stringify(r);
+}
+test('a_body', function (i) { document.body.appendChild(i); });
+var host = document.createElement('div'); document.body.appendChild(host);
+var sr = host.attachShadow({ mode: 'closed' });
+test('b_shadowOfDiv', function (i) { sr.appendChild(i); });
+var sr2 = document.body.attachShadow({ mode: 'closed' });
+test('c_shadowOfBody', function (i) { sr2.appendChild(i); });
+test('d_lightOfShadowedBody', function (i) { document.body.appendChild(i); });
+document.title = JSON.stringify(out);
+window.__out = function () { return JSON.stringify(out, null, 1); }; window.__done = true;
+</script></body></html>

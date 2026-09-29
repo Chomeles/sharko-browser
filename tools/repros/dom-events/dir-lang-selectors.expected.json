@@ -1,0 +1,14 @@
+{
+ "matches-dir-ltr-body": true,
+ "matches-dir-rtl-s1": true,
+ "matches-dir-rtl-i1": false,
+ "matches-dir-ltr-i1": true,
+ "bdi-dir-rtl": true,
+ "input-auto-rtl": true,
+ "lang-en-p1": true,
+ "lang-de-p2": true,
+ "css-lang-color": "rgb(1, 2, 3)",
+ "css-lang-de-color": "rgb(4, 5, 6)",
+ "css-dir-color": "rgb(7, 8, 9)",
+ "el-dir-prop": "rtl||auto"
+}

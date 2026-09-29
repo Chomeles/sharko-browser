@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Dialog, popover and CSS.supports of newer features</title>
+<!-- window.report(): 'supports' lists CSS.supports() results (false in Sharko where Chromium says true: stylo gates the
+     property to the gecko engine, see docs/lanes/layout-css.md). pop_after: showPopover() must display the popover
+     (Chromium block, 114x64 at the viewport centre, :popover-open true; Sharko none, 0x0). dlg_modal: showModal() is
+     position:fixed and centred in Chromium (521,331 238x138), Sharko absolute at y=0 and :modal false. dlg2 (an open
+     <dialog>) is 121px wide and centred in Chromium, 1280 wide in Sharko: abspos boxes with both insets ignore width:fit-content (see abspos-fit-content.html). -->
+<body style="margin:0;font:16px Arial">
+<style>#pop{width:100px;height:50px} dialog#dlg{width:200px;height:100px} dialog::backdrop{background:rgba(0,0,0,.5)}</style>
+<div id="pop" popover>pop</div><dialog id="dlg">dialog</dialog><dialog id="dlg2" open>open dialog</dialog>
+<script>
+window.report = function () {
+  var o = {}, r = function (e) { var b = e.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(Math.round); };
+  var pop = document.getElementById('pop'), dlg = document.getElementById('dlg'), S = function (p, v) { return CSS.supports(p, v); };
+  o.supports = { lineClamp: S('-webkit-line-clamp', '2'), containerType: S('container-type', 'inline-size'), contentVisibility: S('content-visibility', 'auto'),
+    subgrid: S('grid-template-columns', 'subgrid'), textWrapBalance: S('text-wrap', 'balance'), textWrapPretty: S('text-wrap', 'pretty'), anchorName: S('anchor-name', '--a'),
+    writingMode: S('writing-mode', 'vertical-rl'), hyphens: S('hyphens', 'auto'), scrollSnap: S('scroll-snap-type', 'x mandatory'), accentColor: S('accent-color', 'red'),
+    shapeOutside: S('shape-outside', 'circle(50%)'), fieldSizing: S('field-sizing', 'content'), scrollbarGutter: S('scrollbar-gutter', 'stable'), initialLetter: S('initial-letter', '3'),
+    calcSize: S('width', 'calc-size(auto,size)'), interpolateSize: S('interpolate-size', 'allow-keywords'), ruby: S('display', 'ruby'), dirSelector: S('selector(:dir(ltr))', ''),
+    langSelector: S('selector(:lang(en))', ''), atScope: typeof CSSScopeRule, atStartingStyle: typeof CSSStartingStyleRule };
+  o.pop_before = [getComputedStyle(pop).display, r(pop)];
+  try { pop.showPopover(); o.pop_after = [getComputedStyle(pop).display, r(pop), pop.matches(':popover-open')]; } catch (e) { o.pop_err = String(e); }
+  try { dlg.showModal(); o.dlg_modal = [getComputedStyle(dlg).display, r(dlg), getComputedStyle(dlg).position, dlg.matches(':modal')]; } catch (e) { o.dlg_err = String(e); }
+  o.dlg2 = [getComputedStyle(document.getElementById('dlg2')).position, r(document.getElementById('dlg2'))];
+  return JSON.stringify(o);
+};
+
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+function __reproDone(issue, expected, actual) { window.__repro = { issue: issue, expected: expected, actual: actual, pass: JSON.stringify(expected) === JSON.stringify(actual) }; }
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report()), w = innerWidth;
+  var a = { popoverShown: r.pop_after ? r.pop_after[0] === 'block' && r.pop_after[2] === true : false, modalFixed: r.dlg_modal ? r.dlg_modal[2] === 'fixed' && r.dlg_modal[3] === true : false, openDialogFitsContent: r.dlg2[1][2] < w / 2 };
+  __reproDone('layout-css/top-layer', { popoverShown: true, modalFixed: true, openDialogFitsContent: true }, a);
+}, 50); });
+</script>

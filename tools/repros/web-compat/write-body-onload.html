@@ -1,0 +1,15 @@
+<!doctype html><html><head><title>t</title></head><body><script>
+var out={};
+var f=document.createElement('iframe'); document.body.appendChild(f);
+var d=f.contentWindow.document;
+out.same = (f.contentDocument===d);
+var o=d.open(); out.openRet = (o===d);
+d._x=function(){ out.xcalled=true; };
+d.write('<bo'+'dy onload="document._x && document._x(); parent.__onload=1;">'); 
+out.afterWriteBody = !!d.body; out.xkept = typeof d._x;
+d.close();
+out.afterCloseBody = d.body && d.body.outerHTML;
+out.readyState = d.readyState;
+f.addEventListener('load', function(){ out.iframeLoad=true; });
+setTimeout(function(){ out.onloadParent = window.__onload; out.xcalled=out.xcalled||false; out.xkept2=typeof d._x; out.finalBody = d.body && d.body.outerHTML; document.title=JSON.stringify(out); }, 1000);
+</script></body></html>

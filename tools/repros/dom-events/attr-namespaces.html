@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>attribute namespaces, prefixes and local names</title>
+<!-- Sharko stores attributes by qualified name and re-derives the namespace from the prefix (README "XPath ... Attribute namespaces are recovered"), so
+     xlink:href / xml:lang on HTML elements, xml:base on SVG and setAttributeNS with unusual prefixes differ. WPT dom/nodes attributes.html 26/67,
+     case.html 155/285, namespaced-attribute-mutations 16/24, html5lib tests9/10/14 + webkit02. -->
+<body>
+<script>
+const out = {};
+const t = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name; } };
+const describe = (el) => [...el.attributes].map((a) => [a.name, a.namespaceURI, a.prefix, a.localName].join('|')).join(' ; ');
+const box = document.createElement('div');
+document.body.appendChild(box);
+box.innerHTML = '<p id="h" xlink:href="foo" xml:lang="en" xmlns:foo="bar" foo:baz="1"></p><svg id="s" xml:base="b" xml:lang="fr" xml:space="preserve" xlink:href="#q" xmlns:xlink="http://www.w3.org/1999/xlink"></svg>';
+t('parsedHtml', () => describe(box.querySelector('#h')));
+t('parsedSvg', () => describe(box.querySelector('#s')));
+const el = document.createElement('div');
+t('setNS', () => {
+  el.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:title', 'x');
+  el.setAttributeNS('urn:a', 'a:x', '1');
+  el.setAttributeNS('urn:b', 'b:x', '2');
+  el.setAttributeNS(null, 'plain', '3');
+  return describe(el);
+});
+t('xmlnsNamespaceError', () => el.setAttributeNS('urn:c', 'xmlns', 'c'));
+t('getNS', () => [el.getAttributeNS('urn:a', 'x'), el.getAttributeNS('urn:b', 'x'), el.getAttributeNS(null, 'plain'), el.getAttributeNS('urn:a', 'y')].join(','));
+t('hasNS', () => [el.hasAttributeNS('urn:a', 'x'), el.hasAttributeNS(null, 'a:x')].join(','));
+t('afterRemove', () => { el.removeAttributeNS('urn:a', 'x'); return describe(el); });
+t('xmlDoc', () => { const xml = document.implementation.createDocument('urn:x', 'r', null); const r = xml.documentElement; r.setAttributeNS('urn:q', 'q:a', '1'); return describe(r) + ' / ' + r.namespaceURI + ' / ' + r.prefix + ' / ' + r.localName; });
+t('createAttrNS', () => { const a = document.createAttributeNS('urn:z', 'z:k'); return [a.name, a.namespaceURI, a.prefix, a.localName].join('|'); });
+t('toggle', () => { const d = document.createElement('div'); d.toggleAttribute('data-x'); return d.hasAttribute('data-x'); });
+t('caseHtmlNS', () => { const d = document.createElement('div'); d.setAttributeNS('http://www.w3.org/1999/xhtml', 'ABC:Def', 'v'); return describe(d) + ' / ' + d.getAttributeNS('http://www.w3.org/1999/xhtml', 'Def'); });
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Streams: interfaces, backpressure, BYOB, streaming fetch</title>
+<!-- Chromium: the whole WHATWG Streams API and response bodies that arrive chunk by chunk (fetch('/api/slow?n=3&ms=300') delivers its first chunk
+     after ~300 ms). Sharko: ReadableStream is a minimal class (40_webapi.js ~l.1766-1990); WritableStream/TransformStream are thin; the fetch
+     response is buffered by the network natives, so a streamed reply (SSE over fetch, chat UIs, NDJSON) arrives all at once at the end. -->
+<script src="repro.js"></script>
+<script>
+addEventListener('load', function () {
+  c('interfaces', function (done) { done(['ReadableStream', 'ReadableStreamDefaultReader', 'ReadableStreamDefaultController', 'ReadableStreamBYOBReader', 'ReadableStreamBYOBRequest', 'ReadableByteStreamController', 'WritableStream', 'WritableStreamDefaultWriter', 'WritableStreamDefaultController', 'TransformStream', 'TransformStreamDefaultController', 'ByteLengthQueuingStrategy', 'CountQueuingStrategy', 'TextDecoderStream', 'TextEncoderStream', 'CompressionStream', 'DecompressionStream'].filter(function (n) { return typeof self[n] !== 'function'; }).join(',') || 'all'); });
+  c('byobReader', function (done) { var s = new ReadableStream({ type: 'bytes', start: function (c) { c.enqueue(new Uint8Array([1, 2, 3, 4])); c.close(); } }); s.getReader({ mode: 'byob' }).read(new Uint8Array(8)).then(function (r) { done(r.value.byteLength + ':' + r.value.buffer.byteLength + ':' + r.done); }, function (e) { done('rejected ' + e.name); }); });
+  c('backpressure', function (done) { var log = []; var ws = new WritableStream({ write: function (ch) { log.push('w' + ch); return new Promise(function (r) { setTimeout(r, 20); }); } }, new CountQueuingStrategy({ highWaterMark: 1 })); var w = ws.getWriter(); var first = w.desiredSize; w.write(1); w.write(2); var after = w.desiredSize; done(first + ':' + after); });
+  c('pipeThroughTransformToWritable', function (done) { var got = []; new ReadableStream({ start: function (c) { ['a', 'b', 'c'].forEach(function (x) { c.enqueue(x); }); c.close(); } }).pipeThrough(new TransformStream({ transform: function (ch, ctl) { ctl.enqueue(ch + ch); }, flush: function (ctl) { ctl.enqueue('end'); } })).pipeTo(new WritableStream({ write: function (ch) { got.push(ch); }, close: function () { got.push('closed'); } })).then(function () { done(got.join()); }, function (e) { done('rejected ' + e.name); }); });
+  c('pipeToPropagatesSourceError', function (done) { var s = new ReadableStream({ start: function (c) { c.error(new RangeError('boom')); } }); s.pipeTo(new WritableStream()).then(function () { done('resolved'); }, function (e) { done(e.name); }); });
+  c('teeBothBranches', function (done) { var b = new ReadableStream({ start: function (c) { c.enqueue('x'); c.enqueue('y'); c.close(); } }).tee(); function all(s) { var r = s.getReader(), out = []; return r.read().then(function step(x) { if (x.done) return out.join(''); out.push(x.value); return r.read().then(step); }); } Promise.all([all(b[0]), all(b[1])]).then(function (v) { done(v.join('|')); }); });
+  c('asyncIteration', function (done) { (async function () { var out = []; for await (var ch of new ReadableStream({ start: function (c) { c.enqueue(1); c.enqueue(2); c.close(); } })) out.push(ch); done(out.join()); })().catch(function (e) { done('threw ' + e.name); }); });
+  c('textDecoderStreamSplitCodepoint', function (done) { var s = new ReadableStream({ start: function (c) { c.enqueue(new Uint8Array([0xe2, 0x82])); c.enqueue(new Uint8Array([0xac])); c.close(); } }).pipeThrough(new TextDecoderStream()); var r = s.getReader(), out = ''; r.read().then(function step(x) { if (x.done) return done(out); out += x.value; return r.read().then(step); }); });
+  c('responseFromStream', function (done) { new Response(new ReadableStream({ start: function (c) { c.enqueue(new TextEncoder().encode('from-stream')); c.close(); } })).text().then(done, function (e) { done('rejected ' + e.name); }); });
+  c('queuingStrategySize', function (done) { var s = new ByteLengthQueuingStrategy({ highWaterMark: 4 }); done(s.highWaterMark + ':' + s.size(new Uint8Array(3))); });
+  c('streamingFetch', function (done) { var t0 = performance.now(), times = []; fetch('http://127.0.0.1:18932/api/slow?n=3&ms=300').then(function (r) { var rd = r.body.getReader(); return rd.read().then(function step(x) { if (x.done) return; times.push(Math.round(performance.now() - t0)); return rd.read().then(step); }); }).then(function () { done({ chunks: times.length, firstChunkBeforeHalf: times[0] < times[times.length - 1] / 2 }); }, function (e) { done('rejected ' + e.name); }); }, 6000);
+  finish('streams', {
+    interfaces: 'all', byobReader: '4:8:false', backpressure: '1:-1', pipeThroughTransformToWritable: 'aa,bb,cc,end,closed', pipeToPropagatesSourceError: 'RangeError', teeBothBranches: 'xy|xy',
+    asyncIteration: '1,2', textDecoderStreamSplitCodepoint: '€', responseFromStream: 'from-stream', queuingStrategySize: '4:3', streamingFetch: { chunks: 3, firstChunkBeforeHalf: true }
+  });
+});
+</script>

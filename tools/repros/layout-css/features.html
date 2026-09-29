@@ -1,0 +1,308 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>feature matrix</title>
+<style>
+body{margin:0;font:16px/1 Arial, sans-serif}
+.box{width:500px;position:relative}
+/* media queries */
+@media (min-width: 1000px){#mq_min{display:grid}}
+@media (width >= 1000px){#mq_range{display:grid}}
+@media (hover: hover){#mq_hover{display:grid}}
+@media (pointer: fine){#mq_pointer{display:grid}}
+@media (prefers-reduced-motion: no-preference){#mq_prm{display:grid}}
+@media (prefers-color-scheme: light){#mq_light{display:grid}}
+@media screen and (min-resolution: 1dppx){#mq_res{display:grid}}
+@media (min-aspect-ratio: 1/1){#mq_ar{display:grid}}
+@media not print{#mq_notprint{display:grid}}
+@media only screen and (max-width: 1279.98px){#mq_maxw{display:grid}}
+@media (orientation: landscape){#mq_orient{display:grid}}
+/* container queries */
+.cq{container-type:inline-size;width:600px}
+@container (min-width: 400px){#cq_size{display:grid}}
+.cqn{container:card / inline-size;width:600px}
+@container card (width > 400px){#cq_named{display:grid}}
+@container (max-width: 100px){#cq_neg{display:grid}}
+.cqs{--theme:dark}
+@container style(--theme: dark){#cq_style{display:grid}}
+/* supports / layers / nesting */
+@supports (display:grid){#sup_grid{display:grid}}
+@supports selector(:has(a)){#sup_has{display:grid}}
+@supports not (display:foo){#sup_not{display:grid}}
+@layer a, b;
+@layer b{#layer_order{display:grid}}
+@layer a{#layer_order{display:flex}}
+@layer x{#layer_unlayered{display:grid}}
+#layer_unlayered{display:flex}
+@layer y{#layer_imp{display:grid !important}}
+#layer_imp{display:flex !important}
+#nest{display:flex; &.n{display:grid}}
+#nest_mq{display:flex; @media (min-width:1000px){display:grid}}
+.parent{ #nest_desc{display:grid} }
+:is(#idsel, .b) .is_spec{display:grid}
+.x .is_spec{display:flex}
+:where(#idsel) .where_spec{display:grid}
+.x .where_spec{display:flex}
+.hp:has(> .child) #has_sel{display:grid}
+#var_fb{display:var(--nope, grid)}
+:root{--gap:20px;--w:200px}
+#var_calc{width:calc(var(--w) * 2 + var(--gap))}
+@property --reg{syntax:'<length>';inherits:false;initial-value:33px}
+#prop_reg{width:var(--reg)}
+/* values */
+#calc_mixed{width:calc(100% - 2em)}
+#clamp{width:clamp(100px, 50%, 200px)}
+#minf{width:min(50%, 100px)}
+#maxf{width:max(10px, 5vw)}
+#dvh{height:50dvh}
+#svh{height:50svh}
+#lvh{height:50lvh}
+#vi{width:10vi}
+#vmin{width:10vmin}
+#rem_root{width:10rem}
+#ch{width:10ch}
+#ex{height:10ex}
+#lh{height:2lh}
+#cap{height:2cap}
+#ic{width:2ic}
+#ar{width:200px;aspect-ratio:2/1}
+#ar_h{height:100px;aspect-ratio:1/2}
+#ar_minh{width:200px;aspect-ratio:1/1;min-height:250px}
+#pt_hack{width:320px}#pt_hack::before{content:'';display:block;padding-top:56.25%}
+#fitc{width:fit-content}
+#minc{width:min-content}
+#maxc{width:max-content}
+#stretch{width:stretch;width:-webkit-fill-available}
+#logical{inline-size:123px;block-size:45px;margin-inline-start:7px;padding-block:3px}
+#inset{position:absolute;inset:10px}
+#inset_p{position:relative;height:200px;width:200px}
+#autom{position:absolute;inset:0;margin:auto;width:50px;height:50px}
+#tr_p{transform:translateX(0);width:300px;height:100px;position:relative;margin-left:100px}
+#fixed_in_tr{position:fixed;top:0;left:0;width:10px;height:10px}
+#indiv{translate:30px 0;scale:2;width:20px;height:20px;position:relative}
+#rotate{rotate:90deg;width:40px;height:20px;position:relative}
+/* flex */
+#fgap{display:flex;gap:20px}#fgap>div{width:100px;height:10px}
+#fwrap{display:flex;flex-wrap:wrap;gap:10px;width:250px;align-content:space-between;height:100px}#fwrap>div{width:100px;height:10px}
+#fmin{display:flex;width:200px}#fmin>div{flex:1 1 0}
+#fmin0{display:flex;width:200px}#fmin0>div{flex:1 1 0;min-width:0}
+#fbasis{display:flex;width:400px}#fbasis>div{flex:1 1 content}
+#fauto{display:flex;width:400px}#fauto>div{flex:1 1 auto;width:50px}
+#fcol{display:flex;flex-direction:column;height:200px}#fcol>div{flex:1}
+#fpct{display:flex;height:200px}#fpct>div{height:50%;width:20px}
+#fpct2{height:200px}#fpct2>div{height:100%;width:20px}
+#fstretch_img{display:flex;width:400px;height:60px}#fstretch_img img{width:100%}
+#fmargin{display:flex;width:400px}#fmargin>div{margin-left:auto;width:50px;height:10px}
+#fjust{display:flex;width:400px;justify-content:space-evenly}#fjust>div{width:50px;height:10px}
+#frow_nowrap{display:flex;width:300px}#frow_nowrap>div{white-space:nowrap}
+#fshrink_txt{display:flex;width:300px}#fshrink_txt>div{flex-shrink:0}
+#fbutton{display:flex;align-items:center;width:44px;height:44px;padding:10px;box-sizing:border-box}#fbutton svg{width:24px;height:24px}
+#inline_flex_btn{display:inline-flex;align-items:center;justify-content:center;padding:0 16px;height:40px}
+/* grid */
+#gareas{display:grid;grid-template-areas:"a b" "c c";grid-template-columns:100px 1fr;width:300px}#gareas>.ga{grid-area:a}#gareas>.gb{grid-area:b}#gareas>.gc{grid-area:c;height:10px}
+#gauto{display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));width:650px}#gauto>div{height:10px}
+#gauto_fit{display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));width:650px}#gauto_fit>div{height:10px}
+#gminmax{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);width:400px}#gminmax>div{white-space:nowrap}
+#gfr_min{display:grid;grid-template-columns:1fr 1fr;width:400px}#gfr_min>div{white-space:nowrap}
+#gdense{display:grid;grid-template-columns:repeat(3,100px);grid-auto-flow:dense}#gdense>div{height:10px}#gdense>.wide{grid-column:span 2}
+#gsub{display:grid;grid-template-columns:100px 200px;width:300px}#gsub>div{display:grid;grid-column:span 2;grid-template-columns:subgrid}#gsub>div>div{height:10px}
+#ggap{display:grid;grid-template-columns:1fr 1fr;gap:10px 30px;width:330px}#ggap>div{height:10px}
+#gplace{display:grid;grid-template-columns:100px 100px;height:100px;place-items:center}#gplace>div{width:20px;height:20px}
+#gcontents{display:grid;grid-template-columns:100px 100px 100px}#gcontents>div{display:contents}#gcontents>div>div{height:10px}
+#gimplicit{display:grid;grid-template-columns:100px;grid-auto-rows:minmax(30px,auto)}#gimplicit>div{}
+#gcenter{display:grid;place-content:center;width:300px;height:100px}#gcenter>div{width:20px;height:20px}
+#gjustify{display:grid;grid-template-columns:100px 100px;justify-content:space-between;width:400px}#gjustify>div{height:10px}
+#gspan_abs{display:grid;grid-template-columns:100px 100px;position:relative;height:50px}#gspan_abs>div{position:absolute;grid-column:2;top:0;bottom:0;left:0;right:0}
+#gauto_cols{display:grid;grid-auto-flow:column;grid-auto-columns:max-content;gap:10px}#gauto_cols>div{white-space:nowrap}
+#g1fr_img{display:grid;grid-template-columns:1fr 1fr;width:400px}#g1fr_img img{width:100%;height:auto}
+#grow_pct{display:grid;grid-template-rows:50% 50%;height:200px}#grow_pct>div{}
+#gcol_pct{display:grid;grid-template-columns:25% 75%;width:400px;gap:20px}#gcol_pct>div{height:10px}
+/* text */
+#nowrap{white-space:nowrap;width:100px}
+#pre{white-space:pre}
+#breakall{word-break:break-all;width:100px}
+#anywhere{overflow-wrap:anywhere;width:100px}
+#balance{text-wrap:balance;width:300px}
+#vert{writing-mode:vertical-rl}
+#fontfb{font-family:"NoSuchFont_XYZ", sans-serif}
+#fontsys{font-family:system-ui}
+#fonthelv{font-family:Helvetica}
+#fontmono{font-family:monospace}
+#fontw{font-family:Arial;font-weight:700}
+#lhn{line-height:normal;font-size:20px}
+#ellip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100px}
+#textind{text-indent:2em;width:200px}
+#letters{letter-spacing:2px;white-space:nowrap}
+/* replaced */
+#svg_nosz{display:block}
+#svg_css{width:24px;height:24px}
+#svg_em{width:1.5em;height:1.5em}
+#svg_inline_parent{font-size:24px}
+#svg_h100{height:100%;width:auto}
+#svg_h100_p{height:40px;width:200px}
+#svg_wonly{width:100px}
+#canvas_pct_p{width:95px;height:95px}#canvas_pct{width:100%;height:100%}
+#canvas_attr{width:100%}
+#canvas_attr_p{width:400px}
+#img_attr{width:100%}
+#img_attr_p{width:200px}
+#img_maxw{max-width:100%}
+#img_maxw_p{width:100px}
+#objfit{width:100px;height:100px;object-fit:cover}
+#iframe_p{width:200px}#iframe_p iframe{width:100%;aspect-ratio:16/9;border:0}
+#video{width:100%}#video_p{width:300px}
+/* misc */
+#bb{box-sizing:border-box;width:100px;padding:10px;border:5px solid}
+#cb{box-sizing:content-box;width:100px;padding:10px;border:5px solid}
+#ovclip{overflow:clip;width:100px;height:20px}
+#ovauto{overflow-x:auto;width:100px;height:20px}
+#tblfix{table-layout:fixed;width:300px;border-collapse:collapse}#tblfix td{padding:0}
+#tblauto{border-collapse:collapse}#tblauto td{padding:0}
+#multicol{column-count:3;width:300px}
+#ld{color:light-dark(rgb(1,2,3), rgb(4,5,6))}
+#cmix{color:color-mix(in srgb, red 50%, blue)}
+#rel{color:rgb(from rgb(10,20,30) r g b / 0.5)}
+#oklch{color:oklch(50% 0.1 200)}
+#hwb{color:hwb(120 0% 0%)}
+#curcolor{color:rgb(9,9,9);border:1px solid currentColor}
+#imp{width:10px !important}
+#nth{display:flex}#nth>.k:nth-child(2 of .k){width:77px}#nth>.k{height:5px;width:10px}
+#attr_i[data-v="ABC" i]{display:grid}
+#cls_where:where(.q){display:grid}
+#hidden_attr[hidden]{display:block}
+#sticky_p{height:100px;overflow:auto}#sticky{position:sticky;top:10px}
+#abs_pct_p{position:relative;width:200px;height:100px}#abs_pct{position:absolute;width:50%;height:50%;right:0;bottom:0}
+#zero_flex_h{display:flex;flex-direction:column;height:100px}#zero_flex_h>div{flex:1;min-height:0;overflow:auto}#zero_flex_h>div>div{height:500px}
+#body_h{height:100%}
+#negm{width:200px}#negm>div{margin:0 -20px;height:10px}
+#pct_gap{display:flex;width:400px;gap:10%}#pct_gap>div{width:50px;height:10px}
+#dlg{width:150px}
+</style>
+</head>
+<body>
+<div class="box">
+<div id="mq_min" data-p="display"></div><div id="mq_range" data-p="display"></div><div id="mq_hover" data-p="display"></div><div id="mq_pointer" data-p="display"></div><div id="mq_prm" data-p="display"></div><div id="mq_light" data-p="display"></div><div id="mq_res" data-p="display"></div><div id="mq_ar" data-p="display"></div><div id="mq_notprint" data-p="display"></div><div id="mq_maxw" data-p="display"></div><div id="mq_orient" data-p="display"></div>
+<div class="cq"><div id="cq_size" data-p="display"></div><div id="cq_neg" data-p="display"></div></div>
+<div class="cqn"><div id="cq_named" data-p="display"></div></div>
+<div class="cqs"><div id="cq_style" data-p="display"></div></div>
+<div id="sup_grid" data-p="display"></div><div id="sup_has" data-p="display"></div><div id="sup_not" data-p="display"></div>
+<div id="layer_order" data-p="display"></div><div id="layer_unlayered" data-p="display"></div><div id="layer_imp" data-p="display"></div>
+<div id="nest" class="n" data-p="display"></div><div id="nest_mq" data-p="display"></div><div class="parent"><div id="nest_desc" data-p="display"></div></div>
+<div id="idsel" class="x"><div class="is_spec" data-p="display"></div><div class="where_spec" data-p="display"></div></div>
+<div class="hp"><div class="child"></div><div id="has_sel" data-p="display"></div></div>
+<div id="var_fb" data-p="display"></div><div id="var_calc" data-p="width"></div><div id="prop_reg" data-p="width"></div>
+<div id="calc_mixed" data-p="width"></div><div id="clamp" data-p="width"></div><div id="minf" data-p="width"></div><div id="maxf" data-p="width"></div>
+<div id="dvh" data-p="height"></div><div id="svh" data-p="height"></div><div id="lvh" data-p="height"></div><div id="vi" data-p="width"></div><div id="vmin" data-p="width"></div><div id="rem_root" data-p="width"></div><div id="ch" data-p="width"></div><div id="ex" data-p="height"></div><div id="lh" data-p="height"></div><div id="cap" data-p="height"></div><div id="ic" data-p="width"></div>
+<div id="ar" data-p="height"></div><div id="ar_h" data-p="width"></div><div id="ar_minh" data-p="height"></div><div id="pt_hack" data-p="height"></div>
+<div id="fitc" data-p="width">fit content text</div><div id="minc" data-p="width">min content text</div><div id="maxc" data-p="width">max content text</div><div id="stretch" data-p="width">x</div>
+<div id="logical" data-p="width,height,marginLeft,paddingTop"></div>
+<div id="inset_p"><div id="inset" data-p="width,height,top,left"></div><div id="autom" data-p="top,left"></div></div>
+<div id="tr_p"><div id="fixed_in_tr" data-p="left,top"></div></div>
+<div id="indiv" data-p="width,left"></div><div id="rotate" data-p="width,height"></div>
+<div id="fgap"><div></div><div id="fgap_b" data-p="left"></div></div>
+<div id="fwrap"><div></div><div></div><div></div><div id="fwrap_c" data-p="top,left"></div></div>
+<div id="fmin"><div id="fmin_a" data-p="width">Loooooooooooooooooooooooooooongword</div><div>b</div></div>
+<div id="fmin0"><div id="fmin0_a" data-p="width">Loooooooooooooooooooooooooooongword</div><div>b</div></div>
+<div id="fbasis"><div id="fbasis_a" data-p="width">short</div><div>a much longer piece of text here</div></div>
+<div id="fauto"><div id="fauto_a" data-p="width">a</div><div>b</div></div>
+<div id="fcol"><div id="fcol_a" data-p="height"></div><div></div></div>
+<div id="fpct"><div id="fpct_a" data-p="height"></div></div>
+<div id="fpct2"><div id="fpct2_a" data-p="height"></div></div>
+<div id="fstretch_img"><img id="fstretch_img_i" data-p="width,height" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='50'%3E%3C/svg%3E"></div>
+<div id="fmargin"><div id="fmargin_a" data-p="left"></div></div>
+<div id="fjust"><div id="fjust_a" data-p="left"></div><div></div></div>
+<div id="frow_nowrap"><div id="frow_nowrap_a" data-p="width">one two three four five six seven eight nine ten eleven twelve</div><div id="frow_nowrap_b" data-p="width">b</div></div>
+<div id="fshrink_txt"><div id="fshrink_txt_a" data-p="width">one two three four five six seven eight nine ten</div><div id="fshrink_txt_b" data-p="width">shrinks</div></div>
+<button id="fbutton"><svg id="fbutton_svg" data-p="width,height" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg></button>
+<button id="inline_flex_btn" data-p="width,height,display">Label</button>
+<div id="gareas"><div class="ga">a</div><div class="gb" id="gareas_b" data-p="left,width">b</div><div class="gc" id="gareas_c" data-p="top,width"></div></div>
+<div id="gauto" data-p="gridTemplateColumns"><div></div><div></div><div></div><div id="gauto_d" data-p="left,width"></div></div>
+<div id="gauto_fit" data-p="gridTemplateColumns"><div id="gauto_fit_a" data-p="width"></div><div></div></div>
+<div id="gminmax"><div id="gminmax_a" data-p="width">a very long text that does not wrap at all in this cell</div><div>b</div></div>
+<div id="gfr_min"><div id="gfr_min_a" data-p="width">a very long text that does not wrap at all in this cell</div><div>b</div></div>
+<div id="gdense"><div class="wide"></div><div class="wide"></div><div id="gdense_c" data-p="left,top"></div></div>
+<div id="gsub"><div><div></div><div id="gsub_b" data-p="left,width"></div></div></div>
+<div id="ggap"><div></div><div id="ggap_b" data-p="left,width"></div><div id="ggap_c" data-p="top"></div></div>
+<div id="gplace"><div id="gplace_a" data-p="left,top"></div></div>
+<div id="gcontents"><div><div></div><div></div><div id="gcontents_c" data-p="left"></div></div></div>
+<div id="gimplicit"><div id="gimplicit_a" data-p="height">x</div></div>
+<div id="gcenter"><div id="gcenter_a" data-p="left,top"></div></div>
+<div id="gjustify"><div></div><div id="gjustify_b" data-p="left"></div></div>
+<div id="gspan_abs"><div id="gspan_abs_a" data-p="left,width"></div></div>
+<div id="gauto_cols"><div>first col</div><div id="gauto_cols_b" data-p="left">second</div></div>
+<div id="g1fr_img"><img id="g1fr_img_i" data-p="width,height" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3C/svg%3E"><div>b</div></div>
+<div id="grow_pct"><div id="grow_pct_a" data-p="height"></div><div></div></div>
+<div id="gcol_pct"><div></div><div id="gcol_pct_b" data-p="left,width"></div></div>
+<div id="nowrap" data-p="width,scrollWidth">a long piece of text that does not wrap</div>
+<div id="pre" data-p="height">line1
+line2</div>
+<div id="breakall" data-p="height">Loooooooooooooooooooooooooooooooongword</div>
+<div id="anywhere" data-p="height">Loooooooooooooooooooooooooooooooongword</div>
+<div id="balance" data-p="height">The quick brown fox jumps over the lazy dog and keeps running far away</div>
+<div id="vert" data-p="width,height">vertical text</div>
+<span id="fontfb" data-p="width,fontFamily">The quick brown fox jumps</span><br>
+<span id="fontsys" data-p="width,fontFamily">The quick brown fox jumps</span><br>
+<span id="fonthelv" data-p="width,fontFamily">The quick brown fox jumps</span><br>
+<span id="fontmono" data-p="width,fontFamily">The quick brown fox jumps</span><br>
+<span id="fontw" data-p="width">The quick brown fox jumps</span><br>
+<div id="lhn" data-p="height">x</div>
+<div id="ellip" data-p="scrollWidth">a long piece of text that gets an ellipsis</div>
+<div id="textind" data-p="height">indented text that wraps onto a second line surely</div>
+<span id="letters" data-p="width">spaced</span>
+<svg id="svg_nosz" data-p="width,height" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
+<svg id="svg_css" data-p="width,height" viewBox="0 0 24 24"></svg>
+<div id="svg_inline_parent"><svg id="svg_em" data-p="width,height" viewBox="0 0 24 24"></svg></div>
+<div id="svg_h100_p"><svg id="svg_h100" data-p="width,height" viewBox="0 0 48 24"></svg></div>
+<svg id="svg_wonly" data-p="width,height" viewBox="0 0 100 50"></svg>
+<svg id="svg_attr" data-p="width,height" width="32" height="16"></svg>
+<div id="canvas_pct_p"><canvas id="canvas_pct" data-p="width,height"></canvas></div>
+<div id="canvas_attr_p"><canvas id="canvas_attr" data-p="width,height" width="1920" height="1080"></canvas></div>
+<div id="img_attr_p"><img id="img_attr" data-p="width,height" width="400" height="200"></div>
+<div id="img_maxw_p"><img id="img_maxw" data-p="width,height" width="400" height="200" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='200'%3E%3C/svg%3E"></div>
+<img id="objfit" data-p="width,height" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='200'%3E%3C/svg%3E">
+<div id="iframe_p"><iframe id="iframe_ar" data-p="width,height"></iframe></div>
+<div id="video_p"><video id="video" data-p="width,height"></video></div>
+<div id="bb" data-p="width"></div><div id="cb" data-p="width"></div>
+<div id="ovclip" data-p="scrollWidth"><div style="width:300px;height:5px"></div></div>
+<div id="ovauto" data-p="scrollWidth,clientHeight"><div style="width:300px;height:5px"></div></div>
+<table id="tblfix"><tr><td id="tblfix_a" data-p="width" style="width:50px">a</td><td>b</td><td>c</td></tr></table>
+<table id="tblauto" data-p="width"><tr><td>short</td><td id="tblauto_b" data-p="width">a longer cell content here</td></tr></table>
+<div id="multicol" data-p="height">a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n o p q r s t u v w x y z a b c d e f g h i j k l m n</div>
+<div id="ld" data-p="color"></div><div id="cmix" data-p="color"></div><div id="rel" data-p="color"></div><div id="oklch" data-p="color"></div><div id="hwb" data-p="color"></div><div id="curcolor" data-p="borderTopColor"></div>
+<div id="imp" data-p="width" style="width:50px"></div>
+<div id="nth"><div class="k"></div><div class="k" id="nth_b" data-p="width"></div><div class="k"></div></div>
+<div id="attr_i" data-v="abc" data-p="display"></div>
+<div id="cls_where" class="q" data-p="display"></div>
+<div id="hidden_attr" hidden data-p="display"></div>
+<div id="sticky_p"><div style="height:30px"></div><div id="sticky" data-p="top"></div><div style="height:300px"></div></div>
+<div id="abs_pct_p"><div id="abs_pct" data-p="width,height,left,top"></div></div>
+<div id="zero_flex_h"><div id="zero_flex_h_a" data-p="height,scrollHeight"><div></div></div></div>
+<div id="negm"><div id="negm_a" data-p="left,width"></div></div>
+<div id="pct_gap"><div></div><div id="pct_gap_b" data-p="left"></div></div>
+<details id="det" data-p="height"><summary>sum</summary><div style="height:100px"></div></details>
+<dialog id="dlg" data-p="display,width">dialog</dialog>
+<div id="pop" popover data-p="display">pop</div>
+</div>
+<script>
+window.report = function(){
+  var out = {};
+  var els = document.querySelectorAll('[data-p]');
+  for (var i=0;i<els.length;i++){
+    var el = els[i]; var cs = getComputedStyle(el); var r = el.getBoundingClientRect();
+    var props = el.getAttribute('data-p').split(',');
+    var v = {};
+    for (var j=0;j<props.length;j++){
+      var p = props[j];
+      if (p === 'left') v.left = Math.round(r.left - (el.parentElement.getBoundingClientRect().left));
+      else if (p === 'top') v.top = Math.round(r.top - (el.parentElement.getBoundingClientRect().top));
+      else if (p === 'width') v.width = Math.round(r.width*10)/10;
+      else if (p === 'height') v.height = Math.round(r.height*10)/10;
+      else if (p === 'scrollWidth' || p === 'scrollHeight' || p === 'clientHeight') v[p] = el[p];
+      else v[p] = cs[p];
+    }
+    out[el.id] = v;
+  }
+  out.__viewport = [innerWidth, innerHeight];
+  out.__docH = document.documentElement.scrollHeight;
+  return JSON.stringify(out);
+};
+</script>
+</body></html>

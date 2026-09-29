@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Inline replaced elements and the line box strut</title>
+<!-- window.report() -> heights of the blocks below. An inline image, inline-block, svg, canvas or video sits on the
+     baseline of a line box whose strut has a descender, so its block is 4px taller than the box (16px Arial):
+     a, b, c, d, g, h are 104 in Chromium, 100 in Sharko. e (line-height:0) and f (font-size:0) are 100 in both.
+     i (checkbox + label): 20 in Chromium, 26 in Sharko. -->
+<body style="margin:0;font:16px Arial">
+<div id="a"><img width="100" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3C/svg%3E"></div>
+<div id="b"><svg width="100" height="100"></svg></div>
+<div id="c"><span style="display:inline-block;width:100px;height:100px"></span></div>
+<div id="d"><a href="#"><img width="100" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3C/svg%3E"></a></div>
+<div id="e" style="line-height:0"><img width="100" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3C/svg%3E"></div>
+<div id="f" style="font-size:0"><img width="100" height="100" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3C/svg%3E"></div>
+<div id="g"><canvas width="100" height="100"></canvas></div>
+<div id="h"><video width="100" height="100"></video></div>
+<div id="i"><input type="checkbox"><label>x</label></div>
+<script>window.report = function () { var o = {}; document.querySelectorAll('body>div').forEach(function (d) { o[d.id] = Math.round(d.getBoundingClientRect().height * 10) / 10; }); return JSON.stringify(o); };
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+function __reproDone(issue, expected, actual) { window.__repro = { issue: issue, expected: expected, actual: actual, pass: JSON.stringify(expected) === JSON.stringify(actual) }; }
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report()); delete r.i;   // the checkbox line depends on the control metrics of the platform
+  __reproDone('layout-css/inline-strut', { a: 104, b: 104, c: 104, d: 104, e: 100, f: 100, g: 104, h: 104 }, r);
+}, 50); });
+</script>

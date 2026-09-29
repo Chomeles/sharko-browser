@@ -1,0 +1,10 @@
+{
+ "intl-locale-is-navigator-language": true,
+ "toLocaleString": true,
+ "toLocaleDateString": true,
+ "number": true,
+ "currency": true,
+ "relative": true,
+ "list": true,
+ "collator": true
+}

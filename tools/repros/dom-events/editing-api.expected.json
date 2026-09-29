@@ -1,0 +1,12 @@
+{
+ "isContentEditable": "true,true,false",
+ "queryCommandSupported": "111111011111",
+ "bold": "true|a<b>b</b>c <i>def</i>",
+ "insertText": "true|aXY<b>b</b>c <i>def</i>",
+ "delete": "true|aY<b>b</b>c <i>def</i>",
+ "insertHTML": "true|a<u>U</u><b>b</b>c <i>def</i>",
+ "undo": "true|aY<b>b</b>c <i>def</i>",
+ "events": "in:formatBold:null in:insertText:XY in:deleteContentBackward:null in::null in:historyUndo:null",
+ "designMode": true,
+ "plaintext-only": "plaintext-only,true"
+}

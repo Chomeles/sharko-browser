@@ -1,0 +1,21 @@
+{
+ "KeyboardEvent": "a|KeyA|65|65|0|true|true|true|false|0|",
+ "KeyboardEvent-members": "ppppppppffpp",
+ "InputEvent": "insertText|a|false|true|true||function|0",
+ "CompositionEvent": "ka|false|function",
+ "MouseEvent": "5|6|5|6|5|6|0|5|2|1|4|true|true|true|function",
+ "PointerEvent": "3|pen|2|3|0.5|0|1|0|true|function|0|function|1|2",
+ "PointerEvent-defaults": "0|true|1|1|0|false|false",
+ "WheelEvent": "1|2|3|1|2|2|1",
+ "FocusEvent": "true|false|false|",
+ "ClipboardEvent": "hi|true|text/plain|1",
+ "DragEvent": "none|none|function|0",
+ "TouchEvent": "function|function|false|0",
+ "UIEvent": "3|true||number",
+ "SubmitEvent": "null",
+ "BeforeUnload": "function|function|function|function|function|function|function|function|function|function|function",
+ "Event-static": "0,1,2,3",
+ "onhandlers": "1111111111111",
+ "dispatch-order": "focus,focusin,blur,focusout",
+ "composedPath": "INPUT,BODY,HTML,#document,window"
+}

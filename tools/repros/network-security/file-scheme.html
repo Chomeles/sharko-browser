@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>file: from a web page</title>
+<!-- A page served over http must not read or run local files: Chromium rejects fetch (TypeError), XHR (error event), and fires
+     error for script/link/img elements. Sharko today: fetch/XHR return the file, <script src=file:> executes it. Needs serve.py (/local-files). -->
+<script>
+function canon(v) { return JSON.stringify(v, function (k, x) { if (x && typeof x === 'object' && !Array.isArray(x)) { var o = {}; Object.keys(x).sort().forEach(function (y) { o[y] = x[y]; }); return o; } return x; }); }
+var R = {}, pend = [];
+function c(k, f) { pend.push(new Promise(function (res) { var t = setTimeout(function () { R[k] = 'timeout'; res(); }, 3000);
+  try { f(function (v) { clearTimeout(t); R[k] = v; res(); }); } catch (e) { clearTimeout(t); R[k] = 'threw ' + e.name; res(); } })); }
+addEventListener('load', function () {
+  fetch('/local-files').then(function (r) { return r.json(); }).then(function (F) {
+    c('fetchText', function (done) { fetch(F.txt).then(function (r) { return r.text(); }).then(function (t) { done('read:' + t.trim()); }, function (e) { done(e.name); }); });
+    c('xhrText', function (done) { var x = new XMLHttpRequest(); x.open('GET', F.txt); x.onload = function () { done('read:' + x.responseText.trim()); }; x.onerror = function () { done('error'); }; x.send(); });
+    c('scriptRuns', function (done) { var s = document.createElement('script'); s.src = F.js; s.onload = function () { done('load:' + window.__fileScript); }; s.onerror = function () { done('error'); }; document.head.appendChild(s); });
+    c('stylesheet', function (done) { var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = F.txt; l.onload = function () { done('load'); }; l.onerror = function () { done('error'); }; document.head.appendChild(l); });
+    c('image', function (done) { var i = new Image(); i.onload = function () { done('load'); }; i.onerror = function () { done('error'); }; i.src = F.txt; });
+    Promise.all(pend).then(function () {
+      var expected = { fetchText: 'TypeError', xhrText: 'error', scriptRuns: 'error', stylesheet: 'error', image: 'error' };
+      window.__repro = { issue: 'network-security/file-scheme-from-web', expected: expected, actual: R, pass: canon(expected) === canon(R) };
+    });
+  });
+});
+</script>

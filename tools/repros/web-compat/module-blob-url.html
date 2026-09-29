@@ -1,0 +1,15 @@
+<!doctype html><html><head><title>t</title></head><body><script>
+var out={};
+var blob=new Blob(['export const x = 42; export default "dflt";'],{type:'text/javascript'});
+var u=URL.createObjectURL(blob);
+import(u).then(m=>{out.dyn='OK '+m.x+' '+m.default}).catch(e=>{out.dyn='ERR '+e}).then(()=>{
+  var s=document.createElement('script'); s.type='module';
+  var b2=new Blob(['window.__modscript=1;'],{type:'text/javascript'});
+  s.src=URL.createObjectURL(b2);
+  s.onload=()=>{out.tag='loaded '+window.__modscript; document.title=JSON.stringify(out)};
+  s.onerror=()=>{out.tag='error'; document.title=JSON.stringify(out)};
+  document.head.appendChild(s);
+});
+var w=null;
+setTimeout(()=>{document.title=JSON.stringify(out)},1500);
+</script></body></html>

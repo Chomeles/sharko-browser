@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Performance timeline: paint, LCP, long tasks, server timing</title>
+<!-- Chromium: PerformanceObserver.supportedEntryTypes lists paint, largest-contentful-paint, layout-shift, longtask, event, first-input ...;
+     first-paint / first-contentful-paint exist after the first frame; resource entries carry serverTiming and transfer sizes.
+     Sharko: supportedEntryTypes is mark, measure, navigation, resource (nothing else is produced; web-vitals style libraries get no data). -->
+<script src="repro.js"></script>
+<p style="font-size:24px">Some text so that something gets painted.</p>
+<script>
+addEventListener('load', function () {
+  var want = ['event', 'first-input', 'largest-contentful-paint', 'layout-shift', 'longtask', 'mark', 'measure', 'navigation', 'paint', 'resource'];
+  c('supportedEntryTypes', function (done) { var s = PerformanceObserver.supportedEntryTypes || []; done(want.filter(function (t) { return s.indexOf(t) < 0; }).join() || 'all'); });
+  c('paintEntries', function (done) { setTimeout(function () { done(performance.getEntriesByType('paint').map(function (e) { return e.name; }).sort().join()); }, 300); });
+  c('lcpObserver', function (done) { try { new PerformanceObserver(function (l, o) { var e = l.getEntries().pop(); o.disconnect(); done(e.entryType + ':' + (e.size > 0) + ':' + (e.element && e.element.tagName)); }).observe({ type: 'largest-contentful-paint', buffered: true }); } catch (e) { done('threw ' + e.name); } });
+  c('resourceServerTiming', function (done) { fetch('/api/servertiming').then(function (r) { return r.text(); }).then(function () { var e = performance.getEntriesByType('resource').filter(function (x) { return /servertiming/.test(x.name); })[0]; done(e ? e.serverTiming.map(function (s) { return s.name + '=' + s.duration; }).join() + ':' + (e.transferSize > 0) + ':' + e.initiatorType : 'no entry'); }, function () { done('rejected'); }); });
+  c('longtaskObserver', function (done) { try { new PerformanceObserver(function (l, o) { o.disconnect(); done(l.getEntries()[0].entryType); }).observe({ entryTypes: ['longtask'] }); var t = performance.now(); while (performance.now() - t < 120); } catch (e) { done('threw ' + e.name); } });
+  finish('perf-timeline', { supportedEntryTypes: 'all', paintEntries: 'first-contentful-paint,first-paint', lcpObserver: 'largest-contentful-paint:true:P', resourceServerTiming: 'db=53.5:true:fetch', longtaskObserver: 'longtask' });
+});
+</script>

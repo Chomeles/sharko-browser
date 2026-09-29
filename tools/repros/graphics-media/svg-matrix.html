@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>svg matrix</title>
+<!-- Visual checklist of inline SVG features (each cell: what Chromium draws in data-expect).
+     Screenshot: target/profiling/browser --headless --screenshot=/tmp/svg.png --window-size=1000x560 file://$PWD/svg-matrix.html -->
+<style>
+  body { margin: 8px; font: 10px/1.2 Arial, sans-serif; background: #fff; }
+  .g { display: grid; grid-template-columns: repeat(6, 150px); gap: 8px; }
+  .c > i { display: block; font-style: normal; color: #444; height: 24px; overflow: hidden; }
+  svg { display: block; width: 150px; height: 84px; background: #f4f4f4; }
+  .t { font: 700 20px Arial; fill: #39f; }
+  .cc { color: #e33; }
+</style>
+<div class="g">
+  <div class="c"><svg viewBox="0 0 150 84"><defs><filter id="b"><feGaussianBlur stdDeviation="4"/></filter></defs><rect x="30" y="18" width="90" height="48" fill="#e33" filter="url(#b)"/></svg><i data-expect="blurred red box">feGaussianBlur</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><filter id="d" x="-20%" y="-20%" width="150%" height="150%"><feDropShadow dx="5" dy="5" stdDeviation="3" flood-opacity=".6"/></filter></defs><rect x="30" y="18" width="80" height="44" fill="#39f" filter="url(#d)"/></svg><i data-expect="box with drop shadow">feDropShadow</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><filter id="m"><feColorMatrix type="saturate" values="0"/></filter></defs><rect x="20" y="18" width="110" height="48" fill="url(#lg)" filter="url(#m)"/><defs><linearGradient id="lg"><stop offset="0" stop-color="#e33"/><stop offset="1" stop-color="#3e3"/></linearGradient></defs></svg><i data-expect="grey gradient">feColorMatrix</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><mask id="k"><rect width="150" height="84" fill="#000"/><circle cx="75" cy="42" r="30" fill="#fff"/></mask></defs><rect width="150" height="84" fill="#e33" mask="url(#k)"/></svg><i data-expect="red disc">mask</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><clipPath id="cp"><polygon points="75,8 140,76 10,76"/></clipPath></defs><rect width="150" height="84" fill="#3c3" clip-path="url(#cp)"/></svg><i data-expect="green triangle">clipPath</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><pattern id="pt" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="6" cy="6" r="4" fill="#e33"/></pattern></defs><rect x="15" y="10" width="120" height="64" fill="url(#pt)" stroke="#333"/></svg><i data-expect="dotted pattern in a frame">pattern</i></div>
+
+  <div class="c"><svg viewBox="0 0 150 84"><defs><marker id="mk" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><circle cx="4" cy="4" r="3" fill="#e33"/></marker></defs><polyline points="15,60 60,20 100,55 135,15" fill="none" stroke="#333" stroke-width="2" marker-start="url(#mk)" marker-mid="url(#mk)" marker-end="url(#mk)"/></svg><i data-expect="polyline with red dots at vertices">marker</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><path d="M15 20H135" stroke="#333" stroke-width="6" stroke-dasharray="14 8" stroke-linecap="round" fill="none"/><path d="M15 50 L75 70 L135 50" stroke="#39f" stroke-width="10" stroke-linejoin="round" fill="none"/></svg><i data-expect="round-capped dashes, rounded join">dash/linecap/linejoin</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><text class="t" x="10" y="36">Hello</text><text x="10" y="64" font-size="14" font-family="Arial"><tspan fill="#e33">red </tspan><tspan fill="#3c3" dy="0" font-weight="700">green</tspan></text></svg><i data-expect="blue Hello, red+green tspans">text / tspan</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><path id="tp" d="M10 60 Q75 -10 140 60"/></defs><text font-size="16" font-family="Arial" fill="#333"><textPath href="#tp">Text on a curve</textPath></text></svg><i data-expect="text following an arc">textPath</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><text x="75" y="48" text-anchor="middle" font-size="18" font-family="Arial" fill="#333" stroke="#e33" stroke-width="1" paint-order="stroke">Anchor</text><line x1="75" y1="0" x2="75" y2="84" stroke="#39f" stroke-width=".5"/></svg><i data-expect="centred on the blue line, red stroke behind">text-anchor, paint-order</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><image href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%23e33'/%3E%3C/svg%3E" x="55" y="22" width="40" height="40"/></svg><i data-expect="red disc via &lt;image&gt;">image element</i></div>
+
+  <div class="c"><svg viewBox="0 0 150 84"><foreignObject x="10" y="10" width="130" height="60"><div xmlns="http://www.w3.org/1999/xhtml" style="font:14px Arial;background:#fc0;padding:4px">HTML in SVG</div></foreignObject></svg><i data-expect="yellow box with HTML text">foreignObject</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><symbol id="sy" viewBox="0 0 10 10"><rect width="10" height="10" rx="2" fill="currentColor"/></symbol><g class="cc"><use href="#sy" x="10" y="10" width="40" height="40"/></g><use href="#sy" x="70" y="30" width="60" height="40" style="color:#39f"/></svg><i data-expect="red square + blue rounded rect (currentColor)">use symbol + currentColor</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><defs><radialGradient id="rg" cx=".5" cy=".5" r=".5" spreadMethod="reflect"><stop offset="0" stop-color="#fff"/><stop offset=".5" stop-color="#e33"/></radialGradient></defs><rect x="15" y="8" width="120" height="68" fill="url(#rg)"/></svg><i data-expect="reflected radial rings">gradient spreadMethod</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><style>.q{fill:#e33}.q:hover{fill:#3c3}@media (min-width:100px){.q2{fill:#39f}}</style><circle class="q" cx="45" cy="42" r="25"/><circle class="q2" cx="105" cy="42" r="25"/></svg><i data-expect="red disc, blue disc (media rule applies)">&lt;style&gt; in svg</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><g opacity=".5"><rect x="20" y="15" width="70" height="50" fill="#e33"/><rect x="50" y="25" width="70" height="50" fill="#33e"/></g></svg><i data-expect="group opacity (overlap not double-blended)">group opacity</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><rect x="20" y="15" width="70" height="50" fill="#fc0"/><rect x="50" y="25" width="70" height="50" fill="#39f" style="mix-blend-mode:multiply"/></svg><i data-expect="overlap is green">mix-blend-mode in svg</i></div>
+  <div class="c"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 50'%3E%3Crect width='100' height='50' fill='%23e33'/%3E%3Ctext x='50' y='32' font-size='20' text-anchor='middle' fill='white' font-family='Arial'%3EIMG%3C/text%3E%3C/svg%3E" style="display:block;width:150px;height:84px;object-fit:contain;background:#f4f4f4"><i data-expect="red 2:1 banner with white IMG, centred">svg in img + object-fit</i></div>
+  <div class="c"><svg viewBox="0 0 150 84"><rect x="20" y="15" width="60" height="50" fill="#39f" stroke="#333" stroke-width="10" vector-effect="non-scaling-stroke" transform="scale(1.5 1)"/></svg><i data-expect="uniform 10px stroke despite scale">vector-effect</i></div>
+  <div class="c"><svg viewBox="0 0 150 84" width="150"><g id="anim"><rect width="150" height="84" fill="#eee"/><circle r="10" fill="#e33"><animate attributeName="cx" from="20" to="130" dur="1s" fill="freeze" begin="0s"/><set attributeName="cy" to="42" begin="0s"/></circle></g></svg><i data-expect="SMIL: first frame at x=20 (Chromium at t=0)">SMIL animate</i></div>
+</div>

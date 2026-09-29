@@ -1,0 +1,65 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>shadow DOM flattening repro</title>
+<style>
+  /* Light-DOM rules a page would write for its own markup */
+  x-card > p { color: rgb(0, 128, 0); }         /* child combinator across the (real) light tree */
+  x-card p { font-weight: 700; }
+  .icon::before { content: "\2605"; display: inline-block; width: 20px; height: 20px; }
+</style>
+<!-- 1. declarative shadow root, as otto.de / stern.de components ship it -->
+<x-card id="c1">
+  <template shadowrootmode="open">
+    <style>:host { display: block; border: 1px solid #999; padding: 4px; } .wrap { background: #eee; }</style>
+    <div class="wrap"><slot></slot></div>
+  </template>
+  <!--[--><p id="p1">slotted <i class="icon"></i></p><!--]-->
+</x-card>
+<!-- 2. imperative attachShadow -->
+<x-card id="c2"><p id="p2">light</p></x-card>
+<!-- 3. named slots that appear in the shadow tree only after a later render
+        (otto.de's <ft9-benefit-countdown-v1> picks one of its <div slot=...> children) -->
+<x-card id="c3"><div slot="expired">expired</div><div slot="tomorrow">Gültig bis: morgen</div></x-card>
+<!-- 4. shadow content re-rendered (innerHTML replaced) after the light children were slotted -->
+<x-card id="c4"><div slot="a">A</div><div slot="b">B</div></x-card>
+<script>
+const c2 = document.getElementById('c2');
+c2.attachShadow({ mode: 'open' }).innerHTML = '<div class="wrap"><slot></slot></div>';
+const c3 = document.getElementById('c3');
+const sr3 = c3.attachShadow({ mode: 'open' });
+sr3.innerHTML = '<span>loading</span>';           // first render: no slots yet
+const c4 = document.getElementById('c4');
+const sr4 = c4.attachShadow({ mode: 'open' });
+sr4.innerHTML = '<slot name="a"></slot>';
+setTimeout(() => {
+  sr3.innerHTML = '<slot name="tomorrow"></slot>';  // later render chooses a slot
+  sr4.innerHTML = '<slot name="b"></slot>';         // re-render switches the slot
+}, 100);
+
+// What a hydration walker (Svelte 5 uses comment anchors, React/Lit use child indices) sees:
+const walk = (n) => [...n.childNodes].map((c) => c.nodeType === 8 ? '#c' + c.data : c.nodeType === 3 ? (c.data.trim() ? '#t' : '#ws') : c.tagName.toLowerCase()).join(' ');
+const c1 = document.getElementById('c1');
+const p1 = document.getElementById('p1');
+window.__out = () => ({
+  c1_childNodes: walk(c1),
+  c1_children: [...c1.children].map((e) => e.tagName.toLowerCase()).join(' '),
+  c2_childNodes: walk(c2),
+  p1_parent: p1.parentElement.tagName.toLowerCase(),
+  p1_assignedSlot: p1.assignedSlot ? 'slot' : null,
+  slots_in_document: document.querySelectorAll('slot').length,
+  matches_child_combinator: p1.matches('x-card > p'),
+  p1_color: getComputedStyle(p1).color,
+  p1_weight: getComputedStyle(p1).fontWeight,
+  p1_rendered_height: Math.round(p1.getBoundingClientRect().height),
+  wrap_in_light_query: document.querySelectorAll('.wrap').length,
+  icon_before_width: getComputedStyle(document.querySelector('.icon'), '::before').width,
+  comment_anchors_in_c1: [...c1.childNodes].filter((n) => n.nodeType === 8).length,
+  sr_childNodes: c1.shadowRoot ? walk(c1.shadowRoot) : 'no-sr',
+  c3_text_rendered: c3.innerText.trim(),
+  c3_tomorrow_in_document: document.contains(c3.querySelector('[slot=tomorrow]')) || (document.body.innerText.includes('Gültig bis')),
+  c4_text_rendered: c4.innerText.trim(),
+});
+const __collect = window.__out;
+window.__out = () => JSON.stringify(__collect(), null, 1);
+setTimeout(() => { window.__done = true; }, 300);
+</script>

@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>form-associated custom elements</title>
+<!-- WPT: custom-elements/form-associated/* (11 of 114 subtests pass). Expected values:
+     face-basic.expected.json (Chromium). -->
+<body>
+<form id="f"><fieldset id="fs"><my-c id="c" name="nm"></my-c></fieldset></form>
+<label id="lb" for="c">Label</label>
+<script>
+const out = {};
+const log = [];
+class C extends HTMLElement {
+  static formAssociated = true;
+  static observedAttributes = ['disabled'];
+  constructor() { super(); this.i = this.attachInternals(); }
+  formAssociatedCallback(f) { log.push('assoc:' + (f ? f.id : null)); }
+  formDisabledCallback(d) { log.push('disabled:' + d); }
+  formResetCallback() { log.push('reset'); }
+  formStateRestoreCallback(s, m) { log.push('restore:' + s + ':' + m); }
+}
+customElements.define('my-c', C);
+const c = document.getElementById('c'), f = document.getElementById('f'), fs = document.getElementById('fs');
+const fd = () => JSON.stringify([...new FormData(f).entries()]);
+out.upgraded = c instanceof C;
+out.formOwner = c.i.form === f;
+out.inElements = Array.prototype.includes.call(f.elements, c);
+out.length = f.length;
+out.namedItem = f.elements.namedItem('nm') === c;
+c.i.setFormValue('v1'); out.fd_string = fd();
+const data = new FormData(); data.append('a', '1'); data.append('b', '2');
+c.i.setFormValue(data); out.fd_formdata = fd();
+c.i.setFormValue('v3', 'state3'); out.fd_state = fd();
+c.i.setFormValue(null); out.fd_null = fd();
+fs.disabled = true; out.disabledByFieldset = [c.matches(':disabled'), fd()];
+fs.disabled = false;
+c.setAttribute('disabled', ''); out.disabledAttr = c.matches(':disabled'); c.removeAttribute('disabled');
+c.i.setValidity({ valueMissing: true }, 'need a value');
+out.validity = [c.i.willValidate, c.i.validity.valueMissing, c.i.validationMessage, f.checkValidity(), c.matches(':invalid')];
+c.i.setValidity({}); out.validAgain = [c.i.validity.valid, f.checkValidity()];
+out.labels = c.i.labels.length;
+f.reset();
+out.reset = true;
+out.noForm = (() => { const x = document.createElement('my-c'); return x.i === undefined ? 'no-internals-prop' : String(x.i.form); })();
+out.log = log.join(',');
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

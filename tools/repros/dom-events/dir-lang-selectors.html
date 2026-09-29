@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>:dir() and :lang()</title>
+<!-- WPT html/dom/elements/global-attributes/dir-*: 100 subtests fail with "':dir(ltr)' is not a valid selector"; :lang() never matches in style (stylo.rs Lang => false). -->
+<body>
+<div id="a" lang="en-US"><p id="p1">x</p><p id="p2" lang="de">y</p></div>
+<div id="r" dir="rtl"><span id="s1">a</span><bdi id="b1">שלום</bdi><div id="d2" dir="ltr"><i id="i1">z</i></div></div>
+<input id="in1" dir="auto" value="ש">
+<style>
+#a:lang(en) { color: rgb(1, 2, 3); }
+#p2:lang(de) { color: rgb(4, 5, 6); }
+#s1:dir(rtl) { color: rgb(7, 8, 9); }
+</style>
+<script>
+const out = {};
+const q = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name; } };
+const $ = (id) => document.getElementById(id);
+q('matches-dir-ltr-body', () => document.body.matches(':dir(ltr)'));
+q('matches-dir-rtl-s1', () => $('s1').matches(':dir(rtl)'));
+q('matches-dir-rtl-i1', () => $('i1').matches(':dir(rtl)'));
+q('matches-dir-ltr-i1', () => $('i1').matches(':dir(ltr)'));
+q('bdi-dir-rtl', () => $('b1').matches(':dir(rtl)'));
+q('input-auto-rtl', () => $('in1').matches(':dir(rtl)'));
+q('lang-en-p1', () => $('p1').matches(':lang(en)'));
+q('lang-de-p2', () => $('p2').matches(':lang(de)'));
+q('css-lang-color', () => getComputedStyle($('a')).color);
+q('css-lang-de-color', () => getComputedStyle($('p2')).color);
+q('css-dir-color', () => getComputedStyle($('s1')).color);
+q('el-dir-prop', () => $('r').dir + '|' + $('b1').dir + '|' + $('in1').dir);
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CORS: response check, preflight, credentials, Sec-Fetch-Mode</title>
+<!-- Cross-origin server: same code on the next port (serve.js). Chromium: a cors-mode response without a matching Access-Control-Allow-Origin
+     rejects with TypeError, a non-simple request is preceded by an OPTIONS preflight (and never sent if the preflight fails), credentials 'include'
+     needs an exact ACAO plus ACAC. Sharko: the JS layer marks the response 'cors' without checking anything, and the network stack sends no preflight. -->
+<script src="repro.js"></script>
+<script>
+var X = 'http://127.0.0.1:18932', T = 0;
+function f(k, path, init, pick) { c(k, function (done) { fetch(X + path + '&t=' + k, init).then(function (r) { return pick ? pick(r) : r.json().then(function (j) { return 'ok:' + j.method; }); }, function (e) { done(e.name); }).then(function (v) { if (v !== undefined) done(v); }); }); }
+function x(k, path, method, headers) { c(k, function (done) { var q = new XMLHttpRequest(); q.open(method || 'GET', X + path + '&t=' + k); for (var h in headers || {}) q.setRequestHeader(h, headers[h]); q.onload = function () { done('load:' + q.status); }; q.onerror = function () { done('error:' + q.status); }; q.send(); }); }
+addEventListener('load', function () {
+  fetch(X + '/api/log?clear=1').then(function () {
+    f('fetchNoAcao', '/api/cors?mode=none');
+    f('fetchStar', '/api/cors?mode=star');
+    f('fetchReflect', '/api/cors?mode=reflect');
+    f('credsIncludeWithStar', '/api/cors?mode=star', { credentials: 'include' });
+    f('credsIncludeWithReflectAndAcac', '/api/cors?mode=creds', { credentials: 'include' });
+    f('credsIncludeWithReflectNoAcac', '/api/cors?mode=reflect', { credentials: 'include' });
+    f('noCorsIsOpaque', '/api/cors?mode=none', { mode: 'no-cors' }, function (r) { return r.type + ':' + r.status; });
+    f('customHeaderPreflighted', '/api/cors?mode=preflight', { headers: { 'X-Custom': 'v' } }, function (r) { return r.json().then(function (j) { return 'ok:' + j.custom; }); });
+    f('customHeaderPreflightRefused', '/api/cors?mode=star', { headers: { 'X-Custom': 'v' } });
+    f('putPreflighted', '/api/cors?mode=preflight', { method: 'PUT', body: 'x' });
+    f('jsonPostPreflighted', '/api/cors?mode=preflight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    f('formPostSimple', '/api/cors?mode=star', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'x' });
+    f('exposedHeader', '/api/cors?mode=preflight&expose=1', {}, function (r) { return r.headers.get('x-secret'); });
+    f('unexposedHeader', '/api/cors?mode=reflect', {}, function (r) { return String(r.headers.get('x-secret')); });
+    x('xhrNoAcao', '/api/cors?mode=none');
+    x('xhrStar', '/api/cors?mode=star');
+    x('xhrCustomHeaderPreflighted', '/api/cors?mode=preflight', 'GET', { 'X-Custom': 'v' });
+    x('xhrCustomHeaderRefused', '/api/cors?mode=star', 'GET', { 'X-Custom': 'v' });
+    c('serverLog', function (done) { setTimeout(function () { fetch(X + '/api/log').then(function (r) { return r.json(); }).then(function (log) {
+      var by = function (k) { return log.filter(function (e) { return e.url.indexOf('t=' + k) >= 0; }); };
+      var seq = function (k) { return by(k).map(function (e) { return e.method; }).join('+') || 'none'; };
+      done({
+        methods: { fetchNoAcao: seq('fetchNoAcao'), customHeaderPreflighted: seq('customHeaderPreflighted'), customHeaderPreflightRefused: seq('customHeaderPreflightRefused'), putPreflighted: seq('putPreflighted'),
+                   jsonPostPreflighted: seq('jsonPostPreflighted'), formPostSimple: seq('formPostSimple'), xhrCustomHeaderRefused: seq('xhrCustomHeaderRefused') },
+        preflightAsks: by('putPreflighted').filter(function (e) { return e.method === 'OPTIONS'; }).map(function (e) { return e.acrm; }).join(),
+        originOnSimpleGet: by('fetchNoAcao')[0] && by('fetchNoAcao')[0].origin,
+        secFetchModeGet: by('fetchNoAcao')[0] && by('fetchNoAcao')[0].secFetchMode,
+        secFetchModeNoCors: by('noCorsIsOpaque')[0] && by('noCorsIsOpaque')[0].secFetchMode
+      });
+    }); }, 800); }, 6000);
+    finish('cors', {
+      fetchNoAcao: 'TypeError', fetchStar: 'ok:GET', fetchReflect: 'ok:GET', credsIncludeWithStar: 'TypeError', credsIncludeWithReflectAndAcac: 'ok:GET', credsIncludeWithReflectNoAcac: 'TypeError',
+      noCorsIsOpaque: 'opaque:0', customHeaderPreflighted: 'ok:v', customHeaderPreflightRefused: 'TypeError', putPreflighted: 'ok:PUT', jsonPostPreflighted: 'ok:POST', formPostSimple: 'ok:POST',
+      exposedHeader: 'yes', unexposedHeader: 'null', xhrNoAcao: 'error:0', xhrStar: 'load:200', xhrCustomHeaderPreflighted: 'load:200', xhrCustomHeaderRefused: 'error:0',
+      serverLog: {
+        methods: { fetchNoAcao: 'GET', customHeaderPreflighted: 'OPTIONS+GET', customHeaderPreflightRefused: 'OPTIONS', putPreflighted: 'OPTIONS+PUT', jsonPostPreflighted: 'OPTIONS+POST', formPostSimple: 'POST', xhrCustomHeaderRefused: 'OPTIONS' },
+        preflightAsks: 'PUT', originOnSimpleGet: 'http://127.0.0.1:18931', secFetchModeGet: 'cors', secFetchModeNoCors: 'no-cors'
+      }
+    });
+  });
+});
+</script>

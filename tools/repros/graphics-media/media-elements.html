@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>media elements</title>
+<!-- Backlog items 1 and 2. Two contracts in one page. HONEST (must hold as soon as item 1 lands, with or without a decoder): an unplayable source ends in
+     an error event, MediaError code 4 and a rejected play(). PLAYBACK (item 2): MP4/H.264, WebM/VP8 and MP3 play, time advances, videoWidth is set.
+     Sharko (Sep 29): canPlayType is '' for everything, play() resolves at once, paused stays true, no event ever fires. -->
+<body>
+<video id="bad" muted></video>
+<video id="mp4" muted playsinline></video>
+<video id="webm" muted playsinline></video>
+<audio id="mp3"></audio>
+<script>
+const out = {}, $ = (id) => document.getElementById(id);
+const wait = (t, ev, ms = 4000) => new Promise((res) => { const to = setTimeout(() => res(false), ms); t.addEventListener(ev, () => { clearTimeout(to); res(true); }, { once: true }); });
+window.report = () => JSON.stringify(out);
+(async () => {
+  const bad = $('bad');
+  const errEv = wait(bad, 'error');
+  bad.src = 'media/does-not-exist.mp4';
+  let rej = 'resolved';
+  try { await bad.play(); } catch (e) { rej = e.name; }
+  out.badPlayRejects = rej;                                                  // NotSupportedError
+  out.badErrorEvent = await errEv;                                           // true
+  out.badErrorCode = bad.error && bad.error.code;                            // 4 (MEDIA_ERR_SRC_NOT_SUPPORTED)
+  out.badNetworkState = bad.networkState;                                    // 3 (NETWORK_NO_SOURCE)
+  out.canPlay = ['video/mp4; codecs="avc1.42E01E"', 'video/webm; codecs="vp8"', 'audio/mpeg', 'video/x-nonsense'].map((t) => bad.canPlayType(t)).join('|'); // probably|probably|probably| (empty last)
+  for (const [id, src] of [['mp4', 'media/white.mp4'], ['webm', 'media/white.webm'], ['mp3', 'media/sound_5.mp3']]) {
+    const m = $(id), meta = wait(m, 'loadedmetadata');
+    m.src = src;
+    out[id + '.metadata'] = await meta;                                      // true
+    out[id + '.duration>0'] = m.duration > 0;                                // true
+    if (id !== 'mp3') out[id + '.size>0'] = m.videoWidth > 0 && m.videoHeight > 0;   // true
+    let ok = true; try { await m.play(); } catch (e) { ok = e.name; }
+    out[id + '.play'] = ok;                                                  // true
+    await new Promise((r) => setTimeout(r, 600));
+    out[id + '.advanced'] = m.currentTime > 0.2 && !m.paused;                // true (mp3/webm/mp4 are longer than 1 s)
+    m.pause();
+  }
+  const want = { badPlayRejects: 'NotSupportedError', badErrorEvent: true, badErrorCode: 4, badNetworkState: 3 };
+  const honest = Object.keys(want).filter((k) => out[k] !== want[k]);
+  const play = Object.keys(out).filter((k) => /\.(metadata|duration>0|size>0|play|advanced)$/.test(k) && out[k] !== true);
+  window.__repro = { issue: 'media-elements', expected: 'honest failure + playback of mp4, webm, mp3', actual: out, pass: honest.length === 0 && play.length === 0, failing: honest.concat(play) };
+})();
+</script>

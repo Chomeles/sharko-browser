@@ -1,0 +1,149 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Web API matrix</title>
+<!-- Exploration matrix, not a pass/fail page: window.report() returns one JSON object of feature and behaviour probes
+     (async ones finish within ~2 s). Compare with Chromium:
+       node tools/repros/layout-css/compare.js http://127.0.0.1:18931/api-matrix.html 'window.report()' --settle=4000
+     Every line "Sharko X  Chromium Y" is a gap. Serve it (node tools/repros/web-apis/serve.js) and open http://127.0.0.1:18931/api-matrix.html: over file:// Chromium gives an opaque origin. -->
+<script>
+var R = {}, pend = [];
+addEventListener('load', function () {
+function t(k, f) { try { var v = f(); R[k] = v === undefined ? 'undefined' : v; } catch (e) { R[k] = 'threw ' + (e && e.name); } }
+function a(k, f) { pend.push(new Promise(function (res) {
+  var timer = setTimeout(function () { R[k] = 'timeout'; res(); }, 2000);
+  try { Promise.resolve(f()).then(function (v) { clearTimeout(timer); R[k] = v === undefined ? 'undefined' : v; res(); }, function (e) { clearTimeout(timer); R[k] = 'rejected ' + (e && e.name); res(); }); }
+  catch (e) { clearTimeout(timer); R[k] = 'threw ' + (e && e.name); res(); }
+})); }
+var ty = function (x) { return typeof x; };
+// ---- interfaces that scripts feature-detect ----
+['EventSource','SharedWorker','ServiceWorker','ServiceWorkerContainer','CacheStorage','Cache','CookieStore','Navigation','NavigateEvent','URLPattern',
+ 'WritableStream','WritableStreamDefaultWriter','WritableStreamDefaultController','TransformStream','TransformStreamDefaultController','ByteLengthQueuingStrategy','CountQueuingStrategy',
+ 'ReadableStreamBYOBReader','ReadableByteStreamController','CompressionStream','DecompressionStream','TextDecoderStream','Scheduler','TaskController','TaskSignal',
+ 'PerformanceObserver','PerformanceEventTiming','PerformanceLongTaskTiming','LargestContentfulPaint','LayoutShift','PerformancePaintTiming','PerformanceServerTiming',
+ 'ReportingObserver','IntersectionObserver','ResizeObserver','MutationObserver','BroadcastChannel','MessageChannel','Notification','PermissionStatus','Permissions','Clipboard','ClipboardItem',
+ 'LockManager','StorageManager','FileSystemDirectoryHandle','OffscreenCanvas','ImageBitmap','createImageBitmap','VideoDecoder','AudioDecoder','ImageDecoder','AudioContext','OfflineAudioContext',
+ 'MediaSource','MediaRecorder','MediaStream','RTCPeerConnection','WebSocketStream','WebTransport','CredentialsContainer','PublicKeyCredential','PasswordCredential','FederatedCredential',
+ 'PushManager','PaymentRequest','TrustedTypePolicyFactory','Sanitizer','WebAssembly','SharedArrayBuffer','Atomics','FinalizationRegistry','WeakRef','structuredClone','reportError',
+ 'requestIdleCallback','CloseWatcher','ViewTransition','fetchLater','Highlight','EventCounts','DOMError','PerformanceServerTiming','XSLTProcessor','Intl'].forEach(function (n) { t('has:' + n, function () { return n in self; }); });
+['serviceWorker','credentials','mediaDevices','storage','locks','permissions','clipboard','connection','userAgentData','wakeLock','share','canShare','sendBeacon','vibrate','getBattery','gpu','pdfViewerEnabled','webdriver','onLine','cookieEnabled','hardwareConcurrency','deviceMemory','maxTouchPoints','language','languages','plugins','mimeTypes'].forEach(function (n) { t('navigator.' + n, function () { var v = navigator[n]; return v === undefined ? 'undefined' : typeof v === 'object' ? (v === null ? 'null' : 'object') : typeof v === 'function' ? 'function' : v; }); });
+['cookieStore','caches','navigation','scheduler','trustedTypes','launchQueue','speechSynthesis','crossOriginIsolated','isSecureContext','originAgentCluster','indexedDB','webkitRequestFileSystem','showOpenFilePicker','getScreenDetails','queryLocalFonts'].forEach(function (n) { t('window.' + n, function () { var v = self[n]; return v === undefined ? 'undefined' : typeof v === 'object' ? (v === null ? 'null' : 'object') : typeof v === 'function' ? 'function' : v; }); });
+// ---- streams ----
+t('streams.methods', function () { var p = ReadableStream.prototype; return ['getReader','pipeTo','pipeThrough','tee','cancel','values'].filter(function (m) { return typeof p[m] !== 'function'; }).join(',') || 'all'; });
+t('streams.static', function () { return typeof ReadableStream.from; });
+t('streams.asyncIter', function () { return typeof ReadableStream.prototype[Symbol.asyncIterator]; });
+t('streams.byob', function () { return new ReadableStream({ type: 'bytes', start: function (c) { c.close(); } }).getReader({ mode: 'byob' }).constructor.name; });
+t('streams.writable', function () { return typeof new WritableStream().getWriter; });
+t('streams.transform', function () { return typeof new TransformStream().readable; });
+t('streams.lockedAfterReader', function () { var s = new ReadableStream(); s.getReader(); return s.locked; });
+a('streams.pipeThrough', function () { var out = []; var rs = new ReadableStream({ start: function (c) { c.enqueue('a'); c.enqueue('b'); c.close(); } }); return rs.pipeThrough(new TransformStream({ transform: function (ch, c) { c.enqueue(ch.toUpperCase()); } })).getReader().read().then(function (r) { return r.value; }); });
+a('streams.pipeTo', function () { var got = []; var ws = new WritableStream({ write: function (c) { got.push(c); } }); return new ReadableStream({ start: function (c) { c.enqueue(1); c.enqueue(2); c.close(); } }).pipeTo(ws).then(function () { return got.join(','); }); });
+a('streams.tee', function () { var b = new ReadableStream({ start: function (c) { c.enqueue('x'); c.close(); } }).tee(); return Promise.all([b[0].getReader().read(), b[1].getReader().read()]).then(function (r) { return r[0].value + r[1].value; }); });
+a('streams.cs.gzip', function () { var cs = new CompressionStream('gzip'); var w = cs.writable.getWriter(); w.write(new TextEncoder().encode('hello hello hello')); w.close(); return new Response(cs.readable).arrayBuffer().then(function (b) { return new Uint8Array(b)[0]; }); });
+a('streams.responseBody', function () { return new Response('abc').body.getReader().read().then(function (r) { return r.value.length; }); });
+a('streams.textDecoderStream', function () { var s = new ReadableStream({ start: function (c) { c.enqueue(new Uint8Array([0xe2, 0x82])); c.enqueue(new Uint8Array([0xac])); c.close(); } }).pipeThrough(new TextDecoderStream()); return new Response(s).text(); });
+// ---- fetch / xhr / body ----
+a('fetch.data', function () { return fetch('data:text/plain,hi').then(function (r) { return r.text(); }); });
+a('fetch.blob', function () { return fetch(URL.createObjectURL(new Blob(['b1']))).then(function (r) { return r.text(); }); });
+a('fetch.file', function () { return fetch(location.href).then(function (r) { return r.type + ':' + r.status; }); });
+a('fetch.abort', function () { var c = new AbortController(); var p = fetch('data:text/plain,x', { signal: c.signal }); c.abort(); return p.then(function () { return 'resolved'; }, function (e) { return e.name; }); });
+a('fetch.timeoutSignal', function () { return typeof AbortSignal.timeout + typeof AbortSignal.any; });
+a('fetch.requestReuse', function () { var r = new Request('data:,x', { method: 'POST', body: 'x' }); return fetch(r).then(function () { try { new Request(r); return 'no throw'; } catch (e) { return e.name; } }); });
+a('fetch.requestGetReuse', function () { var r = new Request('data:,x'); return fetch(r).then(function () { try { new Request(r); return 'ok'; } catch (e) { return e.name; } }); });
+t('response.static', function () { return [typeof Response.error, typeof Response.redirect, typeof Response.json].join(','); });
+a('response.formData', function () { return new Response('a=1&b=2', { headers: { 'content-type': 'application/x-www-form-urlencoded' } }).formData().then(function (f) { return f.get('b'); }); });
+a('response.bytes', function () { return typeof new Response('x').bytes; });
+a('xhr.blobUrl', function () { return new Promise(function (res) { var x = new XMLHttpRequest(); x.open('GET', URL.createObjectURL(new Blob(['xb']))); x.onload = function () { res(x.responseText); }; x.onerror = function () { res('error'); }; x.send(); }); });
+a('xhr.arraybuffer', function () { return new Promise(function (res) { var x = new XMLHttpRequest(); x.open('GET', 'data:application/octet-stream;base64,AQID'); x.responseType = 'arraybuffer'; x.onload = function () { res(x.response.byteLength); }; x.onerror = function () { res('error'); }; x.send(); }); });
+// ---- structured clone ----
+t('clone.map', function () { var m = structuredClone(new Map([[1, { a: new Date(0) }]])); return m.get(1).a instanceof Date; });
+t('clone.error', function () { var e = structuredClone(new RangeError('x')); return e.name + ':' + e.message; });
+t('clone.nestedBlob', function () { try { var o = structuredClone({ b: new Blob(['x']) }); return o.b instanceof Blob; } catch (e) { return 'threw ' + e.name; } });
+t('clone.nestedFile', function () { try { var o = structuredClone([new File(['x'], 'f.txt')]); return o[0] instanceof File; } catch (e) { return 'threw ' + e.name; } });
+t('clone.transfer', function () { var b = new ArrayBuffer(8); structuredClone(b, { transfer: [b] }); return b.byteLength; });
+t('clone.domrect', function () { try { return structuredClone(new DOMRect(1, 2, 3, 4)).width; } catch (e) { return 'threw ' + e.name; } });
+t('clone.function', function () { try { structuredClone(function () {}); return 'ok'; } catch (e) { return e.name; } });
+// ---- URL / encoding ----
+t('url.canParse', function () { return typeof URL.canParse + typeof URL.parse; });
+t('url.searchParamsSize', function () { return new URLSearchParams('a=1&a=2').size; });
+t('url.idna', function () { return new URL('http://münchen.de/').hostname; });
+t('url.ipv4', function () { return new URL('http://0x7f.1/').hostname; });
+t('encoding.labels', function () { return ['windows-1252', 'shift_jis', 'gbk', 'euc-kr', 'iso-8859-15', 'utf-16le', 'big5', 'koi8-r'].map(function (l) { try { return new TextDecoder(l).encoding; } catch (e) { return 'X'; } }).join(','); });
+t('encoding.decode1252', function () { return new TextDecoder('windows-1252').decode(new Uint8Array([0x80, 0xe4])); });
+t('encoding.fatal', function () { try { new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array([0xff])); return 'no throw'; } catch (e) { return e.name; } });
+t('encoding.encodeInto', function () { var u = new Uint8Array(4); var r = new TextEncoder().encodeInto('a€b', u); return r.read + ',' + r.written; });
+// ---- Intl / locale ----
+t('intl.tz', function () { return Intl.DateTimeFormat().resolvedOptions().timeZone; });
+t('intl.locale', function () { return Intl.DateTimeFormat().resolvedOptions().locale; });
+t('intl.navLang', function () { return navigator.language + '|' + navigator.languages.join(','); });
+t('intl.dateDefault', function () { return new Date(0).toLocaleString(); });
+t('intl.de', function () { return new Intl.NumberFormat('de-DE').format(1234.5) + '|' + new Date(0).toLocaleDateString('de-DE', { timeZone: 'UTC' }); });
+t('intl.utc', function () { return new Intl.DateTimeFormat('en', { timeZone: 'UTC' }).format(0); });
+t('intl.zones', function () { return Intl.supportedValuesOf('timeZone').length > 300; });
+t('intl.classes', function () { return ['Segmenter', 'PluralRules', 'RelativeTimeFormat', 'ListFormat', 'DisplayNames', 'Locale', 'DurationFormat', 'Collator'].map(function (c) { return typeof Intl[c]; }).join(','); });
+t('intl.offset', function () { return new Date(0).getTimezoneOffset(); });
+// ---- crypto ----
+t('crypto.basics', function () { return typeof crypto.subtle + typeof crypto.randomUUID + typeof crypto.getRandomValues; });
+['SHA-1', 'SHA-256', 'SHA-512'].forEach(function (h) { a('crypto.digest.' + h, function () { return crypto.subtle.digest(h, new Uint8Array([1])).then(function (b) { return b.byteLength; }); }); });
+[['ECDSA', { name: 'ECDSA', namedCurve: 'P-256' }, ['sign', 'verify']], ['ECDH', { name: 'ECDH', namedCurve: 'P-256' }, ['deriveBits']], ['RSA-OAEP', { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, ['encrypt', 'decrypt']],
+ ['RSASSA-PKCS1-v1_5', { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, ['sign', 'verify']], ['Ed25519', { name: 'Ed25519' }, ['sign', 'verify']], ['X25519', { name: 'X25519' }, ['deriveBits']],
+ ['AES-KW', { name: 'AES-KW', length: 256 }, ['wrapKey', 'unwrapKey']], ['AES-GCM', { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt']], ['HMAC', { name: 'HMAC', hash: 'SHA-256' }, ['sign', 'verify']]].forEach(function (x) {
+  a('crypto.generateKey.' + x[0], function () { return crypto.subtle.generateKey(x[1], true, x[2]).then(function () { return 'ok'; }); }); });
+a('crypto.exportJwk', function () { return crypto.subtle.generateKey({ name: 'AES-GCM', length: 128 }, true, ['encrypt']).then(function (k) { return crypto.subtle.exportKey('jwk', k); }).then(function (j) { return j.kty + j.alg; }); });
+// ---- performance / observers ----
+t('perf.entryTypes', function () { return (PerformanceObserver.supportedEntryTypes || []).join(','); });
+t('perf.timeOrigin', function () { return typeof performance.timeOrigin + typeof performance.now() + typeof performance.toJSON + typeof performance.measureUserAgentSpecificMemory + typeof performance.memory; });
+t('perf.nav', function () { var n = performance.getEntriesByType('navigation')[0]; return n ? n.type + ':' + (typeof n.domContentLoadedEventEnd) : 'none'; });
+t('perf.paint', function () { return performance.getEntriesByType('paint').length >= 0 ? 'ok' : ''; });
+t('perf.markMeasure', function () { performance.mark('a'); performance.mark('b'); var m = performance.measure('m', 'a', 'b'); return m.entryType + typeof m.duration; });
+a('io.callback', function () { var d = document.createElement('div'); d.style.cssText = 'width:50px;height:50px'; document.body.appendChild(d); return new Promise(function (res) { new IntersectionObserver(function (e) { res(e[0].isIntersecting + ':' + e[0].intersectionRatio + ':' + (e[0].boundingClientRect.width)); }).observe(d); }); });
+a('ro.callback', function () { var d = document.createElement('div'); d.style.cssText = 'width:60px;height:20px'; document.body.appendChild(d); return new Promise(function (res) { new ResizeObserver(function (e) { res(e[0].contentRect.width + 'x' + e[0].contentRect.height + ':' + e[0].borderBoxSize[0].inlineSize); }).observe(d); }); });
+a('po.observe', function () { return new Promise(function (res) { try { var o = new PerformanceObserver(function (l) { res(l.getEntries().length); }); o.observe({ type: 'mark', buffered: true }); } catch (e) { res('threw ' + e.name); } }); });
+a('scheduler.postTask', function () { return typeof scheduler === 'undefined' ? 'no scheduler' : scheduler.postTask(function () { return 'ran'; }); });
+// ---- workers / messaging / storage ----
+a('worker.classic', function () { return new Promise(function (res) { try { var u = URL.createObjectURL(new Blob(['postMessage(typeof importScripts)'])); var w = new Worker(u); w.onmessage = function (e) { res(e.data); w.terminate(); }; w.onerror = function (e) { res('error ' + e.message); }; } catch (e) { res('threw ' + e.name); } }); });
+a('worker.moduleImportMeta', function () { return new Promise(function (res) { try { var u = URL.createObjectURL(new Blob(['postMessage(typeof import.meta.url)'], { type: 'text/javascript' })); var w = new Worker(u, { type: 'module' }); w.onmessage = function (e) { res(e.data); w.terminate(); }; w.onerror = function (e) { res('error ' + e.message); }; } catch (e) { res('threw ' + e.name); } }); });
+a('worker.moduleImport', function () { return new Promise(function (res) { try { var d = URL.createObjectURL(new Blob(['export var v = 7;'], { type: 'text/javascript' })); var u = URL.createObjectURL(new Blob(['import { v } from "' + d + '"; postMessage(v);'], { type: 'text/javascript' })); var w = new Worker(u, { type: 'module' }); w.onmessage = function (e) { res(e.data); w.terminate(); }; w.onerror = function (e) { res('error ' + e.message); }; } catch (e) { res('threw ' + e.name); } }); });
+a('worker.transfer', function () { return new Promise(function (res) { var u = URL.createObjectURL(new Blob(['onmessage=function(e){postMessage(e.data.byteLength)}'])); var w = new Worker(u); var b = new ArrayBuffer(16); w.onmessage = function (e) { res(e.data + ':' + b.byteLength); w.terminate(); }; w.postMessage(b, [b]); }); });
+a('worker.fetchInside', function () { return new Promise(function (res) { var u = URL.createObjectURL(new Blob(['fetch("data:,w").then(function(r){return r.text()}).then(postMessage,function(e){postMessage("err "+e.name)})'])); var w = new Worker(u); w.onmessage = function (e) { res(e.data); w.terminate(); }; w.onerror = function (e) { res('error'); }; }); });
+a('worker.idbInside', function () { return new Promise(function (res) { var u = URL.createObjectURL(new Blob(['postMessage(typeof indexedDB + typeof IDBKeyRange + typeof crypto.subtle + typeof WebSocket + typeof navigator.hardwareConcurrency)'])); var w = new Worker(u); w.onmessage = function (e) { res(e.data); w.terminate(); }; w.onerror = function () { res('error'); }; }); });
+a('sharedworker', function () { return typeof SharedWorker === 'undefined' ? 'absent' : new Promise(function (res) { var u = URL.createObjectURL(new Blob(['onconnect=function(e){e.ports[0].postMessage("hi")}'])); var w = new SharedWorker(u); w.port.onmessage = function (e) { res(e.data); }; w.port.start(); }); });
+a('broadcast.frame', function () { return new Promise(function (res) { var f = document.createElement('iframe'); f.srcdoc = '<script>var c=new BroadcastChannel("t");c.onmessage=function(e){parent.postMessage("got "+e.data,"*")};parent.postMessage("ready","*")<\/script>'; window.addEventListener('message', function h(e) { if (e.data === 'ready') new BroadcastChannel('t').postMessage('m'); else if (/^got/.test(e.data)) { window.removeEventListener('message', h); res(e.data); } }); document.body.appendChild(f); }); });
+a('idb.crossFrame', function () { return new Promise(function (res) { var open = indexedDB.open('mx', 1); open.onupgradeneeded = function () { open.result.createObjectStore('s'); }; open.onsuccess = function () { var db = open.result; var tx = db.transaction('s', 'readwrite'); tx.objectStore('s').put('v', 'k'); tx.oncomplete = function () { var f = document.createElement('iframe'); f.srcdoc = '<script>var o=indexedDB.open("mx",1);o.onupgradeneeded=function(){o.result.createObjectStore("s")};o.onsuccess=function(){var r=o.result.transaction("s").objectStore("s").get("k");r.onsuccess=function(){parent.postMessage("idb:"+r.result,"*")}}<\/script>'; window.addEventListener('message', function (e) { if (/^idb:/.test(e.data)) res(e.data); }); document.body.appendChild(f); }; }; }); });
+a('idb.databases', function () { return indexedDB.databases().then(function (l) { return l.length > 0; }); });
+a('idb.blobValue', function () { return new Promise(function (res) { var o = indexedDB.open('mxb', 1); o.onupgradeneeded = function () { o.result.createObjectStore('s'); }; o.onsuccess = function () { var tx = o.result.transaction('s', 'readwrite'); try { tx.objectStore('s').put({ b: new Blob(['abc']) }, 1); } catch (e) { res('threw ' + e.name); return; } tx.oncomplete = function () { var g = o.result.transaction('s').objectStore('s').get(1); g.onsuccess = function () { res(g.result && g.result.b instanceof Blob); }; }; tx.onerror = function () { res('tx error ' + (tx.error && tx.error.name)); }; }; }); });
+t('storage.quota', function () { try { var s = 'x'.repeat(1 << 20); var n = 0; localStorage.clear(); for (; n < 12; n++) localStorage.setItem('k' + n, s); return 'no quota error, ' + n + 'MB'; } catch (e) { var m = n; localStorage.clear(); return e.name + ' after ' + m + 'MB'; } });
+t('storage.eventTarget', function () { return typeof StorageEvent + typeof localStorage.length + Object.keys(localStorage).length; });
+a('storage.estimate', function () { return navigator.storage ? navigator.storage.estimate().then(function (e) { return typeof e.quota + typeof e.usage; }) : 'no navigator.storage'; });
+a('storage.opfs', function () { return navigator.storage && navigator.storage.getDirectory ? 'present' : 'absent'; });
+a('caches.open', function () { return typeof caches === 'undefined' ? 'absent' : caches.open('c').then(function (c) { return c.put('https://example.test/x', new Response('cached')).then(function () { return c.match('https://example.test/x'); }).then(function (r) { return r.text(); }); }); });
+a('sw.register', function () { return !navigator.serviceWorker ? 'absent' : navigator.serviceWorker.getRegistrations().then(function (l) { return 'registrations:' + l.length; }); });
+a('cookieStore', function () { return typeof cookieStore === 'undefined' ? 'absent' : cookieStore.set('cs', '1').then(function () { return cookieStore.get('cs'); }).then(function (c) { return c && c.value; }); });
+a('notification', function () { return typeof Notification === 'undefined' ? 'absent' : Notification.permission + ':' + typeof Notification.requestPermission; });
+a('permissions', function () { return navigator.permissions ? navigator.permissions.query({ name: 'notifications' }).then(function (s) { return s.state; }, function (e) { return 'rejected ' + e.name; }) : 'absent'; });
+a('clipboard', function () { return navigator.clipboard ? typeof navigator.clipboard.writeText + typeof navigator.clipboard.readText + typeof navigator.clipboard.write : 'absent'; });
+a('locks', function () { return navigator.locks ? navigator.locks.request('l', function () { return 'held'; }) : 'absent'; });
+a('credentials', function () { return navigator.credentials ? 'present' : 'absent'; });
+a('pkc', function () { return typeof PublicKeyCredential === 'undefined' ? 'absent' : PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(String); });
+a('webauthnCaps', function () { return typeof PublicKeyCredential !== 'undefined' && PublicKeyCredential.getClientCapabilities ? 'present' : 'absent'; });
+// ---- wasm ----
+t('wasm.present', function () { return typeof WebAssembly + ':' + ['instantiate', 'compile', 'validate', 'instantiateStreaming', 'compileStreaming', 'Memory', 'Module', 'Global', 'Tag'].map(function (k) { return typeof WebAssembly[k]; }).join(','); });
+a('wasm.instantiate', function () { return WebAssembly.instantiate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])).then(function (r) { return Object.keys(r).join(','); }); });
+a('wasm.streaming', function () { return typeof WebAssembly.instantiateStreaming !== 'function' ? 'absent' : WebAssembly.instantiateStreaming(new Response(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]), { headers: { 'content-type': 'application/wasm' } })).then(function () { return 'ok'; }, function (e) { return 'rejected ' + e.name; }); });
+t('sab', function () { try { new SharedArrayBuffer(8); return 'ok'; } catch (e) { return e.name; } });
+// ---- history / navigation / modules ----
+t('history.state', function () { history.pushState({ a: 1 }, '', '#p'); var s = history.state.a; history.replaceState(null, ''); return s + ':' + history.scrollRestoration + ':' + history.length; });
+t('navigation.api', function () { return typeof navigation === 'undefined' ? 'absent' : typeof navigation.entries + typeof navigation.navigate; });
+t('script.supports', function () { return ['module', 'importmap', 'classic', 'speculationrules'].map(function (k) { return typeof HTMLScriptElement.supports === 'function' ? HTMLScriptElement.supports(k) : 'nofn'; }).join(','); });
+t('import.meta.resolve', function () { return 'n/a in classic'; });
+// ---- misc ----
+t('idle', function () { return typeof requestIdleCallback + typeof cancelIdleCallback + typeof queueMicrotask + typeof reportError; });
+t('trustedTypes', function () { return typeof trustedTypes === 'undefined' ? 'absent' : typeof trustedTypes.createPolicy; });
+t('beacon', function () { return navigator.sendBeacon('data:,x', 'a'); });
+t('websocket', function () { return typeof WebSocket + ':' + WebSocket.CONNECTING + WebSocket.OPEN + WebSocket.CLOSING + WebSocket.CLOSED; });
+t('blob.methods', function () { var b = new Blob(['x']); return ['arrayBuffer', 'bytes', 'text', 'stream', 'slice'].map(function (m) { return typeof b[m]; }).join(','); });
+t('file.lastModified', function () { return typeof new File(['a'], 'a.txt', { lastModified: 5 }).lastModified; });
+a('filereader', function () { return new Promise(function (res) { var r = new FileReader(); r.onload = function () { res(r.result); }; r.readAsDataURL(new Blob(['hi'], { type: 'text/plain' })); }); });
+Promise.all(pend).then(function () { window.__done = true; });
+});
+window.report = function () { return JSON.stringify(R); };
+</script>

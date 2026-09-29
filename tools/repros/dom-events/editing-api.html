@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>contenteditable and document.execCommand</title>
+<!-- document.execCommand is a stub returning false (20_dom.js `execCommand() { return false; }`) and contenteditable regions have no native editing. Editors
+     (ProseMirror, Slate, Lexical, Quill, CKEditor, TinyMCE, Draft.js) depend on beforeinput/execCommand/Selection. WPT: editing/ (386 files), input-events. -->
+<body>
+<div id="ed" contenteditable="true">abc <i>def</i></div>
+<script>
+const out = {};
+const $ = (id) => document.getElementById(id);
+const t = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name; } };
+const sel = () => { const n = document.createTreeWalker($('ed'), NodeFilter.SHOW_TEXT).nextNode(); const r = document.createRange(); r.setStart(n, Math.min(1, n.length)); r.setEnd(n, Math.min(2, n.length)); getSelection().removeAllRanges(); getSelection().addRange(r); };
+t('isContentEditable', () => $('ed').isContentEditable + ',' + $('ed').firstChild.parentElement.isContentEditable + ',' + document.body.isContentEditable);
+t('queryCommandSupported', () => ['bold', 'italic', 'insertText', 'insertHTML', 'delete', 'copy', 'paste', 'undo', 'formatBlock', 'createLink', 'foreColor', 'selectAll'].map((c) => document.queryCommandSupported(c) ? 1 : 0).join(''));
+const events = [];
+$('ed').addEventListener('beforeinput', (e) => events.push('bi:' + e.inputType + ':' + e.data + ':' + e.cancelable));
+$('ed').addEventListener('input', (e) => events.push('in:' + e.inputType + ':' + e.data));
+t('bold', () => { sel(); const r = document.execCommand('bold'); return r + '|' + $('ed').innerHTML; });
+t('insertText', () => { sel(); const r = document.execCommand('insertText', false, 'XY'); return r + '|' + $('ed').innerHTML; });
+t('delete', () => { sel(); const r = document.execCommand('delete'); return r + '|' + $('ed').innerHTML; });
+t('insertHTML', () => { sel(); const r = document.execCommand('insertHTML', false, '<u>U</u>'); return r + '|' + $('ed').innerHTML; });
+t('undo', () => { const r = document.execCommand('undo'); return r + '|' + $('ed').innerHTML; });
+t('events', () => events.join(' '));
+t('designMode', () => { document.designMode = 'on'; const v = document.body.isContentEditable; document.designMode = 'off'; return v; });
+t('plaintext-only', () => { const d = document.createElement('div'); d.contentEditable = 'plaintext-only'; return d.contentEditable + ',' + d.isContentEditable; });
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

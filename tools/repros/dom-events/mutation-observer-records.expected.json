@@ -1,0 +1,13 @@
+{
+ "textContent-replace": "childList:#text//prev=null/next=null | childList:#text/#text/prev=null/next=null",
+ "textContent-empty": "childList:/#text/prev=null/next=null",
+ "appendChild-fragment": "childList:I+U//prev=null/next=null",
+ "replaceChild-internal": "childList:/I/prev=null/next=U | childList:I/U/prev=null/next=null",
+ "replaceChild-self": "childList:/I/prev=null/next=null | childList:I//prev=null/next=null",
+ "insertBefore-move": "childList:/I/prev=null/next=null | childList:I//prev=null/next=null",
+ "attr-old": "attributes://prev=null/next=null/attr=x,old=null | attributes://prev=null/next=null/attr=x,old=1 | attributes://prev=null/next=null/attr=x,old=2",
+ "characterData": "characterData://prev=null/next=null/old=t | characterData://prev=null/next=null/old=u",
+ "innerHTML": "childList:B+B/I+#text/prev=null/next=null",
+ "normalize": "characterData://prev=null/next=null/old=a | childList:/#text/prev=#text/next=null",
+ "deliveryOrder": "mo,promise,qm"
+}

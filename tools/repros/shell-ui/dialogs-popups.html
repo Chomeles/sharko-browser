@@ -1,0 +1,6 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><style>body{font:16px system-ui;margin:24px;max-width:760px}pre{background:#eee;padding:8px;min-height:2em}</style><title>dialogs and popups</title><h1>Dialogs, popups, beforeunload, print</h1>
+<button onclick="alert('alert')">alert</button> <button onclick="log.textContent+='confirm='+confirm('sure?')+'\n'">confirm</button> <button onclick="log.textContent+='prompt='+prompt('name?','x')+'\n'">prompt</button>
+<button onclick="window.open('about:blank','_blank')">window.open (user gesture)</button> <button onclick="setTimeout(()=>window.open('about:blank'),100)">window.open (no gesture, must be blocked)</button>
+<button onclick="onbeforeunload=e=>{e.preventDefault();return ''}">arm beforeunload</button> <button onclick="print()">window.print()</button>
+<p><a href="https://example.com/" target=_blank rel=noopener>target=_blank</a> <a href="mailto:a@b.de">mailto:</a> <a href="tel:+491234">tel:</a></p>
+<pre id=log></pre>

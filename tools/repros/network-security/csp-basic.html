@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CSP from a meta element</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'nonce-n1'; connect-src 'self'; img-src 'self'">
+<!-- Chromium: the inline script without the nonce does not run, eval throws EvalError, a cross-origin fetch/script/image is blocked and each block fires
+     securitypolicyviolation. Sharko has no CSP at all. Needs serve.py. -->
+<script>window.__plain = 'ran';</script>
+<script nonce="n1">
+function canon(v) { return JSON.stringify(v, function (k, x) { if (x && typeof x === 'object' && !Array.isArray(x)) { var o = {}; Object.keys(x).sort().forEach(function (y) { o[y] = x[y]; }); return o; } return x; }); }
+var R = { violations: [] }, pend = [];
+document.addEventListener('securitypolicyviolation', function (e) { R.violations.push(e.effectiveDirective); });
+R.inlineNoNonce = window.__plain || 'blocked';
+R.inlineNonce = 'ran';
+try { R.eval = String(eval('1+1')); } catch (e) { R.eval = e.name; }
+function c(k, f) { pend.push(new Promise(function (res) { var t = setTimeout(function () { R[k] = 'timeout'; res(); }, 3000); f(function (v) { clearTimeout(t); R[k] = v; res(); }); })); }
+addEventListener('load', function () {
+  c('fetchCrossOrigin', function (d) { fetch('http://localhost:18942/json').then(function () { d('allowed'); }, function (e) { d(e.name); }); });
+  c('fetchSelf', function (d) { fetch('/json').then(function () { d('allowed'); }, function (e) { d(e.name); }); });
+  c('scriptCrossOrigin', function (d) { var s = document.createElement('script'); s.src = 'http://localhost:18942/s.js'; s.onload = function () { d('load'); }; s.onerror = function () { d('error'); }; document.head.appendChild(s); });
+  c('imageCrossOrigin', function (d) { var i = new Image(); i.onload = function () { d('load'); }; i.onerror = function () { d('error'); }; i.src = 'http://127.0.0.1:18943/i.png'; });
+  Promise.all(pend).then(function () {
+    R.violations = R.violations.filter(function (v, i, a) { return a.indexOf(v) === i; }).sort();
+    var expected = { violations: ['connect-src', 'img-src', 'script-src', 'script-src-elem'], inlineNoNonce: 'blocked', inlineNonce: 'ran', eval: 'EvalError',
+      fetchCrossOrigin: 'TypeError', fetchSelf: 'allowed', scriptCrossOrigin: 'error', imageCrossOrigin: 'error' };
+    window.__repro = { issue: 'network-security/csp-meta', expected: expected, actual: R, pass: canon(expected) === canon(R) };
+  });
+});
+</script>

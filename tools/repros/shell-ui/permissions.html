@@ -1,0 +1,8 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><style>body{font:16px system-ui;margin:24px;max-width:760px}pre{background:#eee;padding:8px;min-height:2em}</style><title>permissions</title><h1>Permission prompts</h1>
+<button onclick="run('geo',()=>new Promise((y,n)=>navigator.geolocation.getCurrentPosition(p=>y('ok '+p.coords.latitude),e=>n(e.message))))">geolocation</button>
+<button onclick="run('notif',()=>Notification.requestPermission())">notifications</button>
+<button onclick="run('clip',()=>navigator.clipboard.readText())">clipboard read</button>
+<button onclick="run('cam',()=>navigator.mediaDevices.getUserMedia({video:true}).then(()=>'ok'))">camera</button>
+<button onclick="run('perm',()=>navigator.permissions.query({name:'geolocation'}).then(s=>s.state))">permissions.query</button>
+<pre id=out></pre>
+<script>async function run(n,f){try{out.textContent+=n+': '+await f()+'\n'}catch(e){out.textContent+=n+' ERROR '+e+'\n'}}</script>

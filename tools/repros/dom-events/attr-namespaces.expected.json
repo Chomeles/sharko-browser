@@ -1,0 +1,13 @@
+{
+ "parsedHtml": "id|||id ; xlink:href|||xlink:href ; xml:lang|||xml:lang ; xmlns:foo|||xmlns:foo ; foo:baz|||foo:baz",
+ "parsedSvg": "id|||id ; xml:base|||xml:base ; xml:lang|http://www.w3.org/XML/1998/namespace|xml|lang ; xml:space|http://www.w3.org/XML/1998/namespace|xml|space ; xlink:href|http://www.w3.org/1999/xlink|xlink|href ; xmlns:xlink|http://www.w3.org/2000/xmlns/|xmlns|xlink",
+ "setNS": "xlink:title|http://www.w3.org/1999/xlink|xlink|title ; a:x|urn:a|a|x ; b:x|urn:b|b|x ; plain|||plain",
+ "xmlnsNamespaceError": "ERR NamespaceError",
+ "getNS": "1,2,3,",
+ "hasNS": "true,false",
+ "afterRemove": "xlink:title|http://www.w3.org/1999/xlink|xlink|title ; b:x|urn:b|b|x ; plain|||plain",
+ "xmlDoc": "q:a|urn:q|q|a / urn:x / null / r",
+ "createAttrNS": "z:k|urn:z|z|k",
+ "toggle": true,
+ "caseHtmlNS": "ABC:Def|http://www.w3.org/1999/xhtml|ABC|Def / v"
+}

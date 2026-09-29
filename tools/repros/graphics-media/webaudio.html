@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>web audio acceptance</title>
+<!-- Backlog item 12, acceptance page for a REAL Web Audio. No AudioContext object may exist until it works (feature detection must stay honest). Chromium: an offline render of a
+     440 Hz sine at 44.1 kHz gives one second of samples with peak ~1 and a zero crossing about every 50 samples. -->
+<body>
+<script>
+const out = {};
+window.report = () => JSON.stringify(out);
+(async () => {
+  try {
+    out.ctors = [typeof AudioContext, typeof OfflineAudioContext, typeof GainNode, typeof OscillatorNode].join();   // function,function,function,function
+    if (typeof OfflineAudioContext === 'function') {
+      const ctx = new OfflineAudioContext(1, 44100, 44100);
+      const osc = ctx.createOscillator(); osc.frequency.value = 440;
+      const g = ctx.createGain(); g.gain.value = 0.5;
+      osc.connect(g); g.connect(ctx.destination); osc.start();
+      const buf = await ctx.startRendering();
+      const d = buf.getChannelData(0);
+      let peak = 0, cross = 0; for (let i = 0; i < d.length; i++) { peak = Math.max(peak, Math.abs(d[i])); if (i && d[i - 1] < 0 && d[i] >= 0) cross++; }
+      out.length = d.length; out.peak = Math.round(peak * 100) / 100; out.crossings = cross;   // 44100, 0.5, 440 (+-1)
+    }
+  } catch (e) { out.exception = String(e); }
+  window.__repro = { issue: 'webaudio', expected: { length: 44100, peak: 0.5, crossings: 440 }, actual: out, pass: out.length === 44100 && out.peak === 0.5 && Math.abs(out.crossings - 440) <= 1 };
+})();
+</script>

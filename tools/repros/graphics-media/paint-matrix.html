@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>paint matrix</title>
+<!-- Visual checklist of CSS painting features. Each cell states what Chromium draws (data-expect).
+     Screenshot: target/profiling/browser --headless --screenshot=/tmp/paint.png --window-size=1000x1500 file://$PWD/paint-matrix.html
+     Compare with Chromium (Playwright) by eye or with tools/repros/layout-css/compare.js. -->
+<style>
+  body { margin: 8px; font: 10px/1.2 Arial, sans-serif; background: #fff; }
+  .g { display: grid; grid-template-columns: repeat(6, 150px); gap: 8px; }
+  .c { width: 150px; }
+  .b { width: 150px; height: 84px; position: relative; overflow: hidden; background: #f4f4f4; }
+  .c > i { display: block; font-style: normal; color: #444; height: 24px; overflow: hidden; }
+  .in { position: absolute; left: 20px; top: 12px; width: 110px; height: 60px; }
+</style>
+<div class="g">
+  <div class="c"><div class="b"><div class="in" style="background:linear-gradient(90deg,#e33,#33e)"></div></div><i data-expect="red to blue, left to right">linear-gradient</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:radial-gradient(circle at 30% 30%,#fff,#e33 60%,#300)"></div></div><i data-expect="glossy red sphere">radial-gradient</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:conic-gradient(from 0deg,#e33,#ee3,#3e3,#3ee,#33e,#e3e,#e33)"></div></div><i data-expect="colour wheel">conic-gradient</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:repeating-linear-gradient(45deg,#333 0 6px,#fff 6px 12px)"></div></div><i data-expect="diagonal stripes">repeating-linear-gradient</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#fff;box-shadow:6px 8px 12px 2px rgba(0,0,0,.5)"></div></div><i data-expect="soft shadow bottom right">box-shadow blur+spread</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#fff;box-shadow:inset 0 0 14px 4px #e33"></div></div><i data-expect="red inner glow">box-shadow inset</i></div>
+
+  <div class="c"><div class="b"><div class="in" style="background:#39f;border-radius:30px 6px 30px 6px;box-shadow:0 0 0 4px #fc0"></div></div><i data-expect="asymmetric rounded corners, yellow ring">border-radius + ring</i></div>
+  <div class="c"><div class="b"><div class="in" style="border:5px dashed #e33"></div><div class="in" style="left:60px;top:20px;width:60px;height:30px;border:5px dotted #33e"></div></div><i data-expect="dashed red frame, dotted blue frame">dashed/dotted</i></div>
+  <div class="c"><div class="b"><div class="in" style="border:8px double #333"></div></div><i data-expect="double line border">border double</i></div>
+  <div class="c"><div class="b"><div class="in" style="border:8px groove #39f"></div></div><i data-expect="3D grooved border">border groove</i></div>
+  <div class="c"><div class="b"><div class="in" style="border:12px solid;border-image:linear-gradient(45deg,#e33,#33e) 1"></div></div><i data-expect="gradient border">border-image</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#fff;outline:3px solid #e33;outline-offset:5px"></div></div><i data-expect="red outline 5px away">outline-offset</i></div>
+
+  <div class="c"><div class="b"><div class="in" style="background:#e33;filter:blur(5px)"></div></div><i data-expect="blurred red box">filter: blur</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:linear-gradient(90deg,#e33,#3e3);filter:grayscale(1)"></div></div><i data-expect="grey gradient">filter: grayscale</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:linear-gradient(90deg,#e33,#3e3);filter:hue-rotate(120deg) saturate(1.5) brightness(1.2)"></div></div><i data-expect="hue rotated gradient">filter: hue-rotate</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#39f;filter:drop-shadow(6px 6px 4px rgba(0,0,0,.6))"></div></div><i data-expect="blue box with soft shadow">filter: drop-shadow</i></div>
+  <div class="c"><div class="b" style="background:linear-gradient(90deg,#e33 0 25%,#fff 25% 50%,#33e 50% 75%,#3e3 75%)"><div class="in" style="background:rgba(255,255,255,.2);backdrop-filter:blur(6px)"></div></div><i data-expect="frosted glass: stripes blurred inside box">backdrop-filter: blur</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#e33;opacity:.5"></div><div class="in" style="left:50px;top:24px;width:80px;background:#33e;opacity:.5"></div></div><i data-expect="two 50% boxes, overlap purple">opacity</i></div>
+
+  <div class="c"><div class="b" style="background:#fc0"><div class="in" style="background:#39f;mix-blend-mode:multiply"></div></div><i data-expect="green (yellow x blue) box">mix-blend-mode: multiply</i></div>
+  <div class="c"><div class="b" style="background:linear-gradient(90deg,#fff,#333)"><div class="in" style="background:#fff;mix-blend-mode:difference"></div></div><i data-expect="inverted gradient inside box">mix-blend-mode: difference</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='8' fill='red'/%3E%3C/svg%3E&quot;),#39f;background-blend-mode:screen"></div></div><i data-expect="tiled circles blended with blue">background-blend-mode</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#e33;-webkit-mask-image:linear-gradient(90deg,#000,transparent);mask-image:linear-gradient(90deg,#000,transparent)"></div></div><i data-expect="red fading out to the right">mask-image gradient</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#39f;mask:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='4'/%3E%3C/svg%3E&quot;) center/contain no-repeat"></div></div><i data-expect="blue disc">mask svg image</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#e33;clip-path:circle(30px at 50% 50%)"></div></div><i data-expect="red disc">clip-path: circle</i></div>
+
+  <div class="c"><div class="b"><div class="in" style="background:#e33;clip-path:polygon(50% 0,100% 100%,0 100%)"></div></div><i data-expect="red triangle">clip-path: polygon</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#e33;clip-path:inset(8px round 14px)"></div></div><i data-expect="rounded inner rect">clip-path: inset round</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#e33;clip-path:path('M0 30 Q 55 -20 110 30 T 110 60 L 0 60 Z')"></div></div><i data-expect="wavy shape">clip-path: path()</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#39f;transform:rotate(15deg) skewX(-10deg) scale(.9)"></div></div><i data-expect="tilted parallelogram">transform 2D</i></div>
+  <div class="c"><div class="b" style="perspective:200px"><div class="in" style="background:linear-gradient(90deg,#e33,#33e);transform:rotateY(45deg)"></div></div><i data-expect="perspective foreshortened box">transform 3D perspective</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#39f;transform:rotateY(180deg);backface-visibility:hidden"></div></div><i data-expect="EMPTY (backface hidden)">backface-visibility</i></div>
+
+  <div class="c"><div class="b"><div class="in" style="font:700 28px Arial;color:#39f;text-shadow:3px 3px 4px rgba(0,0,0,.6)">Shadow</div></div><i data-expect="blue text with soft shadow">text-shadow</i></div>
+  <div class="c"><div class="b"><div class="in" style="font:700 22px Arial;text-decoration:underline wavy #e33 2px;text-underline-offset:4px">Wavy line</div></div><i data-expect="wavy red underline">text-decoration wavy</i></div>
+  <div class="c"><div class="b"><div class="in" style="font:900 40px Arial;color:transparent;-webkit-text-stroke:2px #e33">Ab</div></div><i data-expect="outlined text">-webkit-text-stroke</i></div>
+  <div class="c"><div class="b"><div class="in" style="font:900 40px Arial;background:linear-gradient(90deg,#e33,#33e);-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent">Grad</div></div><i data-expect="gradient-filled text">background-clip: text</i></div>
+  <div class="c"><div class="b"><div class="in" style="font:16px Arial;letter-spacing:3px;word-spacing:8px;text-transform:uppercase;font-variant:small-caps">Spaced text</div></div><i data-expect="letter/word spaced caps">letter-spacing etc.</i></div>
+  <div class="c"><div class="b"><img class="in" style="image-rendering:pixelated" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGElEQVR4nGP4z8Dwn2EBEAPp//9PMPwHAEKxCGKkHR13AAAAAElFTkSuQmCC"></div><i data-expect="4 crisp colour blocks (red, green / blue, yellow), no smoothing">image-rendering: pixelated</i></div>
+
+  <div class="c"><div class="b"><div class="in" style="background:#fc0;border:2px solid #333;border-radius:50%;overflow:hidden"><div style="width:200px;height:20px;background:#e33;margin-top:10px"></div></div></div><i data-expect="red band clipped to the ellipse">overflow + radius clip</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:conic-gradient(#e33 25%,#39f 0 50%,#3c3 0 75%,#fc0 0);border-radius:50%"></div></div><i data-expect="4-colour pie disc">conic pie</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#fff;box-shadow:0 0 0 1px #999,0 6px 16px rgba(0,0,0,.25);border-radius:8px"></div></div><i data-expect="card with hairline and soft shadow">card shadow</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:linear-gradient(#fff,#ccc);border:1px solid #888;border-radius:4px;box-shadow:inset 0 1px 0 #fff"></div></div><i data-expect="glossy button">button gradient</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='8' height='8' fill='%23ccc'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%23ccc'/%3E%3C/svg%3E&quot;)"></div></div><i data-expect="checkerboard">svg background tile</i></div>
+  <div class="c"><div class="b"><div class="in" style="background:#39f;border-radius:50%;filter:drop-shadow(0 4px 6px rgba(0,0,0,.5)) contrast(1.2)"></div></div><i data-expect="disc, shadow beneath">stacked filters</i></div>
+</div>

@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>blob: URLs in script loading, import(), XHR and workers</title>
+<!-- Chromium: every case below works. Sharko: the JS fetch() path serves blob: itself (L.startNativeFetch is not used), but <script src=blob:>,
+     import(blob:), module workers and XHR go through the network stack (ERR_UNKNOWN_URL_SCHEME) or the classic-script path. -->
+<script src="repro.js"></script>
+<script>
+addEventListener('load', function () {
+c('classicScriptSrc', function (done) { var s = document.createElement('script'); s.src = blobURL('window.__cs = 1'); s.onload = function () { done('load:' + window.__cs); }; s.onerror = function () { done('error'); }; document.head.appendChild(s); });
+c('moduleScriptSrc', function (done) { var s = document.createElement('script'); s.type = 'module'; s.src = blobURL('window.__ms = 2'); s.onload = function () { done('load:' + window.__ms); }; s.onerror = function () { done('error'); }; document.head.appendChild(s); });
+c('dynamicImport', function (done) { import(blobURL('export var answer = 42')).then(function (m) { done('ok:' + m.answer); }, function (e) { done('rejected'); }); });
+c('moduleImportsBlob', function (done) { var dep = blobURL('export var v = 5'); import(blobURL('import { v } from "' + dep + '"; export var w = v + 1')).then(function (m) { done('ok:' + m.w); }, function () { done('rejected'); }); });
+c('xhrBlob', function (done) { var x = new XMLHttpRequest(); x.open('GET', blobURL('xhr-body', 'text/plain')); x.onload = function () { done(x.status + ':' + x.responseText); }; x.onerror = function () { done('error'); }; x.send(); });
+c('fetchBlob', function (done) { fetch(blobURL('fetch-body', 'text/plain')).then(function (r) { return r.text(); }).then(function (t) { done(t); }, function () { done('rejected'); }); });
+c('iframeBlobHtml', function (done) { addEventListener('message', function h(e) { if (e.data === 'in-frame') { removeEventListener('message', h); done('in-frame'); } }); var f = document.createElement('iframe'); f.src = blobURL('<script>parent.postMessage("in-frame", "*")<\/script>', 'text/html'); document.body.appendChild(f); });
+c('classicWorker', function (done) { var w = new Worker(blobURL('postMessage("w1")')); w.onmessage = function (e) { done(e.data); w.terminate(); }; w.onerror = function () { done('error'); }; });
+c('moduleWorkerImportMeta', function (done) { var w = new Worker(blobURL('postMessage(typeof import.meta.url)'), { type: 'module' }); w.onmessage = function (e) { done(e.data); w.terminate(); }; w.onerror = function () { done('error'); }; });
+c('moduleWorkerStaticImport', function (done) { var dep = blobURL('export var v = 7'); var w = new Worker(blobURL('import { v } from "' + dep + '"; postMessage(v)'), { type: 'module' }); w.onmessage = function (e) { done(e.data); w.terminate(); }; w.onerror = function () { done('error'); }; });
+finish('blob-urls', { classicScriptSrc: 'load:1', moduleScriptSrc: 'load:2', dynamicImport: 'ok:42', moduleImportsBlob: 'ok:6', xhrBlob: '200:xhr-body', fetchBlob: 'fetch-body', iframeBlobHtml: 'in-frame', classicWorker: 'w1', moduleWorkerImportMeta: 'string', moduleWorkerStaticImport: 7 });
+});
+</script>

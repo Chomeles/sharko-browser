@@ -1,0 +1,176 @@
+{
+ "s3.light.before": "div#pre #comment #text",
+ "s3.light.after": "div#pre #comment #text div#late div#named",
+ "s3.light.parent": [
+  "div#host1",
+  true,
+  "div#pre",
+  "div#host1",
+  true,
+  "div#late"
+ ],
+ "s3.light.qs": [
+  3,
+  0,
+  0,
+  3
+ ],
+ "s3.shadow.tree": [
+  "style b#sb slot#s1 slot#s2",
+  "#fragment",
+  true,
+  null,
+  "div#host1",
+  "open"
+ ],
+ "s3.roots": [
+  "#fragment",
+  true,
+  true,
+  true
+ ],
+ "s3.position": [
+  false,
+  37,
+  false,
+  false
+ ],
+ "s3.assign": [
+  "slot#s1",
+  "slot#s1",
+  "slot#s2",
+  "div#pre #text div#late",
+  "div#named",
+  "div#named"
+ ],
+ "s3.slot.parent": [
+  "div#host1",
+  "#fragment",
+  "em#fb"
+ ],
+ "s3.counts": [
+  0,
+  true,
+  1,
+  1
+ ],
+ "s3.html": [
+  "<div id=\"pre\">pre</div><!--c-->text<div id=\"late\"></div><div id=\"named\" slot=\"n\"></div>",
+  "<style>b{color:rgb(0,0,255)}</style><b id=\"sb\">shadow</b><slot id=\"s1\"></slot><slot name=\"n\" id=\"s2\"><em id=\"fb\">fallback</em></slot>"
+ ],
+ "s3.slotchange.sync": 0,
+ "s3.manual": [
+  null,
+  "slot#ms",
+  "manual"
+ ],
+ "s3.attach.rules": "a:NotSupportedError,input:NotSupportedError,x-y:ok,div:ok,section:ok",
+ "s3.attach.twice": "NotSupportedError",
+ "s3.clone": [
+  "<p>c</p>",
+  "i"
+ ],
+ "s3.ce.inshadow": "connected",
+ "s2.dsd.dom": [
+  "#text #comment i#dsdi #comment #text",
+  "x-card#dsd",
+  0
+ ],
+ "s2.style.scoping": [
+  "rgb(0, 0, 255)",
+  "rgb(0, 128, 0)",
+  "400",
+  "block",
+  "1px"
+ ],
+ "s2.style.shadow.b": [
+  "rgb(0, 0, 255)",
+  "rgb(0, 0, 0)"
+ ],
+ "s2.unassigned": [
+  "50x20@10,300 12x17@10,320",
+  "0x0@0,0",
+  "0x0@0,0",
+  0,
+  true,
+  "inline"
+ ],
+ "s2.layout": [
+  "50x20@18,308",
+  "116x36@10,300",
+  "200x36@10,300",
+  "block",
+  "contents"
+ ],
+ "s2.hit": [
+  "span#layslotted",
+  "span#layslotted",
+  "span#layslotted,div#layhost,div#lay",
+  "span#layslotted,div#box,div#layhost"
+ ],
+ "s2.hit.shadowbox": [
+  "div#layhost",
+  "div#box"
+ ],
+ "s2.hostcontext": "rgb(1, 2, 3)",
+ "s2.part": "rgb(9, 9, 9)",
+ "s2.adopted": [
+  "rgb(7, 7, 7)",
+  "rgb(0, 128, 0)"
+ ],
+ "s2.text": [
+  "slotted",
+  "slotted"
+ ],
+ "s4.events": [
+  "sr:button#btn:8 | host:div:8 | doc:div:8 | sr:u:8 | host:u:8 | doc:u:8",
+  "sr",
+  "div,body,html,#document,undefined"
+ ],
+ "s4.related": [
+  null,
+  "div"
+ ],
+ "s5.focus": [
+  "div",
+  "button#fb",
+  true,
+  true,
+  "button#fb"
+ ],
+ "s5.offsetParent": [
+  "div#lay",
+  "div#lay"
+ ],
+ "s6.gethtml": [
+  "",
+  "<template shadowrootmode=\"open\" shadowrootserializable=\"\"><b>x</b></template>"
+ ],
+ "s6.setHTMLUnsafe": [
+  true,
+  "<b>s</b>",
+  1
+ ],
+ "s6.innerHTML.noDSD": [
+  true,
+  "template"
+ ],
+ "s3.body.light": [
+  true,
+  true,
+  "body",
+  1,
+  "div#crERV20",
+  true,
+  "body"
+ ],
+ "s3.slotchange.evt": [
+  true,
+  false,
+  "slot"
+ ],
+ "s3.slotchange.async": [
+  1,
+  1
+ ]
+}

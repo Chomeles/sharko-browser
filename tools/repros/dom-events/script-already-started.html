@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>which parser-created scripts run when inserted</title>
+<!-- HTML "already started" flag: scripts created by the fragment parser (innerHTML, insertAdjacentHTML, outerHTML, DOMParser, template content, setHTMLUnsafe) never run;
+     createContextualFragment scripts and cloneNode(true) of a script that has not run yet do run once; a clone of a script that already ran does not run again. Sharko matches
+     Chromium except the clone of a not-yet-run script, which never runs. Guard for the parser rewrite (backlog item 5: mark_script_already_started). Expected values from Chromium. -->
+<body>
+<script>
+const out = {};
+window.__n = {};
+const mark = (k) => `<script>window.__n.${k} = (window.__n.${k} || 0) + 1<\/script>`;
+const host = () => { const d = document.createElement('div'); document.body.appendChild(d); return d; };
+const t = (name, fn) => { try { fn(); } catch (e) { out[name + '-err'] = e.name; } };
+t('innerHTML', () => { host().innerHTML = mark('innerHTML'); });
+t('insertAdjacentHTML', () => { host().insertAdjacentHTML('beforeend', mark('iah')); });
+t('outerHTML', () => { const d = host(); const p = document.createElement('p'); d.appendChild(p); p.outerHTML = mark('outer'); });
+t('contextualFragment', () => { host().appendChild(document.createRange().createContextualFragment(mark('cf'))); });
+t('setHTMLUnsafe', () => { host().setHTMLUnsafe(mark('unsafe')); });
+t('cloneNode', () => { const s = document.createElement('script'); s.textContent = 'window.__n.clone = (window.__n.clone || 0) + 1'; const c = s.cloneNode(true); host().appendChild(c); });
+t('cloneAfterRun', () => { const d = host(); const s = document.createElement('script'); s.textContent = 'window.__n.cloneRun = (window.__n.cloneRun || 0) + 1'; d.appendChild(s); d.appendChild(s.cloneNode(true)); });
+t('moveAfterRun', () => { const d = host(), e = host(); const s = document.createElement('script'); s.textContent = 'window.__n.moved = (window.__n.moved || 0) + 1'; d.appendChild(s); e.appendChild(s); });
+t('templateContent', () => { const tp = document.createElement('template'); tp.innerHTML = mark('tpl'); host().appendChild(tp.content); host().appendChild(document.importNode(tp.content, true)); });
+t('domparser-adopt', () => { const d = new DOMParser().parseFromString('<body>' + mark('dp'), 'text/html'); host().appendChild(document.adoptNode(d.body.firstChild)); });
+setTimeout(() => { Object.assign(out, window.__n); window.__out = () => JSON.stringify(out, null, 1); window.__done = true; }, 100);
+</script>

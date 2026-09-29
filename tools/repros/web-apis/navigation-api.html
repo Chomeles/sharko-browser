@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Navigation API</title>
+<!-- Chromium: window.navigation reports entries, fires `navigate` for location/history/anchor navigations and lets a handler intercept them.
+     Sharko: `navigation` and the Navigation* interfaces are not defined (history.pushState/hashchange/popstate work). -->
+<script src="repro.js"></script>
+<script>
+addEventListener('load', function () { setTimeout(run, 100); });   // navigations during load are converted to `replace`
+function run() {
+  c('api', function (done) { done([typeof self.navigation, typeof self.NavigateEvent, typeof self.NavigationHistoryEntry].join()); });
+  c('sequence', async function (done) {
+    try {
+      var out = [], base = location.href.split('#')[0];
+      var first = new Promise(function (r) { navigation.addEventListener('navigate', function h(e) { navigation.removeEventListener('navigate', h); r([e.navigationType, e.destination.url.replace(base, ''), e.canIntercept, e.hashChange, e.userInitiated].join()); }); });
+      location.hash = '#a'; out.push(await first);
+      var r = navigation.navigate('#b'), en = await r.committed, en2 = await r.finished; out.push(en.url.split('#')[1] + ':' + (en === en2) + ':' + (navigation.currentEntry === en));
+      var order = []; navigation.addEventListener('navigate', function h(e) { navigation.removeEventListener('navigate', h); e.intercept({ handler: function () { order.push('handler'); return new Promise(function (res) { setTimeout(res, 30); }); } }); });
+      await navigation.navigate('#c').finished; order.push('finished'); out.push(order.join() + ':' + location.hash);
+      var push = new Promise(function (res) { navigation.addEventListener('navigate', function h(e) { navigation.removeEventListener('navigate', h); res(e.navigationType + ':' + e.canIntercept); }); });
+      history.pushState({}, '', '#d'); out.push(await push);
+      out.push(navigation.entries().every(function (e) { return typeof e.key === 'string' && typeof e.id === 'string'; }));
+      done(out.join(' '));
+    } catch (e) { done('rejected ' + (e && e.name)); }
+  });
+  finish('navigation-api', { api: 'object,function,function', sequence: 'push,#a,true,true,false b:true:true handler,finished:#c push:true true' });
+}
+</script>

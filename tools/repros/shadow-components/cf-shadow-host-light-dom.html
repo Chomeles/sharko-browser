@@ -1,0 +1,31 @@
+<!doctype html><html><head><title>t</title></head><body>
+<!-- WPT-like: light children of a shadow host stay in the tree (Turnstile probe, docs/lanes/shadow-components.md task 1). Expected: <name>.expected.json (Chromium). -->
+<div id="pre">pre-existing light child</div>
+<script>
+var out = {};
+var sr = document.body.attachShadow({ mode: 'closed' });
+sr.innerHTML = '<div id="inshadow" style="width:100px;height:20px">shadow content</div>';
+out.shadowRootVisible = document.body.shadowRoot === null ? 'null(closed)' : 'exposed';
+// light DOM append after attaching the shadow root (what the Turnstile iframe does)
+var d = document.createElement('div'); d.id = 'lightkid'; d.textContent = 'hello'; d.style.cssText = 'width:50px;height:30px;font:16px serif';
+var ret = document.body.appendChild(d);
+out.isConnected = d.isConnected;
+out.parentIsBody = d.parentNode === document.body;
+out.parentName = d.parentNode && d.parentNode.nodeName;
+out.bodyChildren = document.body.childNodes.length + ':' + Array.prototype.map.call(document.body.children, function (x) { return x.localName + (x.id ? '#' + x.id : ''); }).join(',');
+out.gebi = !!document.getElementById('lightkid');
+out.qsa = document.querySelectorAll('#lightkid').length;
+out.bodyLast = document.body.lastChild === d;
+out.rect = JSON.stringify(d.getBoundingClientRect().toJSON ? (function (r) { return [r.width, r.height]; })(d.getBoundingClientRect()) : 0);
+document.body.insertAdjacentHTML('beforeend', '<span id="iah">x</span>');
+out.iahFound = document.querySelectorAll('#iah').length;
+out.preFound = !!document.getElementById('pre') + '/' + (document.getElementById('pre') && document.getElementById('pre').isConnected);
+var x = document.createElement('x'); document.body.appendChild(x);
+out.cmp = document.body.compareDocumentPosition(sr.querySelector('#inshadow'));
+out.contains = document.body.contains(sr.querySelector('#inshadow'));
+out.shadowElRoot = sr.querySelector('#inshadow').getRootNode() === sr;
+out.shadowElConnected = sr.querySelector('#inshadow').isConnected;
+out.shadowElParent = sr.querySelector('#inshadow').parentNode === sr;
+document.title = JSON.stringify(out);
+window.__out = function () { return JSON.stringify(out, null, 1); }; window.__done = true;
+</script></body></html>

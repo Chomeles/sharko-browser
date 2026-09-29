@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Module workers</title>
+<!-- Chromium: type:'module' workers are real ES modules (import.meta, static/dynamic import, top-level await, no importScripts).
+     Sharko: the worker source is run as a classic script unless it starts with import/export (40_webapi.js Worker#start). -->
+<script src="repro.js"></script>
+<script>
+function worker(k, url, opts, pick) { c(k, function (done) { var w = new Worker(url, opts); w.onmessage = function (e) { done(pick ? pick(e.data) : e.data); w.terminate(); }; w.onerror = function (e) { done('error'); e.preventDefault && e.preventDefault(); }; }); }
+addEventListener('load', function () {
+  worker('importMeta', 'mw-import-meta.js', { type: 'module' });
+  worker('staticImportDynamicImportTopLevelAwait', 'mw-static.js', { type: 'module', name: 'mw1' });
+  worker('missingExportIsAnError', 'mw-error.js', { type: 'module' });
+  worker('classicStillClassic', blobURL('postMessage(typeof importScripts + typeof self.import)'), {});
+  finish('module-worker', {
+    importMeta: { meta: 'string', base: '/' },
+    staticImportDynamicImportTopLevelAwait: { dep: 'dep', sameModule: true, importScripts: 'function', scriptsErr: 'TypeError', name: 'mw1', top: 'undefined' },
+    missingExportIsAnError: 'error',
+    classicStillClassic: 'functionundefined'
+  });
+});
+</script>

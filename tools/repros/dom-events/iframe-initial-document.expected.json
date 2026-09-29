@@ -1,0 +1,67 @@
+{
+ "no-src": {
+  "hasWindow": true,
+  "hasDocument": true,
+  "viaWindowDocument": "object",
+  "url": "about:blank",
+  "locationHref": "about:blank",
+  "readyState": "complete",
+  "compatMode": "BackCompat",
+  "bodyNull": false,
+  "childNodes": 1,
+  "baseURI": "PARENT",
+  "origin": "null"
+ },
+ "about-blank": {
+  "hasWindow": true,
+  "hasDocument": true,
+  "viaWindowDocument": "object",
+  "url": "about:blank",
+  "locationHref": "about:blank",
+  "readyState": "complete",
+  "compatMode": "BackCompat",
+  "bodyNull": false,
+  "childNodes": 1,
+  "baseURI": "PARENT",
+  "origin": "null"
+ },
+ "empty-src": {
+  "hasWindow": true,
+  "hasDocument": true,
+  "viaWindowDocument": "object",
+  "url": "about:blank",
+  "locationHref": "about:blank",
+  "readyState": "complete",
+  "compatMode": "BackCompat",
+  "bodyNull": false,
+  "childNodes": 1,
+  "baseURI": "PARENT",
+  "origin": "null"
+ },
+ "javascript-void": {
+  "hasWindow": true,
+  "hasDocument": true,
+  "viaWindowDocument": "object",
+  "url": "about:blank",
+  "locationHref": "about:blank",
+  "readyState": "complete",
+  "compatMode": "BackCompat",
+  "bodyNull": false,
+  "childNodes": 1,
+  "baseURI": "PARENT",
+  "origin": "null"
+ },
+ "srcdoc": {
+  "hasWindow": true,
+  "hasDocument": true,
+  "viaWindowDocument": "object",
+  "url": "about:blank",
+  "locationHref": "about:blank",
+  "readyState": "complete",
+  "compatMode": "BackCompat",
+  "bodyNull": false,
+  "childNodes": 1,
+  "baseURI": "PARENT",
+  "origin": "null"
+ }
+}

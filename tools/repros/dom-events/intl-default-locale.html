@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<title>Intl default locale follows navigator.language</title>
+<!-- Sharko reports navigator.language de-DE (and sends Accept-Language de-DE) but V8/ICU keeps the OS locale, so toLocaleString(), Intl.*() without a locale and
+     Date#toString use en-US: "1/5/2024, 1:04:05 PM", "1,234,567.891", "EUR1,234.50" (Chromium with de-DE: "5.1.2024, 13:04:05", "1.234.567,891", "1.234,50 EUR").
+     Fix: v8::icu::set_default_locale in crates/script/src/platform.rs before the first isolate. The probes compare default output with explicit-locale output, so the
+     expected values hold in any locale. -->
+<body>
+<script>
+const out = {};
+const t = (name, fn) => { try { out[name] = fn(); } catch (e) { out[name] = 'ERR ' + e.name; } };
+const d = new Date(Date.UTC(2024, 0, 5, 13, 4, 5));
+const L = navigator.language;
+t('intl-locale-is-navigator-language', () => Intl.DateTimeFormat().resolvedOptions().locale === L || Intl.DateTimeFormat().resolvedOptions().locale === L.split('-')[0]);
+t('toLocaleString', () => d.toLocaleString() === d.toLocaleString(L));
+t('toLocaleDateString', () => d.toLocaleDateString() === d.toLocaleDateString(L));
+t('number', () => (1234567.891).toLocaleString() === (1234567.891).toLocaleString(L));
+t('currency', () => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'EUR' }).format(1234.5) === new Intl.NumberFormat(L, { style: 'currency', currency: 'EUR' }).format(1234.5));
+t('relative', () => new Intl.RelativeTimeFormat().format(-1, 'day') === new Intl.RelativeTimeFormat(L).format(-1, 'day'));
+t('list', () => new Intl.ListFormat().format(['a', 'b', 'c']) === new Intl.ListFormat(L).format(['a', 'b', 'c']));
+t('collator', () => ['z', 'ä', 'a'].sort(new Intl.Collator().compare).join('') === ['z', 'ä', 'a'].sort(new Intl.Collator(L).compare).join(''));
+window.__out = () => JSON.stringify(out, null, 1);
+window.__done = true;
+</script>

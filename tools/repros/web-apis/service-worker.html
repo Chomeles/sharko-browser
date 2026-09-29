@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Service worker and Cache API</title>
+<!-- Chromium: navigator.serviceWorker registers sw.js, which takes control, answers /sw-virtual.txt itself and echoes messages; caches (CacheStorage)
+     stores Request/Response pairs. Sharko: neither `navigator.serviceWorker` nor `caches` exist (feature-detecting sites skip them; unguarded ones throw). -->
+<script src="repro.js"></script>
+<script>
+addEventListener('load', function () {
+  c('apiSurface', function (done) { done([typeof navigator.serviceWorker, typeof self.ServiceWorkerRegistration, typeof self.caches, typeof self.CacheStorage, typeof self.Cache].join()); });
+  c('cacheRoundTrip', function (done) { var out = []; caches.open('v1').then(function (cache) { return cache.put('/x?a=1', new Response('cached-body', { headers: { 'x-h': '1' } })).then(function () { return cache.match('/x?a=1'); }).then(function (r) { out.push(r.headers.get('x-h')); return r.text(); })
+    .then(function (t) { out.push(t); return cache.match('/x?a=2', { ignoreSearch: true }); }).then(function (r) { out.push(!!r); return cache.keys(); }).then(function (k) { out.push(k.length); return caches.keys(); }).then(function (k) { out.push(k.join()); return caches.has('v1'); })
+    .then(function (h) { out.push(h); return cache.delete('/x?a=1'); }).then(function (d) { out.push(d); return caches.delete('v1'); }).then(function (d) { out.push(d); done(out.join('|')); }); }).catch(function (e) { done('rejected ' + (e && e.name) + ' ' + out.join('|')); }); });
+  c('registerAndControl', function (done) { var reg;
+    navigator.serviceWorker.register('sw.js').then(function (r) { reg = r; return navigator.serviceWorker.ready; }).then(function () {
+      return navigator.serviceWorker.controller ? 0 : new Promise(function (res) { navigator.serviceWorker.addEventListener('controllerchange', res, { once: true }); }); })
+    .then(function () { return fetch('/sw-virtual.txt').then(function (r) { return r.text(); }); })
+    .then(function (t) { return new Promise(function (res) { navigator.serviceWorker.addEventListener('message', function (e) { res(t + '|' + e.data); }, { once: true }); navigator.serviceWorker.controller.postMessage('hi'); }); })
+    .then(function (v) { return reg.unregister().then(function (u) { done(v + '|unregistered:' + u); }); }).catch(function (e) { done('rejected ' + (e && e.name)); }); }, 8000);
+  finish('service-worker', { apiSurface: 'object,function,object,function,function', cacheRoundTrip: '1|cached-body|true|1|v1|true|true|true', registerAndControl: 'from-sw|pong:hi|unregistered:true' });
+});
+</script>

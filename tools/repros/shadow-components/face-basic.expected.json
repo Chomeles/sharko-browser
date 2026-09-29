@@ -1,0 +1,31 @@
+{
+ "upgraded": true,
+ "formOwner": true,
+ "inElements": true,
+ "length": 2,
+ "namedItem": true,
+ "fd_string": "[[\"nm\",\"v1\"]]",
+ "fd_formdata": "[[\"a\",\"1\"],[\"b\",\"2\"]]",
+ "fd_state": "[[\"nm\",\"v3\"]]",
+ "fd_null": "[]",
+ "disabledByFieldset": [
+  true,
+  "[]"
+ ],
+ "disabledAttr": true,
+ "validity": [
+  true,
+  true,
+  "need a value",
+  false,
+  true
+ ],
+ "validAgain": [
+  true,
+  true
+ ],
+ "labels": 1,
+ "reset": true,
+ "noForm": "null",
+ "log": "assoc:f,disabled:true,disabled:false,disabled:true,disabled:false,reset"
+}

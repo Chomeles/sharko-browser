@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>IndexedDB: persistence across loads, sharing between frames, Blob values</title>
+<!-- Phase 1 stores a value and navigates to ?phase=2. Chromium: the value is still there, a same-origin iframe sees the same databases (and the
+     parent's connection gets `versionchange` when the frame upgrades), Blob values survive, navigator.storage.estimate() reports numbers.
+     Sharko: databases live in the JS layer's memory of one realm (45_indexeddb.js, L.idbBackend), so none of it holds. -->
+<script src="repro.js"></script>
+<script>
+function tx(db, mode, f) { return new Promise(function (res, rej) { var t = db.transaction('s', mode), r = f(t.objectStore('s')); t.oncomplete = function () { res(r && r.result); }; t.onerror = t.onabort = function () { rej(t.error); }; }); }
+function open(name, ver, upgrade) { return new Promise(function (res, rej) { var o = indexedDB.open(name, ver); o.onupgradeneeded = function () { (upgrade || function (db) { db.createObjectStore('s'); })(o.result, o); }; o.onsuccess = function () { res(o.result); }; o.onerror = function () { rej(o.error); }; }); }
+if (location.search !== '?phase=2') {
+  open('persist', 1).then(function (db) { return tx(db, 'readwrite', function (s) { return s.put('v1', 'k'); }); }).then(function () { location.href = 'idb-persist.html?phase=2'; }, function () { location.href = 'idb-persist.html?phase=2'; });
+} else addEventListener('load', function () {
+  c('persistedAcrossLoads', function (done) { open('persist', 1).then(function (db) { return tx(db, 'readonly', function (s) { return s.get('k'); }); }).then(function (v) { done(String(v)); }, function (e) { done('rejected ' + e.name); }); });
+  c('sameOriginFrameSeesParentWrites', function (done) {
+    open('frames', 1).then(function (db) { return tx(db, 'readwrite', function (s) { return s.put('from-parent', 'k'); }).then(function () { db.close(); }); }).then(function () {
+      var f = document.createElement('iframe'); f.srcdoc = '<script>var o = indexedDB.open("frames", 1); o.onsuccess = function () { var r = o.result.transaction("s").objectStore("s").get("k"); r.onsuccess = function () { parent.postMessage("frame:" + r.result, "*"); }; }; o.onupgradeneeded = function () { o.result.createObjectStore("s"); };<\/script>';
+      addEventListener('message', function h(e) { if (/^frame:/.test(e.data)) { removeEventListener('message', h); done(e.data); } }); document.body.appendChild(f); }); });
+  c('versionchangeReachesOtherFrame', function (done) {
+    open('vc', 1).then(function (db) { db.onversionchange = function (e) { db.close(); done('versionchange:' + e.oldVersion + '>' + e.newVersion); };
+      var f = document.createElement('iframe'); f.srcdoc = '<script>indexedDB.open("vc", 2).onupgradeneeded = function () {};<\/script>'; document.body.appendChild(f); }); });
+  c('blobValueRoundTrip', function (done) { open('blobs', 1).then(function (db) { return tx(db, 'readwrite', function (s) { return s.put({ b: new Blob(['blob-text'], { type: 'text/plain' }), n: 1 }, 1); }).then(function () { return tx(db, 'readonly', function (s) { return s.get(1); }); }); })
+    .then(function (v) { return v.b instanceof Blob ? v.b.text().then(function (t) { return v.b.type + ':' + t; }) : 'not a Blob: ' + typeof v.b; }).then(done, function (e) { done('rejected ' + e.name); }); });
+  c('storageEstimate', function (done) { navigator.storage.estimate().then(function (e) { done(typeof e.quota + ':' + typeof e.usage); }, function (e) { done('rejected'); }); });
+  finish('idb-persist', { persistedAcrossLoads: 'v1', sameOriginFrameSeesParentWrites: 'frame:from-parent', versionchangeReachesOtherFrame: 'versionchange:1>2', blobValueRoundTrip: 'text/plain:blob-text', storageEstimate: 'number:number' });
+});
+</script>

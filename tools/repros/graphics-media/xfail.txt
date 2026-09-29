@@ -1,0 +1,10 @@
+# Open issues: each page passes in Chromium (window.__repro.pass === true; verify with tools/repros/layout-css/compare.js before you rely on an expectation, the pages were written
+# without a Chromium at hand) and fails in Sharko. Remove a line when its fix lands.
+# Exploration matrices (no pass/fail, read the screenshot or window.report()): paint-matrix.html, svg-matrix.html, svg-canvas-sizes.html, fingerprint-probe.js.
+svg-geometry.html
+fonts-api.html
+images.html
+canvas-2d.html
+media-elements.html
+webgl.html
+webaudio.html

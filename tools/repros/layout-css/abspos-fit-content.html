@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Absolutely positioned boxes with width: fit-content and both insets</title>
+<!-- window.report() -> [left, width] of each box. The centring idiom `position:absolute; left:0; right:0; margin:auto; width:fit-content` shrinks to the
+     content in Chromium (a, c, d: ~26 px wide, centred). Sharko stretches all of them to the viewport width: vendor/blitz-dom/src/layout/abspos.rs resolves
+     `style.size()` with maybe_resolve, which turns fit-content/min-content/max-content into auto (Taffy's own path uses resolve_absolute_sizing_keywords).
+     Box b uses -moz-fit-content, which Chromium does not parse (stretch there). An open <dialog> is d. -->
+<body style="margin:0;font:16px Arial">
+<div id="a" style="position:absolute;left:0;right:0;width:fit-content;height:fit-content;margin:auto;top:0;border:1px solid">abc</div>
+<div id="b" style="position:absolute;left:0;right:0;width:-moz-fit-content;margin:auto;top:100px;border:1px solid">abc</div>
+<div id="c" style="position:absolute;inset-inline:0;width:max-content;margin:auto;top:200px;border:1px solid">abc</div>
+<dialog id="d" open>abc</dialog>
+<script>
+window.report = function () { var o = {}; ['a', 'b', 'c', 'd'].forEach(function (i) { var r = document.getElementById(i).getBoundingClientRect(); o[i] = [Math.round(r.left), Math.round(r.width)]; }); return JSON.stringify(o); };
+// Contract of tools/repros: window.__repro = {issue, expected, actual, pass} once the page settled; expected = what Chromium gives.
+window.__repro = null;
+addEventListener('load', function () { setTimeout(function () {
+  var r = JSON.parse(window.report()), w = innerWidth, a = { a: r.a[1] < w / 4, c: r.c[1] < w / 4, dialog: r.d[1] < w / 4 };
+  var e = { a: true, c: true, dialog: true };
+  window.__repro = { issue: 'layout-css/abspos-fit-content', expected: e, actual: a, pass: JSON.stringify(a) === JSON.stringify(e) };
+}, 50); });
+</script>

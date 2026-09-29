@@ -1,0 +1,28 @@
+<!doctype html><html><head><title>t</title></head><body>
+<!-- control: insertAdjacentHTML on an unknown element (works today). Expected: <name>.expected.json (Chromium). -->
+<script>
+var out = {};
+var el = document.createElement(null);
+out.tag = el.tagName + '/' + el.localName + '/' + Object.prototype.toString.call(el);
+document.body.appendChild(el);
+out.connected = el.isConnected;
+el.insertAdjacentHTML('beforeend', '<div id="crERV20" class="EBOl60 EBOl61 EBOl62 EBOl63 EBOl64"> </div>');
+out.children = el.children.length; out.inner = el.innerHTML;
+out.byId = document.querySelectorAll('#crERV20').length;
+out.byCls = document.querySelectorAll('.EBOl62').length;
+out.gebi = !!document.getElementById('crERV20');
+// controls
+var d = document.createElement('div'); document.body.appendChild(d);
+d.insertAdjacentHTML('beforeend', '<div id="ctl1" class="k1 k2"> </div>');
+out.ctlDiv = document.querySelectorAll('#ctl1').length + '/' + d.children.length;
+var x = document.createElement('x-foo'); document.body.appendChild(x);
+x.insertAdjacentHTML('beforeend', '<div id="ctl2"> </div>');
+out.ctlCustom = document.querySelectorAll('#ctl2').length + '/' + x.children.length;
+var u = document.createElement('unknownel'); document.body.appendChild(u);
+u.insertAdjacentHTML('beforeend', '<div id="ctl3"> </div>');
+out.ctlUnknown = document.querySelectorAll('#ctl3').length + '/' + u.children.length + '/' + u.innerHTML;
+u.innerHTML = '<div id="ctl4"></div>';
+out.ctlInnerHTML = document.querySelectorAll('#ctl4').length;
+document.title = JSON.stringify(out);
+window.__out = function () { return JSON.stringify(out, null, 1); }; window.__done = true;
+</script></body></html>

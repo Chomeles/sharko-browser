@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>document.open/write/close into a blank iframe</title>
+<!-- "Document open steps" + script-created parser (HTML "dynamic markup insertion"). Sharko replaces only the body with a fragment parse: <html>/<body> attributes
+     and <head> content are lost and no load event fires (Akamai mPulse <body onload=...>, ad creatives). WPT: dynamic-markup-insertion 49/366. -->
+<body>
+<script>
+const out = {};
+const f = document.createElement('iframe');
+document.body.appendChild(f);
+const d = f.contentDocument;
+const ev = [];
+out.readyStateBefore = d.readyState;
+f.contentWindow.addEventListener('load', () => ev.push('window-load'));
+d.addEventListener('DOMContentLoaded', () => ev.push('DCL'));
+d.addEventListener('readystatechange', () => ev.push('rs:' + d.readyState));
+const r = d.open();
+out.openReturnsDocument = r === d;
+out.readyStateAfterOpen = d.readyState;
+d.write('<!DOCTYPE html><html lang=de class=x><head><title>T</title><style>p{color:red}</style></head><body class=b id=bb onload="window.__bodyLoad=1"><p>hi</p>');
+d.write('<script>window.__ranScript = 1<\/script>2');
+d.close();
+out.readyStateAfterClose = d.readyState;
+out.htmlAttrs = d.documentElement ? d.documentElement.getAttribute('lang') + '|' + d.documentElement.className : null;
+out.bodyAttrs = d.body ? d.body.className + '|' + d.body.id + '|' + (d.body.getAttribute('onload') !== null) : null;
+out.headChildren = d.head ? [...d.head.children].map((e) => e.localName).join(',') : null;
+out.title = d.title;
+out.bodyChildren = d.body ? [...d.body.childNodes].map((n) => n.nodeName).join(',') : null;
+out.doctype = d.doctype ? d.doctype.name : null;
+out.scriptRanSync = f.contentWindow.__ranScript === 1;
+setTimeout(() => {
+  out.events = ev.join(',');
+  out.bodyOnloadRan = f.contentWindow.__bodyLoad === 1;
+  out.readyStateLater = d.readyState;
+  window.__out = () => JSON.stringify(out, null, 1);
+  window.__done = true;
+}, 500);
+</script>

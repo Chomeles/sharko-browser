@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Line height and text width by font and size</title>
+<!-- window.report() returns {"family@size": [blockHeight, textWidth]} for line-height: normal.
+     Compare Sharko (browser --headless --eval='window.report()') with Chromium. -->
+<body style="margin:0"><div id="host"></div>
+<script>
+window.report = function(){
+  var fams = ['Arial','"Times New Roman"','Verdana','Georgia','"Courier New"','Helvetica','sans-serif','serif','monospace','system-ui','Tahoma','"Trebuchet MS"'];
+  var sizes = [10,11,12,13,14,15,16,18,20,24,32];
+  var host = document.getElementById('host'); var out = {};
+  var txt = 'The quick brown fox jumps over the lazy dog 0123456789';
+  fams.forEach(function(f){ sizes.forEach(function(s){
+    var d = document.createElement('div'); d.style.cssText = 'font:'+s+'px '+f+';line-height:normal;position:absolute;white-space:nowrap';
+    var sp = document.createElement('span'); sp.textContent = txt; d.appendChild(sp); host.appendChild(d);
+    out[f.replace(/"/g,'')+'@'+s] = [Math.round(d.getBoundingClientRect().height*100)/100, Math.round(sp.getBoundingClientRect().width*100)/100];
+    host.removeChild(d);
+  }); });
+  return JSON.stringify(out);
+};
+</script>

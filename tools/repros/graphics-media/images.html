@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>image formats</title>
+<!-- Backlog items 5 and 6. Chromium: every image loads; the EXIF-rotated JPEG (320x240 stored, orientation 6) reports 240x320; the palette-less GIF is valid (1x1).
+     Sharko (Sep 29): avif and no-palette.gif fail to decode, the JPEG keeps 320x240, animated images show frame 0 only. -->
+<body>
+<script>
+const files = ['green.png', 'exif-orientation-6.jpg', 'animated.gif', 'animated.webp', 'sample.avif', 'no-palette.gif'];
+const want = { 'green.png': '100x100', 'exif-orientation-6.jpg': '240x320', 'animated.gif': '100x100', 'animated.webp': '100x100', 'sample.avif': '100x100', 'no-palette.gif': '1x1' };
+const out = {};
+window.report = () => JSON.stringify(out);
+Promise.all(files.map((f) => new Promise((res) => {
+  const i = new Image();
+  i.onload = () => { out[f] = i.naturalWidth + 'x' + i.naturalHeight; res(); };
+  i.onerror = () => { out[f] = 'error'; res(); };
+  i.src = 'img/' + f;
+}))).then(() => {
+  // image-set() must pick by device pixel ratio: at 1x the green square (screenshot check: a 10px green square below the text; Sharko picks the 2x candidate, the JPEG).
+  const d = document.createElement('div');
+  d.style.cssText = 'width:10px;height:10px;background:image-set(url(img/green.png) 1x, url(img/exif-orientation-6.jpg) 2x) 0 0/10px 10px';
+  document.body.appendChild(d);
+  const bad = files.filter((f) => out[f] !== want[f]);
+  window.__repro = { issue: 'image-formats', expected: want, actual: out, pass: bad.length === 0, failing: bad };
+});
+</script>

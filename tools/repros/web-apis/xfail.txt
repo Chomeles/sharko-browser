@@ -1,0 +1,15 @@
+# Open issues: each page passes in Chromium (window.__repro.pass === true) and fails in Sharko. Remove a line when its fix lands (run.js reports XPASS).
+# Not listed on purpose: idb-library-patterns.html (regression guard, passes) and api-matrix.html (exploration matrix, see its header).
+blob-urls.html
+module-worker.html
+cors.html
+streams.html
+idb-persist.html
+service-worker.html
+eventsource.html
+messaging.html
+crypto-asym.html
+platform-env.html
+cookie-store.html
+navigation-api.html
+perf-timeline.html

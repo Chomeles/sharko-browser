@@ -1,0 +1,4 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><style>body{font:16px system-ui;margin:24px;max-width:760px}pre{background:#eee;padding:8px;min-height:2em}</style><title>text input and IME</title><h1>IME / text input</h1>
+<p>With a Japanese/Chinese IME: composition must show the preedit inline and the candidate window must sit at the caret.</p>
+<input id=i size=40 placeholder="input"><br><textarea id=t rows=4 cols=40></textarea><div contenteditable style="border:1px solid #888;padding:8px;margin-top:8px">contenteditable</div>
+<pre id=log></pre><script>for(const t of ['compositionstart','compositionupdate','compositionend','beforeinput','input'])addEventListener(t,e=>log.textContent=t+' '+(e.data??'')+'\n'+log.textContent.slice(0,600),true)</script>

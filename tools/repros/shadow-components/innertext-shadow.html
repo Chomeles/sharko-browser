@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>shadow tree vs innerText</title></head>
+<body>
+<p>W_LIGHT_TEXT</p>
+<x-declarative>
+  <template shadowrootmode="open"><nav><a href="#">W_DSD_SHADOW_NAV</a> <slot></slot></nav></template>
+  <span>W_DSD_SLOTTED_LIGHT</span>
+</x-declarative>
+<x-imperative></x-imperative>
+<x-empty-root><span>W_LIGHT_CHILD_OF_EMPTY_SHADOW_HOST</span></x-empty-root>
+<script>
+customElements.define('x-imperative', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open' }).innerHTML = '<header><b>W_IMPERATIVE_SHADOW</b></header>'; }
+});
+customElements.define('x-empty-root', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open' }); }
+});
+window.__report = () => {
+  const t = document.body.innerText;
+  const words = ['W_LIGHT_TEXT', 'W_DSD_SHADOW_NAV', 'W_DSD_SLOTTED_LIGHT', 'W_IMPERATIVE_SHADOW', 'W_LIGHT_CHILD_OF_EMPTY_SHADOW_HOST'];
+  const rows = {};
+  const rendered = (w) => {
+    // find the element holding the token, in light DOM or in open shadow roots
+    const find = (root) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) { const r = find(el.shadowRoot); if (r) return r; }
+        if (el.children.length === 0 && (el.textContent || '').includes(w)) return el;
+      }
+      return null;
+    };
+    const el = find(document);
+    if (!el) return 'not-found';
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? 'rendered' : 'no-box';
+  };
+  for (const w of words) rows[w] = 'innerText=' + t.includes(w) + ' ' + rendered(w);
+  rows.__bodyQueryFindsShadowText = document.body.querySelectorAll('nav, header').length;
+  return JSON.stringify(rows);
+};
+window.__out = window.__report;
+window.__done = true;
+</script>
+</body></html>

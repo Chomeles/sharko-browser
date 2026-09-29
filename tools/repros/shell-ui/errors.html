@@ -1,0 +1,5 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width"><style>body{font:16px system-ui;margin:24px;max-width:760px}pre{background:#eee;padding:8px;min-height:2em}</style><title>error pages</title><h1>Network and certificate errors</h1>
+<ul><li><a href="http://127.0.0.1:1/">connection refused</a></li><li><a href="http://nonexistent.invalid/">DNS failure</a></li>
+<li><a href="https://expired.badssl.com/">expired certificate</a></li><li><a href="https://self-signed.badssl.com/">self-signed</a></li><li><a href="https://wrong.host.badssl.com/">wrong host</a></li><li><a href="https://untrusted-root.badssl.com/">untrusted root</a></li>
+<li><a href="http://httpstat.us/500">500</a> / <a href="http://127.0.0.1:8765/nope">404 (serve.py)</a></li><li><a href="file:///does/not/exist">file not found</a></li><li><a href="ftp://example.com/">unsupported scheme</a></li></ul>
+<p>Chrome shows a distinct page per class (ERR_CONNECTION_REFUSED, ERR_NAME_NOT_RESOLVED, NET::ERR_CERT_DATE_INVALID with an interstitial). Sharko shows one generic page with the raw error text.</p>
