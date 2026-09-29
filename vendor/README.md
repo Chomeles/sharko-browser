@@ -313,3 +313,9 @@ Patches so far:
     language is the closest `lang` attribute up the tree (none: the empty language), matched
     with RFC 4647 extended filtering (Stylo's `extended_filtering`); `lang_attr` reports the
     attribute so attribute changes restyle.
+84. `stylo/servo/selector_parser.rs`, `stylo/selector_parser.rs`,
+    `stylo/invalidation/element/invalidation_map.rs`, `blitz-dom/src/stylo.rs`: `:dir(ltr|rtl)`
+    (Selectors 4 §8.2; the servo build did not parse it). Stylo parses it into
+    `NonTSPseudoClass::Dir` and depends on the `dir` attribute; blitz matches the element's
+    directionality (HTML §3.2.6.1): `dir` ltr/rtl, `auto` and `<bdi>` by the first strong
+    character (Hebrew/Arabic/... blocks RTL), else the parent's, `ltr` at the root.
