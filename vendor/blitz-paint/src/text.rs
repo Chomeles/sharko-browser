@@ -272,6 +272,8 @@ pub(crate) struct DrawTextContext {
     path_scratch: Vec<NodeId>,
     deco_boxes: Vec<LineDecoration>,
     win_ascent_ratios: WinAscentCache,
+    /// PATCH 94: paint every glyph in this colour (the mask of `background-clip: text`).
+    pub(crate) force_color: Option<Color>,
 }
 
 /// Resolve the CSS `text-decoration-thickness` to a device-pixel size.
@@ -614,6 +616,7 @@ pub(crate) fn stroke_text<'a>(
         path_scratch,
         deco_boxes,
         win_ascent_ratios,
+        force_color,
     } = context;
     stack.clear();
     path_scratch.clear();
@@ -708,7 +711,9 @@ pub(crate) fn stroke_text<'a>(
 
                 // The glyph colour comes from the run's own node (the stack top): `color`
                 // inherits, so the innermost inline element already carries the right value.
-                let text_color = stack.last().map(|e| e.text_color).unwrap_or(Color::BLACK);
+                let text_color = force_color
+                    .or_else(|| stack.last().map(|e| e.text_color))
+                    .unwrap_or(Color::BLACK);
 
                 let embolden = if FONT_EMBOLDEN_ENABLED {
                     let fs = font_size as f64 / scale;

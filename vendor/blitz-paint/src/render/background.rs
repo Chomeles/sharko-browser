@@ -37,6 +37,9 @@ pub(super) enum BoxModelBox {
     BorderBox,
     PaddingBox,
     ContentBox,
+    /// `background-clip: text` (PATCH 94): the layer shows through the glyphs only. The box
+    /// methods below treat it as the border box; `draw_background` paints it through a mask.
+    Text,
 }
 
 // Also covers MaskClip as the type is the same
@@ -47,6 +50,7 @@ impl From<StyloBackgroundClip> for BoxModelBox {
             StyloBackgroundClip::PaddingBox => Self::PaddingBox,
             StyloBackgroundClip::ContentBox => Self::ContentBox,
 
+            StyloBackgroundClip::Text => Self::Text,
             // TODO: support BorderArea
             StyloBackgroundClip::BorderArea => Self::BorderBox,
         }
@@ -139,14 +143,19 @@ impl ElementCx<'_, '_> {
         // The background color is clipped by the clip of the last layer in the list
         let background_clip: BoxModelBox =
             (*get_cyclic(&bg_styles.background_clip.0, layer_count - 1)).into();
-        let background_clip_path = self.box_path(background_clip);
+        let text_layers = (0..layer_count).any(|idx| {
+            BoxModelBox::from(*get_cyclic(&bg_styles.background_clip.0, idx)) == BoxModelBox::Text
+        });
 
         // Draw background color (if any)
-        self.draw_solid_bg(scene, &background_clip_path);
+        if background_clip != BoxModelBox::Text {
+            let background_clip_path = self.box_path(background_clip);
+            self.draw_solid_bg(scene, &background_clip_path);
+        }
 
         for idx in (0..layer_count).rev() {
             let layer = ImageLayerStyles::from_background(bg_styles, image_data, idx);
-            if layer_paints_nothing(&layer) {
+            if layer_paints_nothing(&layer) || layer.clip == BoxModelBox::Text {
                 continue;
             }
             let background_clip_path = self.box_path(layer.clip);
@@ -164,12 +173,97 @@ impl ElementCx<'_, '_> {
                 },
             );
         }
+
+        if text_layers {
+            self.draw_text_clipped_background(scene, background_clip == BoxModelBox::Text);
+        }
+    }
+
+    /// PATCH 94: `background-clip: text` (CSS Backgrounds 4 §3.7): the layers with that clip
+    /// are painted into an isolated layer that is then intersected (`DestIn`) with the
+    /// glyphs of the element and its descendants (Blink/Gecko clip to the text of the whole
+    /// subtree, not only the element's own inline layout). Text is painted opaque in the mask
+    /// whatever its `color`; the normal text pass still draws it on top afterwards, which
+    /// is what makes `color: transparent` reveal the background.
+    fn draw_text_clipped_background(&self, scene: &mut impl PaintScene, with_color: bool) {
+        let bg_styles = &self.style.get_background();
+        let image_data = &self.element.background_images;
+        let layer_count = bg_styles.background_image.0.len();
+        let border_box = self.frame.border_box_path();
+
+        scene.push_layer(
+            peniko::Mix::Normal,
+            1.0 - f32::EPSILON, // forces an isolated buffer, see mask.rs
+            self.transform,
+            &border_box,
+            None,
+            None,
+        );
+        if with_color {
+            self.draw_solid_bg(scene, &border_box);
+        }
+        for idx in (0..layer_count).rev() {
+            let layer = ImageLayerStyles::from_background(bg_styles, image_data, idx);
+            if layer_paints_nothing(&layer) || layer.clip != BoxModelBox::Text {
+                continue;
+            }
+            self.draw_image_layer(scene, &layer);
+        }
+        scene.push_layer(
+            peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn),
+            1.0,
+            self.transform,
+            &border_box,
+            None,
+            None,
+        );
+        self.draw_subtree_text_mask(scene, self.node, self.transform);
+        scene.pop_layer();
+        scene.pop_layer();
+    }
+
+    /// Opaque glyphs of `node` (given its own transform) and its painted descendants.
+    fn draw_subtree_text_mask(&self, scene: &mut impl PaintScene, node: &blitz_dom::Node, transform: Affine) {
+        let layout = node.final_layout();
+        if node.flags.is_inline_root() {
+            if let Some(text) = node.element_data().and_then(|e| e.inline_layout_data.as_ref()) {
+                let pos = Vec2::new(
+                    (layout.padding.left + layout.border.left) as f64,
+                    (layout.padding.top + layout.border.top) as f64,
+                ) * self.scale;
+                let mut ctx = self.context.draw_text_context.borrow_mut();
+                ctx.force_color = Some(peniko::Color::BLACK);
+                crate::text::stroke_text(
+                    scene,
+                    text.layout.lines(),
+                    self.context.dom,
+                    transform * Affine::translate(pos),
+                    self.scale,
+                    node.id,
+                    &mut ctx,
+                );
+                ctx.force_color = None;
+            }
+        }
+        if let Some(children) = &*node.paint_children.borrow() {
+            for &child_id in children {
+                let child = &self.context.dom.as_ref().tree()[child_id];
+                if child.element_data().is_none()
+                    || matches!(child.style().display, taffy::Display::None)
+                {
+                    continue;
+                }
+                let loc = child.final_layout().location;
+                let t = transform * Affine::translate(Vec2::new(loc.x as f64, loc.y as f64) * self.scale);
+                self.draw_subtree_text_mask(scene, child, t);
+            }
+        }
     }
 
     /// The path of the given CSS box model box for this element
     pub(super) fn box_path(&self, css_box: BoxModelBox) -> BezPath {
         match css_box {
-            BoxModelBox::BorderBox => self.frame.border_box_path(),
+            BoxModelBox::BorderBox | BoxModelBox::Text => self.frame.border_box_path(),
             BoxModelBox::PaddingBox => self.frame.padding_box_path(),
             BoxModelBox::ContentBox => self.frame.content_box_path(),
         }
@@ -178,7 +272,7 @@ impl ElementCx<'_, '_> {
     /// The rect of the given CSS box model box for this element
     fn box_rect(&self, css_box: BoxModelBox) -> Rect {
         match css_box {
-            BoxModelBox::BorderBox => self.frame.border_box,
+            BoxModelBox::BorderBox | BoxModelBox::Text => self.frame.border_box,
             BoxModelBox::PaddingBox => self.frame.padding_box,
             BoxModelBox::ContentBox => self.frame.content_box,
         }
