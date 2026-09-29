@@ -1,12 +1,12 @@
 # Rules (single source of truth)
 
-If any other file in the repo contradicts this one, this one wins, and the other file is to be corrected.
+Rewritten at the owner's request: the earlier rules were set wrongly and are void. If any other file contradicts this one, this one wins and the other file gets corrected.
 
-1. Goal: an own-engine browser that works normally on the market. No WebView2 fallback. Windows is the target and the only release platform.
-2. Method: reproduce against Chromium, read how a reference engine does it (`docs/REFERENCE-MAP.md`), fix the root cause per standard/WPT. Never per-site hacks.
-3. Git: work on your outcome branch, one root cause per commit, push it. The lead opens pull requests to the default branch (lane sessions do not open PRs themselves).
-4. No tags (except via the release gate), no force-push, no history rewriting, no skipped/weakened tests.
-5. Commit messages end with `[skip ci]` (except a deliberate CI trigger) and the trailers from `git log -1 --format=%B`. No model names anywhere in the repo.
-6. Releases: only the lead, only through the gate in `docs/RELEASING.md`.
+1. Goal: an own-engine browser that works normally on the market. No WebView2 fallback. Windows only.
+2. Method: reproduce against Chromium, read how a reference engine does it (`docs/REFERENCE-MAP.md`), fix the root cause per standard/WPT, never per-site hacks.
+3. Speed first: work in parallel (lane sessions with their own machines), small steps, no waiting for permission on decisions inside these rules.
+4. Git: one root cause per commit. Lanes push to their `claude/lane-*` branch. The lead opens a pull request per merged lane or milestone (never one giant collector PR) and merges it.
+5. Releases: the lead releases whenever the Windows smoke build starts and there are no crashes; sitediff numbers are reported with every release but do not block it. Pre-releases (`-beta.N`) are preferred while the sitediff median is above 5.
+6. Commit messages end with the trailers from `git log -1 --format=%B`. No model names anywhere in the repo.
 7. README (en/de) is kept current when behaviour changes.
 8. Reports: short, German, factual, including failures.
