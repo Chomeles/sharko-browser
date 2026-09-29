@@ -69,6 +69,8 @@ mod stylo_to_parley;
 mod traversal;
 /// Versioned storage for the nodes of the DOM tree.
 mod tree;
+/// Propagation of the root element's or body's `overflow` to the viewport.
+mod viewport_overflow;
 
 mod url;
 
@@ -98,6 +100,7 @@ pub use mutator::DocumentMutator;
 pub use node::{Attribute, DocumentData, ElementData, Node, NodeData, TextNodeData};
 pub use parley::FontContext;
 pub use scrolling::{ScrollBehavior, ScrollLogicalPosition};
+pub use viewport_overflow::ViewportOverflow;
 pub use tree::NodeTree;
 
 /// Convert a Blitz [`NodeId`] into a [`taffy::NodeId`] (which wraps a `u64`).

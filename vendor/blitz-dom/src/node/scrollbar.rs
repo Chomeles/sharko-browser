@@ -76,13 +76,15 @@ impl Node {
     /// Whether the node shows an overlay scrollbar in the given axis:
     /// always for `overflow: scroll`, only when the content overflows for
     /// `overflow: auto`, never otherwise — and never when
-    /// `scrollbar-width: none`.
+    /// `scrollbar-width: none`, or when the element's `overflow` belongs to the viewport.
     pub fn wants_scrollbar(&self, axis: AbsoluteAxis) -> bool {
         use style::values::computed::Overflow;
         let Some(style) = self.primary_styles() else {
             return false;
         };
-        if self.scrollbar_width() == ScrollbarWidth::None {
+        if self.scrollbar_width() == ScrollbarWidth::None
+            || self.flags.propagates_overflow_to_viewport()
+        {
             return false;
         }
         let (overflow, scroll_extent) = match axis {

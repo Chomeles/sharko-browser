@@ -23547,14 +23547,8 @@
    "scrollLeft/scrollTop on the HTML body element in quirks mode": "FAIL",
    "scrollWidth/scrollHeight on the HTML body element in quirks mode": "FAIL",
    "clientWidth/clientHeight on the HTML body element in quirks mode": "FAIL",
-   "scroll() on the root element in non-quirks mode": "FAIL",
-   "scrollBy() on the root element in non-quirks mode": "FAIL",
-   "scrollLeft/scrollTop on the root element in non-quirks mode": "FAIL",
    "scrollWidth/scrollHeight on the root element in non-quirks mode": "FAIL",
    "clientWidth/clientHeight on the root element in non-quirks mode": "FAIL",
-   "scroll() on the HTML body element in non-quirks mode": "FAIL",
-   "scrollBy() on the HTML body element in non-quirks mode": "FAIL",
-   "scrollLeft/scrollTop on the HTML body element in non-quirks mode": "FAIL",
    "clientWidth/clientHeight on the HTML body element in non-quirks mode": "FAIL"
   }
  },

@@ -622,6 +622,16 @@ impl BaseDocument {
                 }
                 (taffy_style, style.clone_display())
             };
+            // PATCH: the element whose `overflow` is applied to the viewport (CSS Overflow 3
+            // §3.3) has a used `overflow` of `visible`: it is no scroll container, so what
+            // overflows it contributes to the scrollable overflow of its parent, and
+            // eventually of the viewport's root element.
+            if node.flags.propagates_overflow_to_viewport() {
+                taffy_style.overflow = taffy::Point {
+                    x: taffy::Overflow::Visible,
+                    y: taffy::Overflow::Visible,
+                };
+            }
             taffy_style.item_is_replaced = node
                 .data
                 .downcast_element()

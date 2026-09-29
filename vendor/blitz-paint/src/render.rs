@@ -404,9 +404,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             .and_then(|el| el.text_input_data())
             .is_some();
         // The root element's overflow is propagated to the viewport (which is clipped by the
-        // window/surface bounds), so the root element must not clip its own overflow.
+        // window/surface bounds), so the root element must not clip its own overflow. Nor
+        // must the `<body>` whose `overflow` the viewport took over from the root element.
         let is_root_element = self.root_element_id == Some(node_id);
         let should_clip = !is_root_element
+            && !node.flags.propagates_overflow_to_viewport()
             && (is_image
                 || is_sub_doc
                 || is_text_input

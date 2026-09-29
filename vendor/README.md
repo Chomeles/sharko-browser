@@ -262,3 +262,16 @@ Patches so far:
     to the same detached list (freed by `drop_detached_sub_documents()`). A script that
     took `iframe.contentWindow` and then set `srcdoc` in the same entry keeps using the
     old realm, whose raw document pointer would otherwise dangle.
+77. `blitz-dom/src/viewport_overflow.rs`, `resolve.rs`, `layout/damage.rs`, `scrolling.rs`,
+    `node/{node,scrollbar}.rs`, `blitz-paint/src/{render,text}.rs`: `overflow` propagation to
+    the viewport (CSS Overflow 3 §3.3). The `overflow` of the root element, or, when that is
+    `visible` on an `<html>` root, of its first `<body>` (unless either has containment),
+    belongs to the viewport (`visible` counts as `auto`, `clip` as `hidden`): the element it
+    was taken from is flagged (`OVERFLOW_PROPAGATED_TO_VIEWPORT`, resolved after styling,
+    with damage when the source changes) and has a used `overflow` of `visible` in layout,
+    paint (no clip, no scrollbar) and scrolling. Before, a `<body>` with a definite height
+    and `overflow: hidden|auto|scroll` (an app shell, a consent banner's scroll lock) was a
+    scroll container of its own, so `documentElement.scrollHeight`, `scrollTo`, the wheel and
+    full-page captures saw a page as tall as the window, and a locked `<html>` could still be
+    scrolled by the user. User scrolling along a `hidden` viewport axis is blocked (an offset
+    that scripts set stays), programmatic scrolling is not.

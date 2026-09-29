@@ -86,6 +86,10 @@ bitflags! {
         const FLUSHED_AS_ITEM = 1 << 15;
         /// PATCH: the unrounded layout of this node itself changed since the last rounding.
         const LAYOUT_SELF_CHANGED = 1 << 16;
+        /// PATCH: the element's `overflow` is applied to the viewport (CSS Overflow 3 §3.3):
+        /// the root element, or the `<body>` of an `<html>` root with `overflow: visible`.
+        /// Its used `overflow` is `visible`: it is not a scroll container and does not clip.
+        const OVERFLOW_PROPAGATED_TO_VIEWPORT = 1 << 17;
     }
 }
 
@@ -103,6 +107,11 @@ impl NodeFlags {
     #[inline(always)]
     pub fn is_in_document(&self) -> bool {
         self.contains(Self::IS_IN_DOCUMENT)
+    }
+
+    #[inline(always)]
+    pub fn propagates_overflow_to_viewport(&self) -> bool {
+        self.contains(Self::OVERFLOW_PROPAGATED_TO_VIEWPORT)
     }
 
     #[inline(always)]
@@ -895,7 +904,8 @@ impl Node {
         for (i, node) in chain.iter().enumerate().rev() {
             let layout = node.final_layout();
             let (bx, by) = (ox + layout.location.x, oy + layout.location.y);
-            if i >= first_clip {
+            // (the element whose `overflow` the viewport took over does not clip)
+            if i >= first_clip && !node.flags.propagates_overflow_to_viewport() {
                 if let Some(styles) = node.primary_styles() {
                     use style::values::computed::Overflow;
                     let clips_x = styles.get_box().overflow_x != Overflow::Visible;

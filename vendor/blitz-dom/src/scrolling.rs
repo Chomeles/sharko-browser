@@ -29,7 +29,8 @@ pub enum ScrollLogicalPosition {
 ///
 /// Per the CSS overflow propagation rules the root element has no scrolling mechanism of its
 /// own (its overflow is applied to the viewport), so [`ScrollTarget::Node`] holding the root
-/// element is equivalent to [`ScrollTarget::Viewport`].
+/// element is equivalent to [`ScrollTarget::Viewport`]. So is the `<body>` whose `overflow`
+/// the viewport took over from the root element (see `viewport_overflow.rs`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ScrollTarget {
     Node(NodeId),
@@ -162,9 +163,24 @@ impl BaseDocument {
                 y: current.y + by.y,
             },
         };
+        // The user cannot scroll an `overflow: hidden` axis, which keeps the offset script
+        // left there (clamping it into the empty user range would reset it) and passes the
+        // scroll on.
+        let (hidden_x, hidden_y) = match include_hidden {
+            true => (false, false),
+            false => self.hidden_axes(target),
+        };
         let end = Point {
-            x: unclamped.x.clamp(0.0, max.x),
-            y: unclamped.y.clamp(0.0, max.y),
+            x: if hidden_x {
+                current.x
+            } else {
+                unclamped.x.clamp(0.0, max.x)
+            },
+            y: if hidden_y {
+                current.y
+            } else {
+                unclamped.y.clamp(0.0, max.y)
+            },
         };
 
         if self.should_scroll_smoothly(target, request.behavior) {
@@ -269,16 +285,43 @@ impl BaseDocument {
         }
     }
 
-    /// Resolve a scroll target to the scroller which actually moves: the root element scrolls
-    /// the viewport, per the CSS overflow propagation rules.
+    /// Resolve a scroll target to the scroller which actually moves: the root element and the
+    /// element whose overflow was propagated to the viewport scroll the viewport, per the CSS
+    /// overflow propagation rules.
     fn canonical_scroll_target(&self, target: ScrollTarget) -> ScrollTarget {
         match target {
             ScrollTarget::Node(node_id)
-                if self.try_root_element().is_some_and(|el| el.id == node_id) =>
+                if self.try_root_element().is_some_and(|el| el.id == node_id)
+                    || self
+                        .nodes
+                        .get(node_id)
+                        .is_some_and(|node| node.flags.propagates_overflow_to_viewport()) =>
             {
                 ScrollTarget::Viewport
             }
             target => target,
+        }
+    }
+
+    /// The axes of a scroller with `overflow: hidden` (in the viewport's case, the `overflow` it
+    /// took over from the root element or the body).
+    fn hidden_axes(&self, target: ScrollTarget) -> (bool, bool) {
+        match self.canonical_scroll_target(target) {
+            ScrollTarget::Viewport => (
+                self.viewport_overflow.x == Overflow::Hidden,
+                self.viewport_overflow.y == Overflow::Hidden,
+            ),
+            ScrollTarget::Node(node_id) => self
+                .nodes
+                .get(node_id)
+                .and_then(|node| node.primary_styles())
+                .map(|styles| {
+                    (
+                        styles.clone_overflow_x() == Overflow::Hidden,
+                        styles.clone_overflow_y() == Overflow::Hidden,
+                    )
+                })
+                .unwrap_or((false, false)),
         }
     }
 
@@ -464,9 +507,21 @@ impl BaseDocument {
                 let scale = self.viewport.scale() as f64;
                 let window_width = self.viewport.window_size.0 as f64 / scale;
                 let window_height = self.viewport.window_size.1 as f64 / scale;
+                // An axis the viewport's `overflow` hides has no range for the user; scripts
+                // still scroll it.
+                let (scrolls_x, scrolls_y) = match include_hidden {
+                    true => (true, true),
+                    false => self.viewport_overflow.user_scrollable(),
+                };
                 let max = Point {
-                    x: (content_width - window_width).max(0.0),
-                    y: (content_height - window_height).max(0.0),
+                    x: match scrolls_x {
+                        true => (content_width - window_width).max(0.0),
+                        false => 0.0,
+                    },
+                    y: match scrolls_y {
+                        true => (content_height - window_height).max(0.0),
+                        false => 0.0,
+                    },
                 };
                 (self.viewport_scroll, max)
             }
@@ -642,7 +697,10 @@ impl BaseDocument {
                 break;
             };
             ancestor = container.layout_parent.get();
-            if container_id == root_id || !container.is_element() {
+            if container_id == root_id
+                || !container.is_element()
+                || container.flags.propagates_overflow_to_viewport()
+            {
                 continue;
             }
             let (current, max) = self.scroll_state(ScrollTarget::Node(container_id), true);

@@ -79,6 +79,10 @@ impl BaseDocument {
         self.resolve_stylist(current_time_for_animations);
         timer.record_time("style");
 
+        // PATCH: which element's `overflow` the viewport takes (after style, before damage:
+        // a changed source is marked as damaged).
+        self.update_viewport_overflow();
+
         // Propagate damage flags (from mutation and restyles) up and down the tree
         if self.incremental_layout {
             self.propagate_damage_flags(root_node_id, RestyleDamage::empty());

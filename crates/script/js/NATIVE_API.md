@@ -110,7 +110,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.offsetMetrics(id)` | `[offsetLeft, offsetTop, offsetWidth, offsetHeight, offsetParentId]` |
 | `N.clientMetrics(id)` | `[clientLeft, clientTop, clientWidth, clientHeight]` |
 | `N.scrollMetrics(id)` | `[scrollLeft, scrollTop, scrollWidth, scrollHeight]` |
-| `N.setScroll(id, left, top)` | scroll an element (for the document element / body this scrolls the viewport) |
+| `N.setScroll(id, left, top)` | scroll an element (for the document element this scrolls the viewport; a `<body>` whose `overflow` the viewport took over, CSS Overflow 3 §3.3, is no scroller and ignores it, like any element without a scrolling box) |
 | `N.scrollIntoView(id)` | – |
 | `N.elementFromPoint(x, y)` | id or 0 |
 | `N.viewport()` | `[innerWidth, innerHeight, devicePixelRatio, scrollX, scrollY, screenWidth, screenHeight]` |

@@ -219,6 +219,10 @@ pub struct BaseDocument {
     pub(crate) viewport: Viewport,
     // Scroll within our viewport
     pub(crate) viewport_scroll: crate::Point<f64>,
+    /// PATCH: the `overflow` values that apply to the viewport, and the element they were
+    /// taken from (see `viewport_overflow.rs`).
+    pub(crate) viewport_overflow: crate::ViewportOverflow,
+    pub(crate) viewport_overflow_source: Option<NodeId>,
     /// CSS media type used to evaluate `@media` rules.
     pub(crate) media_type: MediaType,
     /// Strategy for Stylo's style traversal during `resolve`.
@@ -522,6 +526,8 @@ impl BaseDocument {
             subdocument_depth: config.subdocument_depth,
             devtool_settings: DevtoolSettings::default(),
             viewport_scroll: crate::Point::ZERO,
+            viewport_overflow: crate::ViewportOverflow::INITIAL,
+            viewport_overflow_source: None,
             url: base_url,
             ua_stylesheets: HashMap::new(),
             nodes_to_stylesheet: BTreeMap::new(),
