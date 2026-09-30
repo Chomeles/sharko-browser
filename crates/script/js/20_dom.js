@@ -4299,6 +4299,9 @@
       if (options !== undefined && options !== null && options.extends !== undefined && options.extends !== null) {
         ext = `${options.extends}`;
         if (L.isValidCEName(ext)) throw new DOMException(pre + `"${ext}" is a valid custom element name`, 'NotSupportedError');
+        // HTML "look up a custom element definition": an element interface of HTMLUnknownElement
+        // (bgsound, blink, unknown names...) cannot be extended.
+        if (L.elementProtoFor(ext, L.NS_HTML) === L.HTMLUnknownElement.prototype) throw new DOMException(pre + `"${ext}" is an HTMLUnknownElement`, 'NotSupportedError');
       }
       if (this.#defining) throw new DOMException(pre + 'this registry is already defining an element', 'NotSupportedError');
       this.#defining = true;

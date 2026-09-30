@@ -292,3 +292,16 @@ test('custom elements: template contents stay inert (innerHTML, cloneNode) and u
   `);
   assert.strictEqual(JSON.stringify(e.run('__ce')), JSON.stringify(['parsed:0', 'cloned:0:false', 'ctor', 'imported:1:true', 'src:1']));
 });
+
+test('customElements.define: extends an HTMLUnknownElement interface throws NotSupportedError', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    const o = [];
+    for (const ext of ['bgsound', 'blink', 'spacer', 'nonexistent', 'div']) {
+      try { customElements.define('x-' + ext, class extends HTMLElement {}, { extends: ext }); o.push('ok'); }
+      catch (err) { o.push(err.name); }
+    }
+    o.join();
+  `);
+  assert.strictEqual(r, 'NotSupportedError,NotSupportedError,NotSupportedError,NotSupportedError,ok');
+});
