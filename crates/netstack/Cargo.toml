@@ -10,7 +10,7 @@ blitz-traits.workspace = true
 url.workspace = true
 serde.workspace = true
 tokio.workspace = true
-wreq = { version = "0.16.1", default-features = false, features = ["tokio-rt", "webpki-roots", "gzip", "deflate", "brotli", "zstd", "system-proxy", "stream", "socks", "prefix-symbols"] }
+wreq = { version = "0.16.1", default-features = false, features = ["tokio-rt", "webpki-roots", "gzip", "deflate", "brotli", "zstd", "system-proxy", "stream", "socks"] }
 wreq-util = { version = "0.2.0", default-features = false, features = ["emulation"] }
 rustls-native-certs = "0.8"
 webpki-root-certs = "1"
