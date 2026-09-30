@@ -4280,10 +4280,14 @@
   // =======================================================================================
   const CE_RESERVED = new Set(['annotation-xml', 'color-profile', 'font-face', 'font-face-src', 'font-face-uri',
     'font-face-format', 'font-face-name', 'missing-glyph']);
-  const PCEN_RE = /^[a-z][\-.0-9_a-z\u00B7\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u037D\u037F-\u1FFF\u200C\u200D\u203F\u2040\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}]*$/u;
+  // HTML "valid custom element name" (2024 wording): a lowercase ASCII start, no ASCII upper alpha,
+  // no whitespace, NUL, '/' or '>' (the old PCENChar ranges rejected U+00D7, U+3000 and plane 15).
+  const PCEN_RE = /^[a-z][^\t\n\f\r \0/>A-Z]*$/;
   L.isValidCEName = function (n) { return n.includes('-') && PCEN_RE.test(n) && !CE_RESERVED.has(n); };
   function isConstructor(f) {
-    try { Reflect.construct(String, [], f); return true; } catch (_) { return false; }
+    // IsConstructor without observable effects: a proxy's [[Construct]] exists iff the target's,
+    // and the trap keeps `new` from reading f.prototype or calling f.
+    try { new (new Proxy(f, { construct() { return {}; } }))(); return true; } catch (_) { return false; }
   }
   const CE_CALLBACKS = ['connectedCallback', 'disconnectedCallback', 'adoptedCallback', 'attributeChangedCallback', 'connectedMoveCallback'];
   const CE_FORM_CALLBACKS = ['formAssociatedCallback', 'formResetCallback', 'formDisabledCallback', 'formStateRestoreCallback'];

@@ -317,3 +317,25 @@ test('a document without browsing context does not upgrade or construct custom e
   `);
   assert.strictEqual(r, 'true,false,false');
 });
+
+test('valid custom element names follow the relaxed 2024 definition', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    const ok = (n) => { try { customElements.define(n, class extends HTMLElement {}); return 1; } catch (_) { return 0; } };
+    ['a-a\\u00D7', 'a-a\\u3000', 'a-\\uDB80\\uDC00', 'a-A', 'a', 'font-face', 'a-b c'].map(ok).join('');
+  `);
+  assert.strictEqual(r, '1110000');
+});
+
+test('customElements.define rethrows an error from constructor.prototype', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    const B = (function () {}).bind({});
+    const err = new Error('boom');
+    Object.defineProperty(B, 'prototype', { get() { throw err; } });
+    let got = null;
+    try { customElements.define('x-bad-proto', B); } catch (x) { got = x; }
+    [got === err, (() => { try { customElements.define('x-arrow', () => {}); } catch (x) { return x.name; } })()].join();
+  `);
+  assert.strictEqual(r, 'true,TypeError');
+});
