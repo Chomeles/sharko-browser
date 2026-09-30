@@ -387,3 +387,7 @@ Patches so far:
     parse time, so `color: transparent` gradient headings (bsky.app sign-up dialog) painted a
     plain rectangle or nothing. Layers with that clip are painted into an isolated layer and
     intersected (`DestIn`) with the opaque glyphs of the element's subtree, as in Blink/Gecko.
+95. `blitz-dom/src/document.rs` (`get_fragment_target`, `is_in_shadow_tree`): "scroll to the
+    fragment" ignores elements inside an emulated shadow tree (their ids and `<a name>` share
+    the host's subtree). Light children slotted into a `<slot>` stay matchable. WPT
+    shadow-dom/scroll-to-the-fragment-in-shadow-tree.html.
