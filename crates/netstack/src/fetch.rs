@@ -554,7 +554,17 @@ impl NetworkCore {
     fn build_request(&self, hop: &Hop, headers: HeaderMap, version: Option<Version>) -> wreq::RequestBuilder {
         let mut url = hop.url.clone();
         url.set_fragment(None);
-        let mut builder = self.client.request(hop.method.clone(), url.as_str()).headers(headers);
+        // Send the headers in the order the header layer produced (Chrome's); the client's
+        // emulation profile would otherwise reorder them.
+        let mut order = wreq::header::OrigHeaderMap::with_capacity(headers.len());
+        for name in headers.keys() {
+            order.insert(name.clone());
+        }
+        let mut builder = self
+            .client
+            .request(hop.method.clone(), url.as_str())
+            .headers(headers)
+            .orig_headers(order);
         if let Some(version) = version {
             builder = builder.version(version);
         }
