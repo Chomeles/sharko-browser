@@ -77,7 +77,15 @@ def h2_fp(s):
         elif ty == 8 and sid == 0: wu = struct.unpack('>I', body)[0]
         elif ty == 2: prio.append(f'{sid}:{body[4]+1}:{body[0]>>7}:{struct.unpack(">I", body[:4])[0]&0x7fffffff}')
         elif ty == 1:
-            return {'settings': ';'.join(settings), 'window_update': wu, 'priority_frames': ','.join(prio) or '0',
+            try:
+                import hpack
+                blk = body
+                if fl & 8: blk = blk[1:len(blk) - blk[0]]
+                if fl & 0x20: blk = blk[5:]
+                hdrs = [f'{k}: {v}' if not isinstance(k, bytes) else f'{k.decode()}: {v.decode()}' for k, v in hpack.Decoder().decode(blk)]
+            except Exception as e:
+                hdrs = [repr(e)]
+            return {'headers': hdrs, 'settings': ';'.join(settings), 'window_update': wu, 'priority_frames': ','.join(prio) or '0',
                     'hdr_flags_priority': bool(fl & 0x20), 'pseudo_order': hpack_pseudo(body, fl)}
 
 def hpack_pseudo(b, fl):

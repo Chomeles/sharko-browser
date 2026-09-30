@@ -28,8 +28,6 @@ use crate::cache::{StoredResponse, primary_key};
 use crate::core::NetworkCore;
 use crate::error::NetError;
 use crate::headers;
-#[cfg(feature = "http3")]
-use crate::alt_svc::H3Plan;
 use crate::util::{MAX_BODY_BYTES, Response, concat_chunks, find_header, headers_to_vec, version_str};
 
 const MAX_REDIRECTS: usize = 20;
@@ -151,17 +149,19 @@ fn origin_parts(url: &Url) -> (String, u16, String) {
 }
 
 async fn read_body(
-    mut resp: reqwest::Response,
+    resp: wreq::Response,
     idle: Duration,
     progress: Option<&Progress>,
 ) -> Result<Bytes, NetError> {
+    use futures_util::StreamExt;
     let mut chunks = Vec::new();
     let mut total = 0usize;
     let close_delimited = resp.content_length().is_none();
     let expected = resp.content_length().unwrap_or(0);
     let mut last_report: Option<std::time::Instant> = None;
+    let mut stream = Box::pin(resp.bytes_stream());
     loop {
-        match tokio::time::timeout(idle, resp.chunk()).await {
+        match tokio::time::timeout(idle, stream.next()).await {
             Err(_) => {
                 return Err(NetError::timed_out(format!(
                     "no data received for {}s while reading the body",
@@ -171,9 +171,9 @@ async fn read_body(
             // A body delimited by the connection closing, on a TLS connection the peer
             // shut down without `close_notify` (Python's ssl servers, some CDNs): the
             // data received so far is the whole body, like other browsers treat it.
-            Ok(Err(e)) if close_delimited && is_unexpected_eof(&e) => break,
-            Ok(Err(e)) => return Err(NetError::from_reqwest(&e)),
-            Ok(Ok(Some(chunk))) => {
+            Ok(Some(Err(e))) if close_delimited && is_unexpected_eof(&e) => break,
+            Ok(Some(Err(e))) => return Err(NetError::from_wreq(&e)),
+            Ok(Some(Ok(chunk))) => {
                 total += chunk.len();
                 if total > MAX_BODY_BYTES {
                     return Err(NetError::too_big());
@@ -186,7 +186,7 @@ async fn read_body(
                     (progress.0)(total as u64, expected, false);
                 }
             }
-            Ok(Ok(None)) => break,
+            Ok(None) => break,
         }
     }
     Ok(concat_chunks(chunks, total))
@@ -194,7 +194,7 @@ async fn read_body(
 
 /// Whether a body read failed only because the connection ended without a proper TLS
 /// close (an `UnexpectedEof` / missing `close_notify` somewhere in the error chain).
-fn is_unexpected_eof(err: &reqwest::Error) -> bool {
+fn is_unexpected_eof(err: &wreq::Error) -> bool {
     let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(e) = cur {
         if let Some(io) = e.downcast_ref::<std::io::Error>()
@@ -551,28 +551,10 @@ impl NetworkCore {
         });
     }
 
-    /// Whether HTTP/3 may be used for `url` (feature, config, no proxy in the way: QUIC
-    /// cannot be tunneled through an HTTP proxy, Chrome disables it there as well).
-    #[cfg(feature = "http3")]
-    fn h3_allowed(&self, url: &Url, host: &str, port: u16) -> bool {
-        if !self.config.http3 || url.scheme() != "https" || host.is_empty() {
-            return false;
-        }
-        let authority = if host.contains(':') {
-            format!("https://[{host}]:{port}/")
-        } else {
-            format!("https://{host}:{port}/")
-        };
-        match authority.parse::<http::Uri>() {
-            Ok(uri) => self.proxies.intercept(&uri).is_none(),
-            Err(_) => false,
-        }
-    }
-
-    fn build_request(&self, hop: &Hop, headers: HeaderMap, version: Option<Version>) -> reqwest::RequestBuilder {
+    fn build_request(&self, hop: &Hop, headers: HeaderMap, version: Option<Version>) -> wreq::RequestBuilder {
         let mut url = hop.url.clone();
         url.set_fragment(None);
-        let mut builder = self.client.request(hop.method.clone(), url).headers(headers);
+        let mut builder = self.client.request(hop.method.clone(), url.as_str()).headers(headers);
         if let Some(version) = version {
             builder = builder.version(version);
         }
@@ -581,7 +563,7 @@ impl NetworkCore {
                 Some(progress) if !body.is_empty() => {
                     builder = builder
                         .header(CONTENT_LENGTH, body.len())
-                        .body(reqwest::Body::wrap_stream(upload_stream(body.clone(), progress.clone())));
+                        .body(wreq::Body::wrap_stream(upload_stream(body.clone(), progress.clone())));
                 }
                 _ if body.is_empty() && matches!(hop.method, Method::POST | Method::PUT | Method::PATCH) => {
                     // An empty body is sent without a length otherwise.
@@ -602,7 +584,7 @@ impl NetworkCore {
         hop: &Hop,
         headers: HeaderMap,
         origin: &str,
-    ) -> Result<(reqwest::Response, Option<OwnedSemaphorePermit>), NetError> {
+    ) -> Result<(wreq::Response, Option<OwnedSemaphorePermit>), NetError> {
         let permit = self.limiter.acquire(origin).await;
         // Like other browsers, retry once when the connection fails or is reset before a
         // response arrives: always while connecting (nothing was sent), otherwise only for
@@ -612,7 +594,7 @@ impl NetworkCore {
             match self.build_request(hop, headers.clone(), None).send().await {
                 Ok(response) => return Ok((response, permit)),
                 Err(e) => {
-                    let err = NetError::from_reqwest(&e);
+                    let err = NetError::from_wreq(&e);
                     let reset = matches!(
                         err.code(),
                         "ERR_CONNECTION_RESET" | "ERR_CONNECTION_CLOSED" | "ERR_CONNECTION_ABORTED"
@@ -628,24 +610,9 @@ impl NetworkCore {
         }
     }
 
-    /// Sends the request over TCP or QUIC (see `alt_svc` for the policy) and reads the
-    /// response body.
+    /// Sends the request and reads the response body.
     async fn network(self: &Arc<Self>, hop: &Hop, headers: HeaderMap) -> Result<NetResult, NetError> {
         let (host, port, origin) = origin_parts(&hop.url);
-        #[cfg(feature = "http3")]
-        let (response, permit) = {
-            let plan = if self.h3_allowed(&hop.url, &host, port) {
-                self.alt_svc.plan(&host, port, is_safe(&hop.method))
-            } else {
-                H3Plan::Tcp
-            };
-            match plan {
-                H3Plan::Tcp => self.send_tcp(hop, headers, &origin).await?,
-                H3Plan::Direct => self.send_h3_direct(hop, headers, &host, port, &origin).await?,
-                H3Plan::Race => self.send_race(hop, headers, &host, port, &origin).await?,
-            }
-        };
-        #[cfg(not(feature = "http3"))]
         let (response, permit) = self.send_tcp(hop, headers, &origin).await?;
 
         let status = response.status().as_u16();
@@ -682,107 +649,6 @@ impl NetworkCore {
             headers: response_headers,
             body,
         })
-    }
-
-    #[cfg(feature = "http3")]
-    async fn send_h3(&self, hop: &Hop, headers: HeaderMap) -> Result<reqwest::Response, reqwest::Error> {
-        self.build_request(hop, headers, Some(Version::HTTP_3)).send().await
-    }
-
-    /// HTTP/3 to an origin where QUIC is confirmed; falls back to TCP on failure.
-    #[cfg(feature = "http3")]
-    async fn send_h3_direct(
-        &self,
-        hop: &Hop,
-        headers: HeaderMap,
-        host: &str,
-        port: u16,
-        origin: &str,
-    ) -> Result<(reqwest::Response, Option<OwnedSemaphorePermit>), NetError> {
-        match self.send_h3(hop, headers.clone()).await {
-            Ok(response) => Ok((response, None)),
-            Err(e) => {
-                log::debug!("HTTP/3 to {origin} failed ({e}); falling back to TCP");
-                self.alt_svc.mark_broken(host, port);
-                if is_safe(&hop.method) || e.is_connect() {
-                    self.send_tcp(hop, headers, origin).await
-                } else {
-                    Err(NetError::from_reqwest(&e))
-                }
-            }
-        }
-    }
-
-    /// First HTTP/3 attempt for an origin: QUIC gets a head start, then TCP races it.
-    /// If TCP wins, the QUIC attempt continues in the background (bounded) to find out
-    /// whether HTTP/3 works for the next requests.
-    #[cfg(feature = "http3")]
-    async fn send_race(
-        self: &Arc<Self>,
-        hop: &Hop,
-        headers: HeaderMap,
-        host: &str,
-        port: u16,
-        origin: &str,
-    ) -> Result<(reqwest::Response, Option<OwnedSemaphorePermit>), NetError> {
-        let mut h3 = Box::pin(self.build_request(hop, headers.clone(), Some(Version::HTTP_3)).send());
-        tokio::select! {
-            biased;
-            result = &mut h3 => {
-                return match result {
-                    Ok(response) => {
-                        self.alt_svc.mark_confirmed(host, port);
-                        Ok((response, None))
-                    }
-                    Err(e) => {
-                        log::debug!("HTTP/3 to {origin} failed ({e}); using TCP");
-                        self.alt_svc.mark_broken(host, port);
-                        self.send_tcp(hop, headers, origin).await
-                    }
-                };
-            }
-            _ = tokio::time::sleep(self.config.h3_head_start) => {}
-        }
-        let tcp = self.send_tcp(hop, headers, origin);
-        tokio::pin!(tcp);
-        tokio::select! {
-            biased;
-            result = &mut h3 => match result {
-                Ok(response) => {
-                    self.alt_svc.mark_confirmed(host, port);
-                    Ok((response, None))
-                }
-                Err(e) => {
-                    log::debug!("HTTP/3 to {origin} failed ({e}); using TCP");
-                    self.alt_svc.mark_broken(host, port);
-                    tcp.await
-                }
-            },
-            result = &mut tcp => match result {
-                Ok(response) => {
-                    let core = Arc::clone(self);
-                    let host = host.to_owned();
-                    let probe_timeout = self.config.h3_probe_timeout;
-                    tokio::spawn(async move {
-                        match tokio::time::timeout(probe_timeout, h3).await {
-                            Ok(Ok(_)) => core.alt_svc.mark_confirmed(&host, port),
-                            _ => core.alt_svc.mark_broken(&host, port),
-                        }
-                    });
-                    Ok(response)
-                }
-                Err(e) => match tokio::time::timeout(self.config.connect_timeout, h3).await {
-                    Ok(Ok(response)) => {
-                        self.alt_svc.mark_confirmed(host, port);
-                        Ok((response, None))
-                    }
-                    _ => {
-                        self.alt_svc.mark_broken(host, port);
-                        Err(e)
-                    }
-                },
-            },
-        }
     }
 }
 
