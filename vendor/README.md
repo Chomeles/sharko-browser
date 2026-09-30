@@ -391,3 +391,7 @@ Patches so far:
     fragment" ignores elements inside an emulated shadow tree (their ids and `<a name>` share
     the host's subtree). Light children slotted into a `<slot>` stay matchable. WPT
     shadow-dom/scroll-to-the-fragment-in-shadow-tree.html.
+96. `blitz-dom/src/node/node.rs` (`Node::matches_defined`, `is_custom_element_name`),
+    `stylo.rs`: `:defined` does not match an HTML element with a custom element name (minus the
+    reserved hyphenated SVG/MathML names) or an `is` value until it is upgraded; non-HTML
+    elements are always defined. The script crate's `matches()` engine uses the same predicate.

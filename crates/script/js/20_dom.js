@@ -2948,9 +2948,9 @@
   // document.createElement(name, { is }): the element records its "is value" (as the `is`
   // attribute, so serialization, cloning and later upgrades see it) and, if a matching
   // customized built-in is defined, is upgraded synchronously.
-  function createCustomizedBuiltin(w, id, name, is) {
+  function createCustomizedBuiltin(w, id, name, is, hasRegistry) {
     N.setAttr(id, 'is', is);
-    const def = builtinDefs.get(is);
+    const def = hasRegistry ? builtinDefs.get(is) : undefined;
     if (def !== undefined && def.localName === name) upgradeElement(w, def);
   }
   function findTitleId(docId) {
@@ -3051,12 +3051,14 @@
       if (html) name = L.asciiLower(name);
       if (html || info.contentType === 'application/xhtml+xml') {
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
-        const def = ceDefs.get(name);
+        // HTML "look up a custom element definition": a document without a browsing context
+        // (createHTMLDocument, DOMParser, ...) has no registry, so its elements stay undefined.
+        const def = info.main ? ceDefs.get(name) : undefined;
         if (def !== undefined && !isOpt) return ownDoc(this, constructCE(def, name));
         const id = N.createElement(name, '');
         const w = wrap(id);
         if (name === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
-        if (isOpt) createCustomizedBuiltin(w, id, name, `${options.is}`);
+        if (isOpt) createCustomizedBuiltin(w, id, name, `${options.is}`, info.main);
         return ownDoc(this, w);
       }
       const id = N.createElement(name, '');
@@ -3074,13 +3076,14 @@
       const code = L.nsCode(nsv);
       let w;
       if (code === HTML) {
-        const def = ceDefs.get(local);
+        const main = docInfo(this).main;
+        const def = main ? ceDefs.get(local) : undefined;
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
         if (def !== undefined && !isOpt && prefix === null) return ownDoc(this, constructCE(def, local));
         const id = N.createElement(local, '');
         w = wrap(id);
         if (local === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
-        if (isOpt && prefix === null) createCustomizedBuiltin(w, id, local, `${options.is}`);
+        if (isOpt && prefix === null) createCustomizedBuiltin(w, id, local, `${options.is}`, main);
       } else if (code === SVG || code === MATHML) {
         w = wrap(N.createElement(local, nsv));
       } else {

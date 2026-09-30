@@ -305,3 +305,15 @@ test('customElements.define: extends an HTMLUnknownElement interface throws NotS
   `);
   assert.strictEqual(r, 'NotSupportedError,NotSupportedError,NotSupportedError,NotSupportedError,ok');
 });
+
+test('a document without browsing context does not upgrade or construct custom elements', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    class A extends HTMLElement {}
+    customElements.define('x-a', A);
+    const d = document.implementation.createHTMLDocument('');
+    [document.createElement('x-a') instanceof A, d.createElement('x-a') instanceof A,
+     d.createElementNS('http://www.w3.org/1999/xhtml', 'x-a') instanceof A].join();
+  `);
+  assert.strictEqual(r, 'true,false,false');
+});

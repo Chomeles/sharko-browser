@@ -188,7 +188,7 @@ impl<'a> LiveElement<'a> {
             NonTSPseudoClass::Open => {
                 html && matches!(local, "details" | "dialog") && el.has_attr(local_name!("open"))
             }
-            NonTSPseudoClass::Defined => true,
+            NonTSPseudoClass::Defined => self.node.matches_defined(),
             NonTSPseudoClass::Lang(lang) => lang_matches(doc, self.node, lang),
             NonTSPseudoClass::InRange | NonTSPseudoClass::OutOfRange => {
                 let Some(inside) = in_range(st, doc, self.node) else {
