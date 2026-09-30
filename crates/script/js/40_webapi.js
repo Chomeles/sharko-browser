@@ -380,29 +380,41 @@
     get port1() { return this.#p1; }
     get port2() { return this.#p2; }
   }
-  const broadcastChannels = new Map(); // name -> Set
+  const broadcastChannels = new Map(); // name -> Set (the page's storage partition)
+  let bcNext = null; // { chans, origin } of an opaque-origin worker scope, see L.isolatedBroadcastChannel
   class BroadcastChannel extends EventTarget {
-    #name; #closed = false;
+    #name; #closed = false; #chans; #origin;
     constructor(name) {
       super();
       this.#name = `${name}`;
-      let s = broadcastChannels.get(this.#name);
-      if (s === undefined) { s = new Set(); broadcastChannels.set(this.#name, s); }
+      const part = bcNext;
+      bcNext = null;
+      this.#chans = part === null ? broadcastChannels : part.chans;
+      this.#origin = part === null ? null : part.origin;
+      let s = this.#chans.get(this.#name);
+      if (s === undefined) { s = new Set(); this.#chans.set(this.#name, s); }
       s.add(this);
     }
     get name() { return this.#name; }
     postMessage(message) {
       if (this.#closed) throw new DOMException("Failed to execute 'postMessage' on 'BroadcastChannel': Channel is closed", 'InvalidStateError');
       const data = cloneValue(message);
-      const origin = L.docOrigin();
-      for (const ch of broadcastChannels.get(this.#name)) {
+      const origin = this.#origin === null ? L.docOrigin() : this.#origin;
+      for (const ch of this.#chans.get(this.#name)) {
         if (ch === this) continue;
         L.postTask(() => { if (!L.bcClosed(ch)) L.fire(ch, 'message', { data: cloneValue(data), origin }, L.MessageEvent); });
       }
     }
-    close() { this.#closed = true; const s = broadcastChannels.get(this.#name); if (s) s.delete(this); }
+    close() { this.#closed = true; const s = this.#chans.get(this.#name); if (s) s.delete(this); }
     static { L.bcClosed = (c) => c.#closed; }
   }
+  // HTML "obtain a storage key": a worker from a data: URL has its own opaque origin, so its
+  // BroadcastChannels reach neither the page nor any other opaque origin; only the worker's own.
+  L.isolatedBroadcastChannel = function () {
+    const part = { chans: new Map(), origin: 'null' };
+    const C = class BroadcastChannel extends L.BroadcastChannel { constructor(name) { bcNext = part; super(name); } };
+    return C;
+  };
   L.defineEventHandlers(BroadcastChannel.prototype, ['onmessage', 'onmessageerror']);
   // Windows of other frames. The documents of a page and its frames run in one isolate,
   // each in its own realm (context): a same-origin frame's window is its real global
@@ -3230,6 +3242,7 @@
       }
       const resolve = (u) => { const q = N.urlParse(`${u}`, /^https?:/.test(base) ? base : (L.documentURL())); return q === null ? `${u}` : q[0]; };
       define('self', g);
+      if (/^data:/i.test(base)) define('BroadcastChannel', L.isolatedBroadcastChannel());
       define('name', this.#name);
       define('navigator', win.navigator);
       define('location', Object.freeze(Object.assign(Object.create(null), (() => {
