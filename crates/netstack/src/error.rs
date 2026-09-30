@@ -137,8 +137,11 @@ fn tls_code(msg: &str) -> Option<&'static str> {
         || m.contains("certificate signature failure")
     {
         "ERR_CERT_AUTHORITY_INVALID"
-    } else if m.contains("certificate verify failed") {
-        "ERR_CERT_INVALID"
+    } else if m.contains("certificate verify failed") || m.contains("certificate_verify_failed") {
+        // BoringSSL reports only this code through wreq (the X509 verify result is not kept),
+        // so the specific causes above are only seen when a message carries them; unknown
+        // issuer is by far the most common cause.
+        "ERR_CERT_AUTHORITY_INVALID"
     } else if m.contains("ssl") && (m.contains("handshake") || m.contains("alert") || m.contains("protocol")) {
         "ERR_SSL_PROTOCOL_ERROR"
     } else {
