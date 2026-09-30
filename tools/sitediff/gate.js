@@ -37,5 +37,8 @@ for (const [text, pass] of checks) {
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${text}`);
   if (!pass) ok = false;
 }
+// Per-site numbers in the log, so two runs can be compared site by site (the artifacts need a login).
+console.log('sites >= 60: ' + bad.sort((a, b) => b.score - a.score).map((s) => `${s.slug}(${s.score})`).join(' '));
+console.log('SCORES ' + JSON.stringify(Object.fromEntries(sites.map((s) => [s.slug, s.score]))));
 console.log(ok ? 'gate: pass' : 'gate: FAIL');
 process.exit(ok ? 0 : 1);
