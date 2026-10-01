@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "browser"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "common",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "browser-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "browser",
  "common",
@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "browser-launcher"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "libloading",
  "windows-sys 0.61.2",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyrender",
  "crossbeam-channel",
@@ -1468,7 +1468,7 @@ dependencies = [
 
 [[package]]
 name = "engine"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyrender",
  "anyrender_vello_cpu",
@@ -2871,7 +2871,7 @@ dependencies = [
 
 [[package]]
 name = "netstack"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "blitz-traits",
  "brotli",
@@ -4111,7 +4111,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "script"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "aws-lc-rs",
  "blitz-dom",
@@ -4297,7 +4297,7 @@ dependencies = [
 
 [[package]]
 name = "shell"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyrender",
  "anyrender_vello",
@@ -6582,7 +6582,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
