@@ -1309,33 +1309,36 @@ pub(crate) fn n_window_post_message(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// Calls `hook` with `o` in the realm that created `o`, when that is another realm of this
+/// page (same origin); `None` otherwise.
+fn call_in_owner_realm(cx: &mut Cx, hook: Hook) -> Option<i32> {
+    let obj = v8::Local::<v8::Object>::try_from(cx.arg(0)).ok()?;
+    let ctx = obj.get_creation_context(cx.scope)?;
+    let st = crate::state::state_of_context(cx.scope, Some(ctx))?;
+    if std::ptr::eq(st, cx.st) || st.origin() != cx.st.origin() {
+        return None;
+    }
+    let scope = &mut v8::ContextScope::new(cx.scope, ctx);
+    st.native_depth.set(st.native_depth.get() + 1);
+    let r = call_hook(scope, st, hook, &[obj.into()]);
+    st.native_depth.set(st.native_depth.get() - 1);
+    r.and_then(|v| v.int32_value(scope))
+}
+
 /// `foreignNodeType(o)`: the nodeType of `o` when it is a node wrapper of another realm
 /// of this page (0 otherwise: no object, this realm's, not a node).
 pub(crate) fn n_foreign_node_type(cx: &mut Cx) -> NResult {
-    let Ok(obj) = v8::Local::<v8::Object>::try_from(cx.arg(0)) else {
-        cx.ret_i32(0);
-        return Ok(());
-    };
-    let Some(ctx) = obj.get_creation_context(cx.scope) else {
-        cx.ret_i32(0);
-        return Ok(());
-    };
-    let Some(st) = crate::state::state_of_context(cx.scope, Some(ctx)) else {
-        cx.ret_i32(0);
-        return Ok(());
-    };
-    if std::ptr::eq(st, cx.st) || st.origin() != cx.st.origin() {
-        cx.ret_i32(0);
-        return Ok(());
-    }
-    let r = {
-        let scope = &mut v8::ContextScope::new(cx.scope, ctx);
-        st.native_depth.set(st.native_depth.get() + 1);
-        let r = call_hook(scope, st, Hook::NodeType, &[obj.into()]);
-        st.native_depth.set(st.native_depth.get() - 1);
-        r.and_then(|v| v.int32_value(scope))
-    };
-    cx.ret_i32(r.unwrap_or(0));
+    let r = call_in_owner_realm(cx, Hook::NodeType).unwrap_or(0);
+    cx.ret_i32(r);
+    Ok(())
+}
+
+/// `foreignRelease(o)`: asks the realm that owns the node wrapper `o` to let go of it so
+/// this realm can rebind the same object to a node of its own document (adoption keeps
+/// identity, as in browsers). 1 when released, 0 when `o` cannot be moved.
+pub(crate) fn n_foreign_release(cx: &mut Cx) -> NResult {
+    let r = call_in_owner_realm(cx, Hook::ReleaseNode).unwrap_or(0);
+    cx.ret_i32(r);
     Ok(())
 }
 
