@@ -988,8 +988,33 @@
       default: throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
     }
     if (remove && o.parentNode !== null) o.parentNode.removeChild(o);
-    return n;
+    return remove && t !== 11 ? rebindForeign(o, n) : n;
   }
+  // DOM "adopt": the node keeps its identity when it moves to another document. The copy
+  // `n` made above is the node of this document; the wrapper object `o` of the other realm
+  // is re-stamped to it and gets this realm's prototype (so `o instanceof otherRealm.Node`
+  // is false and `o instanceof Node` true, as in Chromium). Wrappers that cannot be moved
+  // (the other realm refuses) keep the copy.
+  function rebindForeign(o, n) {
+    let released = 0;
+    try { released = typeof N.foreignRelease === 'function' ? N.foreignRelease(o) : 0; } catch (_) { released = 0; }
+    if (released !== 1) return n;
+    const id = idOf(n);
+    Object.setPrototypeOf(o, Object.getPrototypeOf(n));
+    L.stamp(o, id, typeOf(n), lnOf(n), nsOf(n));
+    cache.set(id, o);
+    return o;
+  }
+  // This realm lets go of `o` because another realm adopts it (hook `releaseNode`).
+  L.releaseWrapper = function (o) {
+    if (!isNode(o)) return false;
+    const t = typeOf(o);
+    if (t === 9 || t === 11 || t === 2) return false;
+    if (t === 1 && (L.elementWrapperMakers.has(lnOf(o)))) return false;
+    const id = idOf(o);
+    if (cache.get(id) === o) cache.delete(id);
+    return L.releaseNodeStamp(o);
+  };
   L.adoptForeign = adoptForeign;
   // The node argument of a mutating operation: a node of this realm, or a foreign one
   // adopted (by copy).
