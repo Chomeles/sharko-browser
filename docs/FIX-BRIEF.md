@@ -10,7 +10,7 @@ You work alone on your own machine and clone. Fix the causes named in your task 
 2. **Read how a working engine does it** (`docs/REFERENCE-MAP.md`: Ladybird, Servo/Stylo, Chromium, Gecko, plus the spec section) and write the rules and edge cases into the commit message. Ported code needs the attribution described there.
 3. **Implement** in our structure, minimal and general. Comments say why, not what.
 4. **Test**: an engine/JS-layer test that fails before and passes after; the affected WPT directories; the affected sites through sitediff.
-5. **Commit** one root cause per commit, push to your outcome branch. A push to the outcome branch is your finished state; the lead opens the PR, nothing to wait for.
+5. **Commit** one root cause per commit, push to your outcome branch. Merging the finished cause to `master` by PR is your finished state (rule 4 of `docs/RULES.md`).
 
 ## Repository map
 
@@ -33,7 +33,7 @@ If `tools/dev-setup.sh` exists, run it once (Playwright, WPT checkout, hosts ent
 
 - Message: imperative summary line (<= 72 chars) ending in ` [skip ci]`, body = why (mechanism, spec section), what the fix does, tests, sites repaired with before/after score.
 - Trailers: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>` and `Claude-Session: <your session url>`.
-- No model names or identifiers anywhere in the repo. Never push tags, force-push, rewrite history, or skip/weaken tests to get green. Push only to your outcome branch.
+- No model names or identifiers anywhere in the repo. Never push tags, force-push, rewrite history, or skip/weaken tests to get green. Push to your outcome branch and merge finished causes to `master` by pull request as described in `docs/RULES.md` (rule 4).
 
 ## Time box
 
