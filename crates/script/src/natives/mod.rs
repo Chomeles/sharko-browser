@@ -288,6 +288,7 @@ natives_table! {
     "topGlobal" => misc::n_top_global,
     "frameElement" => misc::n_frame_element,
     "foreignNodeType" => misc::n_foreign_node_type,
+    "foreignRelease" => misc::n_foreign_release,
     "windowPostMessage" => misc::n_window_post_message,
     "cryptoDigest" => crypto::n_crypto_digest,
     "cryptoHmac" => crypto::n_crypto_hmac,
