@@ -5,9 +5,12 @@ name: Windows smoke
 # as artifacts. Not a release: nothing is signed or published and installed browsers never
 # see it.
 #
-# Runs when a push changes tools/ci/windows-smoke.trigger (bump the number in it), or
-# manually. The repository is public, so the minutes are free.
+# Runs every night on master (the SCORES line in the report job is the trend), when a push
+# changes tools/ci/windows-smoke.trigger (bump the number in it), or manually. The
+# repository is public, so the minutes are free.
 on:
+  schedule:
+    - cron: '17 2 * * *'
   push:
     paths: ['tools/ci/windows-smoke.trigger']
   workflow_dispatch:
