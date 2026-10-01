@@ -540,14 +540,8 @@ impl selectors::Element for BlitzNode<'_> {
             NonTSPseudoClass::Checked => self.element_state().contains(ElementState::CHECKED),
             NonTSPseudoClass::Valid => false,
             NonTSPseudoClass::Invalid => false,
-            // PATCH: built-in elements are always defined; custom elements once upgraded.
-            NonTSPseudoClass::Defined => {
-                self.flags.contains(NodeFlags::IS_CUSTOM_DEFINED)
-                    || !self
-                        .data
-                        .downcast_element()
-                        .is_some_and(|el| el.name.local.contains('-'))
-            }
+            // PATCH: see `Node::matches_defined`.
+            NonTSPseudoClass::Defined => self.matches_defined(),
             NonTSPseudoClass::Disabled => self.element_state().contains(ElementState::DISABLED),
             NonTSPseudoClass::Enabled => self.element_state().contains(ElementState::ENABLED),
             NonTSPseudoClass::Focus => self.element_state().contains(ElementState::FOCUS),
