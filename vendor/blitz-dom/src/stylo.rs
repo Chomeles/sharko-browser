@@ -70,6 +70,50 @@ fn pseudo_name(pseudo: Option<&style::selector_parser::PseudoElement>) -> &'stat
 }
 
 impl crate::document::BaseDocument {
+    /// PATCH 95: the computed style of an element that has none because it sits in a
+    /// `display: none` subtree (Stylo does not traverse those). `getComputedStyle` must still
+    /// answer with the computed values (Blink computes them on demand: `margin-inline-end`,
+    /// `display: flex` of a hidden carousel's children); script code sums such values.
+    /// Same recipe as Servo's `process_resolved_style_request`: `style::traversal::resolve_style`
+    /// walks up to the first styled ancestor and resolves the chain below it, without storing.
+    pub fn resolve_undisplayed_style(&mut self, node_id: NodeId, now: f64) -> Option<Arc<ComputedValues>> {
+        use style::context::ThreadLocalStyleContext;
+        use style::traversal::UndisplayedStyleCache;
+        use style::stylist::RuleInclusion;
+        let node = self.nodes.get(node_id)?;
+        node.as_element()?;
+        if node.primary_styles().is_some() {
+            return None;
+        }
+        style::thread_state::enter(ThreadState::LAYOUT);
+        let guard = &self.guard;
+        let guards = StylesheetGuards {
+            author: &guard.read(),
+            ua_or_user: &guard.read(),
+        };
+        let context = SharedStyleContext {
+            traversal_flags: TraversalFlags::empty(),
+            stylist: &self.stylist,
+            options: GLOBAL_STYLE_DATA.options.clone(),
+            guards,
+            visited_styles_enabled: false,
+            animations: self.animations.clone(),
+            current_time_for_animations: now,
+            snapshot_map: &self.snapshots,
+            registered_speculative_painters: &RegisteredPaintersImpl,
+        };
+        let mut local = ThreadLocalStyleContext::new();
+        let mut ctx = StyleContext { shared: &context, thread_local: &mut local };
+        let mut cache = UndisplayedStyleCache::default();
+        let el = TNode::as_element(&self.nodes.get(node_id)?)?;
+        let styles = style::traversal::resolve_style(&mut ctx, el, RuleInclusion::All, None, Some(&mut cache));
+        let primary = styles.primary().clone();
+        style::thread_state::exit(ThreadState::LAYOUT);
+        Some(primary)
+    }
+}
+
+impl crate::document::BaseDocument {
     pub fn resolve_stylist(&mut self, now: f64) {
         style::thread_state::enter(ThreadState::LAYOUT);
 

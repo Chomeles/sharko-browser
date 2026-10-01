@@ -395,3 +395,9 @@ Patches so far:
     `stylo.rs`: `:defined` does not match an HTML element with a custom element name (minus the
     reserved hyphenated SVG/MathML names) or an `is` value until it is upgraded; non-HTML
     elements are always defined. The script crate's `matches()` engine uses the same predicate.
+97. `blitz-dom/src/stylo.rs` (`resolve_undisplayed_style`), `crates/script/src/style.rs`:
+    `getComputedStyle` of an element inside a `display: none` subtree returned `none`/empty
+    because Stylo does not traverse such subtrees. The style is now resolved on demand with
+    `style::traversal::resolve_style` (Servo's recipe for resolved-style requests), without
+    storing it. wordpress.com's logo marquee sums `margin-inline-end` of hidden items; with 0
+    its width loop ran until `Invalid string length` and aborted the page's DOMContentLoaded.
