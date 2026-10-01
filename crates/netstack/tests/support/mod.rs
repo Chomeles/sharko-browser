@@ -349,45 +349,17 @@ pub struct TlsTestServer {
 }
 
 impl TlsTestServer {
-    /// HTTPS on TCP `127.0.0.1:port`; with `h3`, HTTP/3 on UDP `127.0.0.1:port` as well.
-    /// With `advertise_h3`, every response carries `Alt-Svc: h3=":port"`.
-    pub fn start(h3: bool, advertise_h3: bool) -> Self {
+    /// HTTPS on TCP `127.0.0.1:port` (h2 and http/1.1 via ALPN).
+    pub fn start(_h3: bool, _advertise_h3: bool) -> Self {
         let ca = test_ca();
-        // Find a port that is free for both TCP and UDP.
-        let (tcp, udp) = loop {
-            let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = tcp.local_addr().unwrap().port();
-            match std::net::UdpSocket::bind(("127.0.0.1", port)) {
-                Ok(udp) => break (tcp, udp),
-                Err(_) => continue,
-            }
-        };
+        let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         tcp.set_nonblocking(true).unwrap();
         let port = tcp.local_addr().unwrap().port();
         let state = Arc::new(ServerState::default());
-        if advertise_h3 {
-            *state.alt_svc.lock().unwrap() = Some(format!("h3=\":{port}\"; ma=3600"));
-        }
         let tls = Arc::new(server_tls_config(&ca, &[b"h2", b"http/1.1"]));
-        let quic_tls = server_tls_config(&ca, &[b"h3"]);
         let st = Arc::clone(&state);
         std::thread::spawn(move || {
             server_runtime().block_on(async move {
-                if h3 {
-                    let quic = quinn::crypto::rustls::QuicServerConfig::try_from(quic_tls).unwrap();
-                    let config = quinn::ServerConfig::with_crypto(Arc::new(quic));
-                    udp.set_nonblocking(true).unwrap();
-                    let endpoint = quinn::Endpoint::new(
-                        quinn::EndpointConfig::default(),
-                        Some(config),
-                        udp,
-                        Arc::new(quinn::TokioRuntime),
-                    )
-                    .unwrap();
-                    tokio::spawn(serve_h3(endpoint, Arc::clone(&st)));
-                } else {
-                    drop(udp);
-                }
                 let acceptor = tokio_rustls::TlsAcceptor::from(tls);
                 let listener = tokio::net::TcpListener::from_std(tcp).unwrap();
                 loop {
@@ -408,32 +380,6 @@ impl TlsTestServer {
 
     pub fn url(&self, path: &str) -> String {
         format!("https://127.0.0.1:{}{}", self.port, path)
-    }
-}
-
-async fn serve_h3(endpoint: quinn::Endpoint, state: Arc<ServerState>) {
-    while let Some(incoming) = endpoint.accept().await {
-        let state = Arc::clone(&state);
-        tokio::spawn(async move {
-            let Ok(conn) = incoming.await else { return };
-            let Ok(mut h3_conn) = h3::server::Connection::<_, Bytes>::new(h3_quinn::Connection::new(conn)).await else {
-                return;
-            };
-            while let Ok(Some(resolver)) = h3_conn.accept().await {
-                let state = Arc::clone(&state);
-                tokio::spawn(async move {
-                    let Ok((req, mut stream)) = resolver.resolve_request().await else { return };
-                    let n = state.hit(&format!("h3:{}", req.uri().path()));
-                    let mut builder = http::Response::builder().status(200).header("content-type", "text/plain");
-                    if let Some(alt) = state.alt_svc.lock().unwrap().clone() {
-                        builder = builder.header("alt-svc", alt);
-                    }
-                    let _ = stream.send_response(builder.body(()).unwrap()).await;
-                    let _ = stream.send_data(Bytes::from(format!("hello over h3 #{n}"))).await;
-                    let _ = stream.finish().await;
-                });
-            }
-        });
     }
 }
 

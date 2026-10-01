@@ -18,9 +18,9 @@
 //! Advertisements (not the broken/confirmed state) are persisted to
 //! `<profile>/alt-svc.json` so a new session can use HTTP/3 right away.
 //!
-//! Without the `http3` feature advertisements are still parsed and persisted (so a
-//! profile can be shared with HTTP/3-enabled builds), but never acted upon.
-#![cfg_attr(not(feature = "http3"), allow(dead_code))]
+//! The HTTP client (wreq, BoringSSL with Chrome's fingerprint) has no QUIC transport, so
+//! advertisements are parsed and persisted but never acted upon.
+#![allow(dead_code)]
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
