@@ -68,7 +68,7 @@ jobs:
         run: |
           "$SHARKO_BIN" --version
           "$SHARKO_BIN" --headless --settle=500 --console '--eval=document.title' https://example.com/
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: JS layer tests
@@ -102,7 +102,7 @@ jobs:
           Expand-Archive -Path $zip.FullName -DestinationPath smoke -Force
           $exe = Get-ChildItem smoke -Recurse -Filter browser.exe | Select-Object -First 1
           "SHARKO_BIN=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - name: Install Playwright (Chromium reference)
@@ -136,7 +136,7 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - uses: actions/download-artifact@v4
