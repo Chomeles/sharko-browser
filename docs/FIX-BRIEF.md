@@ -14,7 +14,7 @@ You work alone on your own machine and clone. Fix the causes named in your task 
 
 ## Repository map
 
-`crates/script/src` (V8 bindings, DOM natives), `crates/script/js/*.js` (JS layer, embedded at build time; native API spec in `crates/script/js/NATIVE_API.md`, update both sides together), `crates/engine` (renderer, layout/paint integration), `crates/netstack` (HTTP client), `crates/common`, `crates/browser` (headless driver), `vendor/blitz-dom` (DOM + layout: Taffy, Stylo; every local change gets a `PATCH:` comment and a numbered entry in `vendor/README.md`). Read `docs/ARCHITECTURE.md` and `CONTRIBUTING.md` first. Dossiers of already diagnosed causes: `docs/dossiers/`.
+`crates/script/src` (V8 bindings, DOM natives), `crates/script/js/*.js` (JS layer, embedded at build time; native API spec in `crates/script/js/NATIVE_API.md`, update both sides together), `crates/engine` (renderer, layout/paint integration), `crates/netstack` (HTTP client), `crates/common`, `crates/browser` (headless driver), `vendor/blitz-dom` (DOM + layout: Taffy, Stylo; every local change gets a `PATCH:` comment and an entry in `vendor/README.md`: append an unnumbered `- ` bullet at the end, never renumber; `vendor/README.md` and `docs/compat/HISTORY.md` merge with git's `union` driver, so parallel lanes do not conflict there). Read `docs/ARCHITECTURE.md` and `CONTRIBUTING.md` first. Dossiers of already diagnosed causes: `docs/dossiers/`.
 
 ## Build and test
 
