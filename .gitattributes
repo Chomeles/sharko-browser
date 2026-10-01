@@ -4,3 +4,6 @@
 *.png binary
 *.dat binary
 *.woff2 binary
+# Append-only lists that every lane extends: keep both sides instead of conflicting on the last line.
+vendor/README.md merge=union
+docs/compat/HISTORY.md merge=union
