@@ -568,3 +568,22 @@ test('BroadcastChannel in a data: URL worker is isolated from the page (opaque o
   await e.flush();
   assert.strictEqual(e.run('got2.length'), 1);
 });
+
+test('Request: clone() leaves the original unused; new Request(used GET request) works; a consumed body is rejected', async () => {
+  const e = await env({});
+  const r = await settle(e, `
+    const out = [];
+    const post = new Request('/y', { method: 'POST', body: 'hi' });
+    const copy = post.clone();
+    out.push(post.bodyUsed, copy.bodyUsed);
+    const again = new Request(post);            // still allowed: the original was not used by clone()
+    out.push(again.method, post.bodyUsed);      // the constructor moves the body (Fetch step 36)
+    const get = new Request('/g'); fetch(get).catch(() => {}); get.text().catch(() => {});
+    out.push(new Request(get).url.endsWith('/g'), get.bodyUsed);
+    let err; try { new Request(post); } catch (x) { err = x instanceof TypeError && /already been used/.test(x.message); }
+    out.push(err, await copy.text());
+    const resp = new Response('x'); resp.clone(); out.push(resp.bodyUsed);
+    return out.join('|');
+  `);
+  assert.strictEqual(String(r), 'false|false|POST|true|true|false|true|hi|false');
+});

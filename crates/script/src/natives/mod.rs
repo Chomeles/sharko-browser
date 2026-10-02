@@ -276,6 +276,7 @@ natives_table! {
     "canvasDrawImage" => crate::canvas::n_canvas_draw_image,
     "canvasGetImageData" => crate::canvas::n_canvas_get_image_data,
     "canvasPutImageData" => crate::canvas::n_canvas_put_image_data,
+    "webglEnabled" => crate::canvas::n_webgl_enabled,
     "canvasToDataURL" => crate::canvas::n_canvas_to_data_url,
     "canvasMeasureText" => crate::canvas::n_canvas_measure_text,
     "canvasText" => crate::canvas::n_canvas_text,
