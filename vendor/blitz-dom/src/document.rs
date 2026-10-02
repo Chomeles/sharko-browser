@@ -1313,7 +1313,7 @@ impl BaseDocument {
             }
             StyleScope::Document => self.make_stylesheet_with_media(&css, Origin::Author, media),
             StyleScope::ShadowHost(host) => {
-                let scoped = crate::shadow_css::scope_shadow_css(&css, &host.to_string());
+                let scoped = crate::shadow_css::scope_shadow_css(&css, &crate::shadow_css::host_key(host));
                 self.make_stylesheet_with_media(&scoped, Origin::Author, media)
             }
         };
@@ -1637,16 +1637,34 @@ impl BaseDocument {
         // §6.4.1). It used to be ordered by node id, i.e. by creation: a `<style>` that script
         // created and inserted before an older one (emotion's `prepend`, `insertBefore`)
         // won the cascade against it, e.g. coursera.org's padding of the nav container.
-        let mine = self.tree_path(node_id);
-        let insertion_point = mine.and_then(|mine| {
-            self.nodes_to_stylesheet
-                .iter()
-                .filter(|(other, _)| **other != node_id)
-                .filter_map(|(other, sheet)| Some((self.tree_path(*other)?, sheet)))
-                .filter(|(path, _)| *path > mine)
-                .min_by(|(a, _), (b, _)| a.cmp(b))
-                .map(|(_, sheet)| sheet)
-        });
+        // PATCH: the next sheet in tree order, found with an allocation-free comparison
+        // (`tree_path` per candidate made registering the sheets of many shadow hosts
+        // quadratic and allocation-heavy).
+        // A sheet scoped to a shadow host only has rules under that host's own class, so
+        // its place among the other sheets decides nothing (sheets of different hosts
+        // never compete, and its extra class outweighs document rules of the same
+        // origin): it is appended. This also keeps registering the sheets of N components
+        // linear instead of quadratic.
+        let insertion_point = if matches!(self.style_scope(node_id), StyleScope::ShadowHost(_)) {
+            None
+        } else if self.is_connected_to_root(node_id) {
+            let mut best: Option<(&NodeId, &DocumentStyleSheet)> = None;
+            for (other, sheet) in self.nodes_to_stylesheet.iter() {
+                if *other == node_id
+                    || self.compare_tree_order(*other, node_id) != Some(std::cmp::Ordering::Greater)
+                {
+                    continue;
+                }
+                if best.is_none_or(|(b, _)| {
+                    self.compare_tree_order(*other, *b) == Some(std::cmp::Ordering::Less)
+                }) {
+                    best = Some((other, sheet));
+                }
+            }
+            best.map(|(_, sheet)| sheet)
+        } else {
+            None
+        };
 
         // PATCH: adopted stylesheets stay behind every node's sheet.
         let insertion_point = insertion_point.or_else(|| self.first_adopted_stylesheet());
@@ -1662,15 +1680,60 @@ impl BaseDocument {
         }
     }
 
+    /// PATCH: tree (document) order of two connected nodes; `None` when one is detached.
+    fn compare_tree_order(&self, a: NodeId, b: NodeId) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        if a == b {
+            return Some(Ordering::Equal);
+        }
+        let depth = |mut id: NodeId| -> Option<usize> {
+            let mut d = 0;
+            while let Some(p) = self.nodes.get(id)?.parent {
+                id = p;
+                d += 1;
+            }
+            Some(d)
+        };
+        let (mut x, mut y) = (a, b);
+        let (mut dx, mut dy) = (depth(a)?, depth(b)?);
+        // Climb to the same depth, remembering the child we came from on the deeper side.
+        let mut from_x = None;
+        while dx > dy {
+            from_x = Some(x);
+            x = self.nodes.get(x)?.parent?;
+            dx -= 1;
+        }
+        while dy > dx {
+            y = self.nodes.get(y)?.parent?;
+            dy -= 1;
+        }
+        if x == y {
+            // One is an ancestor of the other: the ancestor comes first.
+            return Some(if from_x.is_some() { Ordering::Greater } else { Ordering::Less });
+        }
+        loop {
+            let (px, py) = (self.nodes.get(x)?.parent?, self.nodes.get(y)?.parent?);
+            if px == py {
+                let (ix, iy) = (self.nodes.get(x)?.child_index()?, self.nodes.get(y)?.child_index()?);
+                return Some(ix.cmp(&iy));
+            }
+            x = px;
+            y = py;
+        }
+    }
+
     /// PATCH: the child indices from the root down to `id` (`None` when detached).
+    #[allow(dead_code)]
     fn tree_path(&self, id: NodeId) -> Option<Vec<usize>> {
         let root = self.root_node().id;
         let mut path = Vec::new();
         let mut cur = id;
         while cur != root {
-            let parent = self.nodes.get(cur)?.parent?;
-            path.push(self.nodes.get(parent)?.children.iter().position(|c| *c == cur)?);
-            cur = parent;
+            let node = self.nodes.get(cur)?;
+            // PATCH: O(1) with the node's index hint (a scan of a 1500-child parent per
+            // sheet made registering the sheets of many shadow hosts quadratic).
+            path.push(node.child_index()?);
+            cur = node.parent?;
         }
         path.reverse();
         Some(path)
@@ -1709,7 +1772,7 @@ impl BaseDocument {
                         .map(|u| UrlExtraData(ServoArc::new(u)))
                         .unwrap_or_else(|| self.document_base.url_extra_data());
                     let css = match host {
-                        Some(host) => crate::shadow_css::scope_shadow_css(css, &host.to_string()),
+                        Some(host) => crate::shadow_css::scope_shadow_css(css, &crate::shadow_css::host_key(host)),
                         None => css.clone(),
                     };
                     self.make_stylesheet_at(css, Origin::Author, MediaList::empty(), url_data)
@@ -1854,7 +1917,7 @@ impl BaseDocument {
                     StyleScope::Inert => {}
                     StyleScope::ShadowHost(host) => {
                         let scoped =
-                            crate::shadow_css::scope_shadow_css(&source, &host.to_string());
+                            crate::shadow_css::scope_shadow_css(&source, &crate::shadow_css::host_key(host));
                         // Keep the linked sheet's URL (relative `url()`s, `@import`s)
                         // and its `media` attribute.
                         let (url_data, media) = {
