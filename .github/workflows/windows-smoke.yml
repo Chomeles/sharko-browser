@@ -5,9 +5,12 @@ name: Windows smoke
 # as artifacts. Not a release: nothing is signed or published and installed browsers never
 # see it.
 #
-# Runs when a push changes tools/ci/windows-smoke.trigger (bump the number in it), or
-# manually. The repository is public, so the minutes are free.
+# Runs every night on master (the SCORES line in the report job is the trend), when a push
+# changes tools/ci/windows-smoke.trigger (bump the number in it), or manually. The
+# repository is public, so the minutes are free.
 on:
+  schedule:
+    - cron: '17 2 * * *'
   push:
     paths: ['tools/ci/windows-smoke.trigger']
   workflow_dispatch:
@@ -35,6 +38,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+      - name: NASM (BoringSSL assembly on Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - uses: Swatinem/rust-cache@v2
         with:
           key: smoke-x86_64-pc-windows-msvc
@@ -122,6 +131,9 @@ jobs:
     needs: sweep
     if: always()
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -131,11 +143,21 @@ jobs:
         with:
           pattern: sitediff-windows-*
           path: shards
+      # The previous successful run's merged result: the per-site trend in the log.
+      - name: Previous run
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow windows-smoke.yml --status success --limit 10 --json databaseId --jq '.[].databaseId' | grep -v "^${{ github.run_id }}$" | head -1)
+          echo "previous run: ${prev:-none}"
+          if [ -n "$prev" ]; then gh run download "$prev" --repo "$GITHUB_REPOSITORY" -n sitediff-windows-merged -D baseline; fi
       - name: Merge and gate
         run: |
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           node tools/sitediff/merge.js merged-summary.json shards/*/summary.json | tee -a "$GITHUB_STEP_SUMMARY"
-          node tools/sitediff/gate.js merged-summary.json | tee -a "$GITHUB_STEP_SUMMARY" || true
+          base=""; [ -f baseline/merged-summary.json ] && base="--baseline=baseline/merged-summary.json"
+          node tools/sitediff/gate.js merged-summary.json $base | tee -a "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:

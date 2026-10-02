@@ -4,7 +4,8 @@ members = ["crates/common", "crates/netstack", "crates/script", "crates/engine",
 default-members = ["crates/common", "crates/netstack", "crates/script", "crates/engine", "crates/browser", "crates/shell", "crates/core", "crates/launcher"]
 
 [workspace.package]
-version = "0.2.1"
+# Bumping this on master releases it: .github/workflows/release.yml derives the tag, builds, signs and publishes.
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.89"
 license-file = "LICENSE.md"
