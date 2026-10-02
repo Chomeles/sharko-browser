@@ -1298,7 +1298,14 @@ impl<'doc> DocumentMutator<'doc> {
         // away (scripts write into it: `iframe.contentDocument.write(...)`), as in
         // browsers. It is replaced when a `src` loads.
         let raw_src = element.attr(local_name!("src")).unwrap_or("").trim();
-        if raw_src.is_empty() || raw_src.eq_ignore_ascii_case("about:blank") {
+        // PATCH: a `javascript:` src also starts from the initial about:blank document
+        // (HTML "process the iframe attributes" creates it before the URL is evaluated;
+        // `javascript:void(0)` leaves it blank). Loader snippets (Akamai mPulse, ad and
+        // consent frames) write into `contentWindow.document` right after insertion.
+        let is_js_url = raw_src
+            .get(..11)
+            .is_some_and(|p| p.eq_ignore_ascii_case("javascript:"));
+        if raw_src.is_empty() || raw_src.eq_ignore_ascii_case("about:blank") || is_js_url {
             if node.subdoc().is_none() {
                 self.doc.load_iframe_srcdoc(target_id, "");
                 // PATCH: HTML "process the iframe attributes": an empty or about:blank `src`
