@@ -191,3 +191,24 @@ test('load waits for a script written after the parser finished', async () => {
   await e.flush();
   assert.deepStrictEqual(log(e), ['def.js', 'load']);
 });
+
+test('a <script> split over two document.write calls runs once, with the whole text (btloader pattern)', async () => {
+  const e = await createEnv({ html: '<body><p id="old"></p></body>' });
+  e.run(String.raw`window.__log = [];
+    document.open();
+    document.write('<html><body><script>__log.push("a");\n/*\n * @returns {Promise<void>}');
+    __log.push('between');
+    document.write('\n */\n__log.push("b")<\/script><p id="after"></p></body></html>');
+    document.close();`);
+  await e.flush();
+  assert.deepStrictEqual(log(e), ['between', 'a', 'b']);
+  assert.strictEqual(e.run('!!document.getElementById("after")'), true);
+  assert.deepStrictEqual(Array.from(e.run('window.__errors || []')), []);
+});
+
+test('document.close() flushes a tail the writes left open', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  e.run(String.raw`document.open(); document.write('<p id="x">hi</p><div class="un'); document.close();`);
+  await e.flush();
+  assert.strictEqual(e.run('document.getElementById("x") !== null'), true);
+});
