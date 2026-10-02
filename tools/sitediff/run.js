@@ -326,8 +326,13 @@ function lumClass(c) {
 }
 
 // Strip the volatile parts of an error message so the same bug on two sites matches.
+// Chromium's pageerror text has no error-name prefix ("Uncaught Cannot read ..."), Sharko's console line
+// has ("Uncaught TypeError: Cannot read ..."): drop "Uncaught", "(in promise)" and the name so both match.
 function signature(msg) {
   return msg
+    .replace(/^\s*Uncaught\s*/, '')
+    .replace(/^\(in promise\)\s*/, '')
+    .replace(/^(?:[A-Z]\w*Error|DOMException|Error):\s*/, '')
     .replace(/https?:\/\/[^\s)'"]+/g, 'URL')
     .replace(/\b[0-9a-f]{8,}\b/gi, 'HEX')
     .replace(/\d+/g, 'N')
