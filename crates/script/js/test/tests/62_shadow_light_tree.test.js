@@ -41,3 +41,16 @@ test('innerHTML/outerHTML of a shadow host serialize the light tree, also for ne
     '<b>light</b>text|<div id="h"><b>light</b>text</div>|<slot><b>light</b>text</slot><u>shadow</u>|' +
     '<p>a</p><div id="h2"><i>l2</i></div>|<div id="h2"><i>l2</i></div>|');
 });
+
+test('shadow content: parentNode is the ShadowRoot (Lit inserts through startNode.parentNode)', async () => {
+  const e = await createEnv({ html: '<div id="host"></div>' });
+  const r = e.run(`
+    var h = document.getElementById('host'), sr = h.attachShadow({ mode: 'open' });
+    var m = document.createComment(''); sr.appendChild(m);
+    var f = document.createDocumentFragment(), d = document.createElement('div'); d.className = 'x'; f.appendChild(d);
+    m.parentNode.insertBefore(f, null);
+    JSON.stringify([m.parentNode === sr, m.parentElement, d.parentNode === sr, d.getRootNode() === sr,
+      d.getRootNode({ composed: true }) === document, !!sr.querySelector('.x'), h.firstChild === null, sr.childNodes.length]);
+  `);
+  assert.strictEqual(r, '[true,null,true,true,true,true,true,2]');
+});

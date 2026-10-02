@@ -373,6 +373,13 @@
       cur = p;
     }
   };
+  // The ShadowRoot a node is a child of: shadow content has its host's node id as native
+  // parent (the root shares the id), while light children sit in the hidden light fragment.
+  function shadowParentOf(id, p) {
+    if (p === 0 || lightOwner.has(id)) return null;
+    const sr = shadowOfHost.get(wrap(p));
+    return sr === undefined ? null : sr;
+  }
   function lightFragOf(hostW) {
     const sr = shadowOfHost.get(hostW);
     if (sr === undefined) return 0;
@@ -1341,16 +1348,25 @@
       return ownerDocumentOf(this);
     },
     getRootNode(options) {
-      if (isShadowRoot(this)) return this;
+      if (isShadowRoot(this)) return options && options.composed ? this.host.getRootNode(options) : this;
       let r = idOf(this), p;
-      while ((p = N.parent(r)) !== 0) r = p;
+      while ((p = N.parent(r)) !== 0) {
+        // Shadow content shares its host's node id as parent: its root is the shadow root.
+        if (shadowParentOf(r, p) !== null) {
+          const sr = shadowOfHost.get(wrap(p));
+          return options && options.composed ? sr.host.getRootNode(options) : sr;
+        }
+        r = p;
+      }
       return wrap(r);
     },
     get parentNode() {
       if (isShadowRoot(this)) return null;
       const id = idOf(this);
       const h = lightHostOf(id);
-      return h !== null ? h : wrap(N.parent(id));
+      if (h !== null) return h;
+      const p = N.parent(id);
+      return shadowParentOf(id, p) ?? wrap(p);
     },
     get parentElement() {
       if (isShadowRoot(this)) return null;
@@ -1358,7 +1374,7 @@
       const h = lightHostOf(id);
       if (h !== null) return h;
       const p = N.parent(id);
-      if (p === 0) return null;
+      if (p === 0 || shadowParentOf(id, p) !== null) return null;
       const w = wrap(p);
       return typeOf(w) === 1 ? w : null;
     },
@@ -3722,6 +3738,7 @@
     while (i < n) {
       const c = s[i];
       if (c === '/' && s[i + 1] === '*') { if (start === i) { i = skipComment(s, i); start = i; continue; } i = skipComment(s, i); continue; }
+      if (c === '\\') { i += 2; continue; } // CSS escape (`.a\'b`, `\{`): never opens a string or block
       if (c === '"' || c === "'") { i = skipString(s, i); continue; }
       if (c === ';' && s.slice(start, i).trim().startsWith('@')) {
         out.push({ prelude: s.slice(start, i).trim(), body: null, text: s.slice(start, i + 1).trim() });
@@ -3732,6 +3749,7 @@
         while (j < n && depth > 0) {
           const d = s[j];
           if (d === '/' && s[j + 1] === '*') { j = skipComment(s, j); continue; }
+          if (d === '\\') { j += 2; continue; }
           if (d === '"' || d === "'") { j = skipString(s, j); continue; }
           if (d === '{') depth++;
           else if (d === '}') depth--;
@@ -3756,6 +3774,7 @@
     while (i < s.length) {
       const c = s[i];
       if (c === '/' && s[i + 1] === '*') { i = skipComment(s, i); continue; }
+      if (c === '\\') { i += 2; continue; }
       if (c === '"' || c === "'") { i = skipString(s, i); continue; }
       if (c === '(' || c === '{' || c === '[') depth++;
       else if (c === ')' || c === '}' || c === ']') depth--;
@@ -4076,13 +4095,17 @@
     d.text = text;
     d.rules = makeRules(splitRules(text), s, null);
   }
-  // A linked sheet from another origin hides its rules (as in browsers).
+  // CSSOM "origin-clean flag": a linked sheet from another origin hides its rules.
   function checkSheetAccess(s, what) {
     const d = sheetDataOf(s);
     if (!d.linked || d.href === null) return;
     const p = N.urlParse(d.href, null);
     const origin = p === null ? null : p[10];
     if (origin !== null && origin !== 'null' && origin === L.docOrigin()) return;
+    // HTML "fetch and process the linked resource": `crossorigin` makes the sheet a cors-mode
+    // fetch (blitz-dom marks the request, netstack runs the CORS check); a sheet that loaded
+    // is CORS-same-origin and readable. Meta, GitHub, Slack, Discord rely on it.
+    if (d.owner.hasAttribute('crossorigin')) return;
     throw new DOMException(`Failed to ${what === 'cssRules' ? "read the 'cssRules' property from" : `execute '${what}' on`} 'CSSStyleSheet': Cannot access rules`, 'SecurityError');
   }
   function flushSheet(s) {

@@ -240,3 +240,20 @@ test('named access does not see elements the parser has not reached yet', async 
   const e = await createEnv({ html, routes: {} });
   assert.deepStrictEqual(log(e), [true, 'object', 'object', 'later:true', 'object']);
 });
+
+test('<script src=blob:...> runs (async, ordered dynamic, parser-inserted); a revoked blob URL fires error', async () => {
+  const html = `<!DOCTYPE html><html><head><script>window.__log = [];
+      window.__url = URL.createObjectURL(new Blob(['__log.push("blob:" + document.currentScript.dataset.n)'], { type: 'text/javascript' }));
+      function add(n, setup) { const s = document.createElement('script'); s.dataset.n = n; setup(s); s.onload = () => __log.push(n + ':load'); s.onerror = () => __log.push(n + ':error'); document.head.append(s); }
+      add('async', (s) => { s.async = true; s.src = __url; });
+      add('ordered', (s) => { s.src = __url; });
+      add('attr', (s) => { s.setAttribute('async', ''); s.setAttribute('src', __url); });
+      const gone = URL.createObjectURL(new Blob(['1'])); URL.revokeObjectURL(gone);
+      add('revoked', (s) => { s.src = gone; });
+    </script></head><body></body></html>`;
+  const e = await createEnv({ html, routes: {} });
+  await e.flush();
+  const l = log(e);
+  for (const n of ['async', 'ordered', 'attr']) assert.ok(l.includes(`blob:${n}`) && l.includes(`${n}:load`), `${n}: ${JSON.stringify(l)}`);
+  assert.ok(l.includes('revoked:error') && !l.includes('revoked:load'), JSON.stringify(l));
+});

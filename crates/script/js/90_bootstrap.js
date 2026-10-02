@@ -298,7 +298,8 @@
     }
     return null;
   });
-  defMethod('createImageBitmap', function createImageBitmap() {
+  defMethod('createImageBitmap', function createImageBitmap(image) {
+    if (L.createImageBitmap !== undefined) return Reflect.apply(L.createImageBitmap, undefined, arguments);
     return L.rejectedPromise(new DOMException("Failed to execute 'createImageBitmap' on 'Window': not supported", 'InvalidStateError'));
   });
   L.defineEventHandlers(g, L.GLOBAL_HANDLERS.concat(L.WINDOW_HANDLERS), () => g);

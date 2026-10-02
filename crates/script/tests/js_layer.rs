@@ -603,6 +603,23 @@ fn js_layer_frame_replaced_in_same_entry() {
     drop(page);
 }
 
+/// `<iframe src="javascript:void(0)">` starts with the initial about:blank document, so
+/// loader snippets (Akamai mPulse) can `contentWindow.document.open()/write()` right after
+/// inserting it (samsung.com/de: "Cannot read properties of null (reading 'open')").
+#[test]
+fn js_layer_javascript_url_iframe_has_initial_document() {
+    let mut page = js_env(r#"<!DOCTYPE html><html><body></body></html>"#);
+    assert_eq!(
+        page.eval(
+            "const j = document.createElement('iframe'); j.src = 'javascript:void(0)'; document.body.append(j); \
+             const d = j.contentWindow.document; d.open(); d.write('<body><p id=q>x</p></body>'); d.close(); \
+             [d === j.contentDocument, d.getElementById('q') !== null]"
+        ),
+        r#"[true,true]"#
+    );
+    drop(page);
+}
+
 /// Inserting a node of another realm moves the same object (DOM "adopt"): identity,
 /// parent, ownerDocument, expandos stay, the other realm's tree loses it, and the old
 /// realm's `instanceof` no longer holds (Chromium: `x instanceof frame.Node`).
@@ -774,6 +791,39 @@ fn js_layer_canvas_2d() {
     let img = el.raster_image_data().expect("canvas image data");
     assert_eq!((img.width, img.height), (100, 60));
     assert_eq!(&img.data.data()[..4], &[255, 0, 0, 255]);
+}
+
+/// OffscreenCanvas with a 2D context (the 2D natives need the real rasterizer, so the JS-layer harness
+/// cannot run this): the case and its expected values are the ones recorded from Chromium in
+/// `crates/script/js/test/offscreen_cases.js` / `webgl_golden.json`.
+#[test]
+fn js_layer_offscreen_canvas_2d() {
+    let mut e = js_env("<!DOCTYPE html><html><body></body></html>");
+    let r = e.eval(
+        r#"(() => {
+          const oc = new OffscreenCanvas(10, 6);
+          const c = oc.getContext('2d');
+          c.fillStyle = 'rgb(10, 200, 30)'; c.fillRect(2, 1, 4, 3);
+          const d = c.getImageData(3, 2, 1, 1).data;
+          const m = c.measureText('Hi');
+          const out = { size: [oc.width, oc.height], pix: Array.from(d), same: oc.getContext('2d') === c, back: c.canvas === oc,
+            other: oc.getContext('webgl'), tag: Object.prototype.toString.call(c), ctor: c.constructor.name,
+            measure: m.width > 0 && typeof m.actualBoundingBoxAscent === 'number', clear: Array.from(c.getImageData(0, 0, 1, 1).data),
+            isOff: oc instanceof EventTarget };
+          oc.width = 4;
+          out.resize = [oc.width, Array.from(c.getImageData(3, 2, 1, 1).data)];
+          // a bitmap of the canvas drawn into another 2D canvas
+          c.fillStyle = '#ff0000'; c.fillRect(0, 0, 4, 6);
+          const bmp = oc.transferToImageBitmap();
+          const t = new OffscreenCanvas(4, 6).getContext('2d'); t.drawImage(bmp, 0, 0);
+          out.bitmap = [bmp.width, bmp.height, Array.from(t.getImageData(1, 1, 1, 1).data), Array.from(c.getImageData(1, 1, 1, 1).data)];
+          return out;
+        })()"#,
+    );
+    assert_eq!(
+        r,
+        r#"{"size":[10,6],"pix":[10,200,30,255],"same":true,"back":true,"other":null,"tag":"[object OffscreenCanvasRenderingContext2D]","ctor":"OffscreenCanvasRenderingContext2D","measure":true,"clear":[0,0,0,0],"isOff":true,"resize":[4,[0,0,0,0]],"bitmap":[4,6,[255,0,0,255],[0,0,0,0]]}"#
+    );
 }
 
 /// CompressionStream / DecompressionStream round trips (gzip, deflate, deflate-raw) and

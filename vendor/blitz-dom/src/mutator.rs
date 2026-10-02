@@ -1215,11 +1215,17 @@ impl<'doc> DocumentMutator<'doc> {
                 .insert(handler.request_id());
         }
 
-        self.doc.net_provider.fetch(
-            self.doc.id(),
-            self.doc.build_request(url, "style"),
-            Box::new(handler),
+        // PATCH: HTML "obtain the resource" for `<link rel=stylesheet>`: the request mode is
+        // `cors` when the element has a `crossorigin` attribute, else `no-cors`. The network
+        // stack sends `Origin` and performs the CORS check for cors-mode requests; a sheet
+        // that loaded through a cors request is origin-clean (CSSOM: its rules are readable).
+        let mut request = self.doc.build_request(url, "style");
+        let mode = if node.attr(local_name!("crossorigin")).is_some() { "cors" } else { "no-cors" };
+        request.headers.insert(
+            blitz_traits::net::http::HeaderName::from_static("sec-fetch-mode"),
+            blitz_traits::net::http::HeaderValue::from_static(mode),
         );
+        self.doc.net_provider.fetch(self.doc.id(), request, Box::new(handler));
     }
 
     fn unload_stylesheet(&mut self, node_id: NodeId) {
@@ -1292,7 +1298,14 @@ impl<'doc> DocumentMutator<'doc> {
         // away (scripts write into it: `iframe.contentDocument.write(...)`), as in
         // browsers. It is replaced when a `src` loads.
         let raw_src = element.attr(local_name!("src")).unwrap_or("").trim();
-        if raw_src.is_empty() || raw_src.eq_ignore_ascii_case("about:blank") {
+        // PATCH: a `javascript:` src also starts from the initial about:blank document
+        // (HTML "process the iframe attributes" creates it before the URL is evaluated;
+        // `javascript:void(0)` leaves it blank). Loader snippets (Akamai mPulse, ad and
+        // consent frames) write into `contentWindow.document` right after insertion.
+        let is_js_url = raw_src
+            .get(..11)
+            .is_some_and(|p| p.eq_ignore_ascii_case("javascript:"));
+        if raw_src.is_empty() || raw_src.eq_ignore_ascii_case("about:blank") || is_js_url {
             if node.subdoc().is_none() {
                 self.doc.load_iframe_srcdoc(target_id, "");
                 // PATCH: HTML "process the iframe attributes": an empty or about:blank `src`
