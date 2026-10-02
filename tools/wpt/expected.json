@@ -68911,6 +68911,1756 @@
    "Sorts events for the same transition": "FAIL"
   }
  },
+ "/webaudio/idlharness.https.window.html": {
+  "status": "OK",
+  "subtests": {
+   "idl_test setup": "FAIL",
+   "BaseAudioContext interface: attribute renderQuantumSize": "FAIL",
+   "BaseAudioContext interface: attribute audioWorklet": "FAIL",
+   "BaseAudioContext interface: attribute onstatechange": "FAIL",
+   "BaseAudioContext interface: operation createBuffer(unsigned long, unsigned long, float)": "FAIL",
+   "BaseAudioContext interface: operation decodeAudioData(ArrayBuffer, optional DecodeSuccessCallback?, optional DecodeErrorCallback?)": "FAIL",
+   "AudioContext interface: attribute sinkId": "FAIL",
+   "AudioContext interface: attribute onsinkchange": "FAIL",
+   "AudioContext interface: attribute onerror": "FAIL",
+   "AudioContext interface: attribute playbackStats": "FAIL",
+   "AudioContext interface: operation resume()": "FAIL",
+   "AudioContext interface: operation suspend()": "FAIL",
+   "AudioContext interface: operation close()": "FAIL",
+   "AudioContext interface: operation setSinkId((DOMString or AudioSinkOptions))": "FAIL",
+   "AudioContext interface: operation createMediaElementSource(HTMLMediaElement)": "FAIL",
+   "AudioContext interface: operation createMediaStreamSource(MediaStream)": "FAIL",
+   "AudioContext interface: operation createMediaStreamTrackSource(MediaStreamTrack)": "FAIL",
+   "AudioContext interface: operation createMediaStreamDestination()": "FAIL",
+   "AudioContext interface: context must inherit property \"sinkId\" with the proper type": "FAIL",
+   "AudioContext interface: context must inherit property \"onsinkchange\" with the proper type": "FAIL",
+   "AudioContext interface: context must inherit property \"playbackStats\" with the proper type": "FAIL",
+   "AudioContext interface: context must inherit property \"setSinkId((DOMString or AudioSinkOptions))\" with the proper type": "FAIL",
+   "AudioContext interface: calling setSinkId((DOMString or AudioSinkOptions)) on context with too few arguments must throw TypeError": "FAIL",
+   "AudioContext interface: context must inherit property \"createMediaElementSource(HTMLMediaElement)\" with the proper type": "FAIL",
+   "AudioContext interface: calling createMediaElementSource(HTMLMediaElement) on context with too few arguments must throw TypeError": "FAIL",
+   "AudioContext interface: context must inherit property \"createMediaStreamSource(MediaStream)\" with the proper type": "FAIL",
+   "AudioContext interface: calling createMediaStreamSource(MediaStream) on context with too few arguments must throw TypeError": "FAIL",
+   "AudioContext interface: context must inherit property \"createMediaStreamTrackSource(MediaStreamTrack)\" with the proper type": "FAIL",
+   "AudioContext interface: calling createMediaStreamTrackSource(MediaStreamTrack) on context with too few arguments must throw TypeError": "FAIL",
+   "AudioContext interface: context must inherit property \"createMediaStreamDestination()\" with the proper type": "FAIL",
+   "BaseAudioContext interface: context must inherit property \"renderQuantumSize\" with the proper type": "FAIL",
+   "BaseAudioContext interface: context must inherit property \"audioWorklet\" with the proper type": "FAIL",
+   "BaseAudioContext interface: calling decodeAudioData(ArrayBuffer, optional DecodeSuccessCallback?, optional DecodeErrorCallback?) on context with too few arguments must throw TypeError": "FAIL",
+   "AudioSinkInfo interface: existence and properties of interface object": "FAIL",
+   "AudioSinkInfo interface object length": "FAIL",
+   "AudioSinkInfo interface object name": "FAIL",
+   "AudioSinkInfo interface: existence and properties of interface prototype object": "FAIL",
+   "AudioSinkInfo interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "AudioSinkInfo interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "AudioSinkInfo interface: attribute type": "FAIL",
+   "OfflineAudioContext interface: operation startRendering(optional unsigned long?)": "FAIL",
+   "OfflineAudioContext interface: operation resume()": "FAIL",
+   "OfflineAudioContext interface: operation suspend(double)": "FAIL",
+   "OfflineAudioContext interface: operation close()": "FAIL",
+   "OfflineAudioContext interface: attribute oncomplete": "FAIL",
+   "OfflineAudioContext interface: calling suspend(double) on new OfflineAudioContext(1, 1, sample_rate) with too few arguments must throw TypeError": "FAIL",
+   "OfflineAudioContext interface: new OfflineAudioContext(1, 1, sample_rate) must inherit property \"close()\" with the proper type": "FAIL",
+   "BaseAudioContext interface: new OfflineAudioContext(1, 1, sample_rate) must inherit property \"renderQuantumSize\" with the proper type": "FAIL",
+   "BaseAudioContext interface: new OfflineAudioContext(1, 1, sample_rate) must inherit property \"audioWorklet\" with the proper type": "FAIL",
+   "BaseAudioContext interface: calling decodeAudioData(ArrayBuffer, optional DecodeSuccessCallback?, optional DecodeErrorCallback?) on new OfflineAudioContext(1, 1, sample_rate) with too few arguments must throw TypeError": "FAIL",
+   "AudioScheduledSourceNode interface: attribute onended": "FAIL",
+   "AnalyserNode interface: attribute fftSize": "FAIL",
+   "AnalyserNode interface: attribute smoothingTimeConstant": "FAIL",
+   "AudioListener interface: attribute positionX": "FAIL",
+   "AudioListener interface: attribute positionY": "FAIL",
+   "AudioListener interface: attribute positionZ": "FAIL",
+   "AudioListener interface: attribute forwardX": "FAIL",
+   "AudioListener interface: attribute forwardY": "FAIL",
+   "AudioListener interface: attribute forwardZ": "FAIL",
+   "AudioListener interface: attribute upX": "FAIL",
+   "AudioListener interface: attribute upY": "FAIL",
+   "AudioListener interface: attribute upZ": "FAIL",
+   "BiquadFilterNode interface: attribute type": "FAIL",
+   "ConvolverNode interface object length": "FAIL",
+   "MediaElementAudioSourceNode interface: existence and properties of interface object": "FAIL",
+   "MediaElementAudioSourceNode interface object length": "FAIL",
+   "MediaElementAudioSourceNode interface object name": "FAIL",
+   "MediaElementAudioSourceNode interface: existence and properties of interface prototype object": "FAIL",
+   "MediaElementAudioSourceNode interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "MediaElementAudioSourceNode interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "MediaElementAudioSourceNode interface: attribute mediaElement": "FAIL",
+   "MediaElementAudioSourceNode must be primary interface of new MediaElementAudioSourceNode(context, {mediaElement: new Audio})": "FAIL",
+   "Stringification of new MediaElementAudioSourceNode(context, {mediaElement: new Audio})": "FAIL",
+   "MediaElementAudioSourceNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"mediaElement\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"connect(AudioNode, optional unsigned long, optional unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling connect(AudioNode, optional unsigned long, optional unsigned long) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"connect(AudioParam, optional unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling connect(AudioParam, optional unsigned long) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect()\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect(unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(unsigned long) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect(AudioNode)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect(AudioNode, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode, unsigned long) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect(AudioNode, unsigned long, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode, unsigned long, unsigned long) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect(AudioParam)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioParam) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"disconnect(AudioParam, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioParam, unsigned long) on new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"context\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"numberOfInputs\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"numberOfOutputs\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"channelCount\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"channelCountMode\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaElementAudioSourceNode(context, {mediaElement: new Audio}) must inherit property \"channelInterpretation\" with the proper type": "FAIL",
+   "MediaStreamAudioDestinationNode interface: existence and properties of interface object": "FAIL",
+   "MediaStreamAudioDestinationNode interface object length": "FAIL",
+   "MediaStreamAudioDestinationNode interface object name": "FAIL",
+   "MediaStreamAudioDestinationNode interface: existence and properties of interface prototype object": "FAIL",
+   "MediaStreamAudioDestinationNode interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "MediaStreamAudioDestinationNode interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "MediaStreamAudioDestinationNode interface: attribute stream": "FAIL",
+   "MediaStreamAudioDestinationNode must be primary interface of new MediaStreamAudioDestinationNode(context)": "FAIL",
+   "Stringification of new MediaStreamAudioDestinationNode(context)": "FAIL",
+   "MediaStreamAudioDestinationNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"stream\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"connect(AudioNode, optional unsigned long, optional unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling connect(AudioNode, optional unsigned long, optional unsigned long) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"connect(AudioParam, optional unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling connect(AudioParam, optional unsigned long) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect()\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect(unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(unsigned long) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect(AudioNode)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect(AudioNode, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode, unsigned long) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect(AudioNode, unsigned long, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode, unsigned long, unsigned long) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect(AudioParam)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioParam) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"disconnect(AudioParam, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioParam, unsigned long) on new MediaStreamAudioDestinationNode(context) with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"context\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"numberOfInputs\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"numberOfOutputs\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"channelCount\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"channelCountMode\" with the proper type": "FAIL",
+   "AudioNode interface: new MediaStreamAudioDestinationNode(context) must inherit property \"channelInterpretation\" with the proper type": "FAIL",
+   "MediaStreamAudioSourceNode interface: existence and properties of interface object": "FAIL",
+   "MediaStreamAudioSourceNode interface object length": "FAIL",
+   "MediaStreamAudioSourceNode interface object name": "FAIL",
+   "MediaStreamAudioSourceNode interface: existence and properties of interface prototype object": "FAIL",
+   "MediaStreamAudioSourceNode interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "MediaStreamAudioSourceNode interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "MediaStreamAudioSourceNode interface: attribute mediaStream": "FAIL",
+   "MediaStreamTrackAudioSourceNode interface: existence and properties of interface object": "FAIL",
+   "MediaStreamTrackAudioSourceNode interface object length": "FAIL",
+   "MediaStreamTrackAudioSourceNode interface object name": "FAIL",
+   "MediaStreamTrackAudioSourceNode interface: existence and properties of interface prototype object": "FAIL",
+   "MediaStreamTrackAudioSourceNode interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "MediaStreamTrackAudioSourceNode interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "PannerNode interface object length": "FAIL",
+   "PannerNode interface: attribute panningModel": "FAIL",
+   "PannerNode interface: attribute positionX": "FAIL",
+   "PannerNode interface: attribute positionY": "FAIL",
+   "PannerNode interface: attribute positionZ": "FAIL",
+   "PannerNode interface: attribute orientationX": "FAIL",
+   "PannerNode interface: attribute orientationY": "FAIL",
+   "PannerNode interface: attribute orientationZ": "FAIL",
+   "PannerNode interface: attribute distanceModel": "FAIL",
+   "PannerNode interface: attribute maxDistance": "FAIL",
+   "ScriptProcessorNode interface: attribute onaudioprocess": "FAIL",
+   "WaveShaperNode interface: attribute oversample": "FAIL",
+   "AudioWorklet interface: existence and properties of interface object": "FAIL",
+   "AudioWorklet interface object length": "FAIL",
+   "AudioWorklet interface object name": "FAIL",
+   "AudioWorklet interface: existence and properties of interface prototype object": "FAIL",
+   "AudioWorklet interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "AudioWorklet interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "AudioWorklet interface: attribute port": "FAIL",
+   "AudioWorklet must be primary interface of context.audioWorklet": "FAIL",
+   "Stringification of context.audioWorklet": "FAIL",
+   "AudioWorklet interface: context.audioWorklet must inherit property \"port\" with the proper type": "FAIL",
+   "AudioParamMap interface: existence and properties of interface object": "FAIL",
+   "AudioParamMap interface object length": "FAIL",
+   "AudioParamMap interface object name": "FAIL",
+   "AudioParamMap interface: existence and properties of interface prototype object": "FAIL",
+   "AudioParamMap interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "AudioParamMap interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "AudioParamMap interface: maplike<DOMString, AudioParam>": "FAIL",
+   "AudioParamMap must be primary interface of worklet_node.parameters": "FAIL",
+   "Stringification of worklet_node.parameters": "FAIL",
+   "AudioWorkletNode interface: existence and properties of interface object": "FAIL",
+   "AudioWorkletNode interface object length": "FAIL",
+   "AudioWorkletNode interface object name": "FAIL",
+   "AudioWorkletNode interface: existence and properties of interface prototype object": "FAIL",
+   "AudioWorkletNode interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "AudioWorkletNode interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "AudioWorkletNode interface: attribute parameters": "FAIL",
+   "AudioWorkletNode interface: attribute port": "FAIL",
+   "AudioWorkletNode interface: attribute onprocessorerror": "FAIL",
+   "AudioWorkletNode must be primary interface of worklet_node": "FAIL",
+   "Stringification of worklet_node": "FAIL",
+   "AudioWorkletNode interface: worklet_node must inherit property \"parameters\" with the proper type": "FAIL",
+   "AudioWorkletNode interface: worklet_node must inherit property \"port\" with the proper type": "FAIL",
+   "AudioWorkletNode interface: worklet_node must inherit property \"onprocessorerror\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"connect(AudioNode, optional unsigned long, optional unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling connect(AudioNode, optional unsigned long, optional unsigned long) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"connect(AudioParam, optional unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling connect(AudioParam, optional unsigned long) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect()\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect(unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(unsigned long) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect(AudioNode)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect(AudioNode, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode, unsigned long) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect(AudioNode, unsigned long, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioNode, unsigned long, unsigned long) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect(AudioParam)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioParam) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"disconnect(AudioParam, unsigned long)\" with the proper type": "FAIL",
+   "AudioNode interface: calling disconnect(AudioParam, unsigned long) on worklet_node with too few arguments must throw TypeError": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"context\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"numberOfInputs\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"numberOfOutputs\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"channelCount\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"channelCountMode\" with the proper type": "FAIL",
+   "AudioNode interface: worklet_node must inherit property \"channelInterpretation\" with the proper type": "FAIL",
+   "AudioPlaybackStats interface: existence and properties of interface object": "FAIL",
+   "AudioPlaybackStats interface object length": "FAIL",
+   "AudioPlaybackStats interface object name": "FAIL",
+   "AudioPlaybackStats interface: existence and properties of interface prototype object": "FAIL",
+   "AudioPlaybackStats interface: existence and properties of interface prototype object's \"constructor\" property": "FAIL",
+   "AudioPlaybackStats interface: existence and properties of interface prototype object's @@unscopables property": "FAIL",
+   "AudioPlaybackStats interface: attribute underrunDuration": "FAIL",
+   "AudioPlaybackStats interface: attribute underrunEvents": "FAIL",
+   "AudioPlaybackStats interface: attribute totalDuration": "FAIL",
+   "AudioPlaybackStats interface: attribute averageLatency": "FAIL",
+   "AudioPlaybackStats interface: attribute minimumLatency": "FAIL",
+   "AudioPlaybackStats interface: attribute maximumLatency": "FAIL",
+   "AudioPlaybackStats interface: operation resetLatency()": "FAIL",
+   "AudioPlaybackStats interface: operation toJSON()": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=display": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "cross-origin direct: AudioContext in an iframe created hidden should be interrupted (visibility=display)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=visibility": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "cross-origin direct: AudioContext in an iframe created hidden should be interrupted (visibility=visibility)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=zero-size": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "cross-origin direct: AudioContext in an iframe created hidden should be interrupted (visibility=zero-size)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=display": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "cross-origin nested: AudioContext in an iframe created hidden should be interrupted (visibility=display)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=visibility": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "cross-origin nested: AudioContext in an iframe created hidden should be interrupted (visibility=visibility)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=zero-size": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "cross-origin nested: AudioContext in an iframe created hidden should be interrupted (visibility=zero-size)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=display": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "same-origin direct: AudioContext in an iframe created hidden should be interrupted (visibility=display)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=visibility": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "same-origin direct: AudioContext in an iframe created hidden should be interrupted (visibility=visibility)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=zero-size": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "same-origin direct: AudioContext in an iframe created hidden should be interrupted (visibility=zero-size)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=display": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "same-origin nested: AudioContext in an iframe created hidden should be interrupted (visibility=display)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=visibility": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "same-origin nested: AudioContext in an iframe created hidden should be interrupted (visibility=visibility)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-created-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=zero-size": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "same-origin nested: AudioContext in an iframe created hidden should be interrupted (visibility=zero-size)": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: hide/show an iframe with a running AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: hide/show an iframe with a running AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: hide/show an iframe with a running AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: hide/show an iframe with a running AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: hide/show an iframe with a running AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: hide/show an iframe with a running AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: hide/show an iframe with a running AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: hide/show an iframe with a running AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: hide/show an iframe with a running AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: hide/show an iframe with a running AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: hide/show an iframe with a running AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/interrupt-when-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: hide/show an iframe with a running AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: resume() a suspended AudioContext while its iframe is hidden (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: resume() a suspended AudioContext while its iframe is hidden (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=cross-origin&frame=direct&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: resume() a suspended AudioContext while its iframe is hidden (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: resume() a suspended AudioContext while its iframe is hidden (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: resume() a suspended AudioContext while its iframe is hidden (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=cross-origin&frame=nested&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: resume() a suspended AudioContext while its iframe is hidden (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: resume() a suspended AudioContext while its iframe is hidden (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: resume() a suspended AudioContext while its iframe is hidden (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=same-origin&frame=direct&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: resume() a suspended AudioContext while its iframe is hidden (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: resume() a suspended AudioContext while its iframe is hidden (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: resume() a suspended AudioContext while its iframe is hidden (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/resume-while-hidden.tentative.sub.html?origin=same-origin&frame=nested&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: resume() a suspended AudioContext while its iframe is hidden (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=cross-origin&frame=direct&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: hide/show an iframe with a suspended AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=cross-origin&frame=direct&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: hide/show an iframe with a suspended AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=cross-origin&frame=direct&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin direct: hide/show an iframe with a suspended AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=cross-origin&frame=nested&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: hide/show an iframe with a suspended AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=cross-origin&frame=nested&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: hide/show an iframe with a suspended AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=cross-origin&frame=nested&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin nested: hide/show an iframe with a suspended AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=same-origin&frame=direct&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: hide/show an iframe with a suspended AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=same-origin&frame=direct&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: hide/show an iframe with a suspended AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=same-origin&frame=direct&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "same-origin direct: hide/show an iframe with a suspended AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=same-origin&frame=nested&visibility=display": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: hide/show an iframe with a suspended AudioContext (visibility=display)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=same-origin&frame=nested&visibility=visibility": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: hide/show an iframe with a suspended AudioContext (visibility=visibility)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/suspended-hide-show.tentative.sub.html?origin=same-origin&frame=nested&visibility=zero-size": {
+  "status": "OK",
+  "subtests": {
+   "same-origin nested: hide/show an iframe with a suspended AudioContext (visibility=zero-size)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/viewport.tentative.sub.html?origin=cross-origin": {
+  "status": "OK",
+  "subtests": {
+   "cross-origin: AudioContext should not be interrupted when its iframe is scrolled out of view": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/media-playback-while-not-visible-permission-policy/viewport.tentative.sub.html?origin=same-origin": {
+  "status": "OK",
+  "subtests": {
+   "same-origin: AudioContext should not be interrupted when its iframe is scrolled out of view": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/processing-model/cycle-without-delay.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that cycles that don't contain a DelayNode are muted": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/processing-model/delay-time-clamping.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that a DelayNode allows a feedback loop of a single rendering quantum": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/processing-model/feedback-delay-time.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that a DelayNode allows a feedback loop of a single rendering quantum": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-analysernode-interface/ctor-analyser.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"constructor with options\"": "FAIL",
+   "X node1 = new AnalyserNode(c, {\"fftSize\":32,\"maxDecibels\":1,\"minDecibels\":-13,\"smoothingTimeConstant\":0.125}) incorrectly threw IndexSizeError: \"Failed to set the 'minDecibels' property on 'AnalyserNode': The minDecibels provided (-13) is greater than the maximum bound (-30).\".": "FAIL",
+   "X node1 instanceof AnalyserNode is not equal to true. Got false.": "FAIL",
+   "X node = new AnalyserNode(c, {\"minDecibels\":-10,\"maxDecibels\":20}) incorrectly threw IndexSizeError: \"Failed to set the 'minDecibels' property on 'AnalyserNode': The minDecibels provided (-10) is greater than the maximum bound (-30).\".": "FAIL",
+   "X node = new AnalyserNode(c, {\"maxDecibels\":20,\"minDecibels\":-10}) incorrectly threw IndexSizeError: \"Failed to set the 'minDecibels' property on 'AnalyserNode': The minDecibels provided (-10) is greater than the maximum bound (-30).\".": "FAIL",
+   "< [setting min/max] 2 out of 6 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 2 out of 7 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-analysernode-interface/test-analyser-minimum.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test AnalyserNode when the input is silent": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-analysernode-interface/test-analyser-resume-after-suspended.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "AnalyserNode resume after suspended": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffer-interface/acquire-the-content.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioBufferSourceNode setter set with non-null buffer": "FAIL",
+   "AudioBufferSourceNode buffer setter set with null": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffer-interface/audiobuffer-copy-channel.html": {
+  "status": "OK",
+  "subtests": {
+   "X 8: buffer.copyFromChannel(SharedArrayBuffer view, 0) did not throw an exception.": "FAIL",
+   "X 9: buffer.copyFromChannel(SharedArrayBuffer view, 0, 0) did not throw an exception.": "FAIL",
+   "< [copyFrom-exceptions] 2 out of 11 assertions were failed.": "FAIL",
+   "X 7: buffer.copyToChannel(SharedArrayBuffer view, 0) did not throw an exception.": "FAIL",
+   "X 8: buffer.copyToChannel(SharedArrayBuffer view, 0, 0) did not throw an exception.": "FAIL",
+   "< [copyTo-exceptions] 2 out of 10 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 2 out of 5 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/active-processing.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Setup graph with AudioWorklet and AudioBufferSourceNode": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/audiobuffersource-channels.html": {
+  "status": "OK",
+  "subtests": {
+   "validate .buffer: Validation of AudioBuffer in .buffer attribute setter": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/audiobuffersource-output-channel-count.html": {
+  "status": "OK",
+  "subtests": {
+   "A source with a stereo buffer that was never started outputs one channel": "FAIL",
+   "A playing source outputs the buffer channel count, then one channel at the end of the buffer": "FAIL",
+   "A source that is stopped outputs one channel after the stop time": "FAIL",
+   "A source outputs one channel after its duration has elapsed": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/audiobuffersource-playbackrate-negative.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioBufferSourceNode supports fractional negative playbackRate": "FAIL",
+   "AudioBufferSourceNode enters loop backwards from offset > loopEnd": "FAIL",
+   "AudioBufferSourceNode clamps offset to loopStart for playbackRate < 0": "FAIL",
+   "AudioBufferSourceNode loops backwards with negative rate (offset in loop)": "FAIL",
+   "AudioBufferSourceNode handles offset exactly at duration with negative rate": "FAIL",
+   "AudioBufferSourceNode handles out-of-bounds start offset correctly": "FAIL",
+   "AudioBufferSourceNode performs sub-sample interpolation backwards": "FAIL",
+   "AudioBufferSourceNode loops backwards using entire buffer when loopStart > loopEnd": "FAIL",
+   "AudioBufferSourceNode loops backwards using clamped loopStart when loopStart < 0": "FAIL",
+   "AudioBufferSourceNode loops backwards using entire buffer when loopEnd < 0": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/audiobuffersource-start-null-buffer.html": {
+  "status": "OK",
+  "subtests": {
+   "start() with null buffer fires ended event immediately and ignores subsequent buffer assignment": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/buffer-resampling.html": {
+  "status": "OK",
+  "subtests": {
+   "Interpolation of AudioBuffers to context sample rate": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/sub-sample-buffer-stitching.html": {
+  "status": "OK",
+  "subtests": {
+   "buffer-stitching-1": "FAIL",
+   "buffer-stitching-2": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiobuffersourcenode-interface/sub-sample-scheduling.html": {
+  "status": "OK",
+  "subtests": {
+   "X output0[34:8190] does not equal [1.899999976158142,2.9000000953674316,3.9000000953674316,4.900000095367432,5.900000095367432,6.900000095367432,7.900000095367432,8.899999618530273,9.899999618530273,10.899999618530273,11.899999618530273,12.899999618530273,13.899999618530273,14.899999618530273,15.899999618530273,16.899999618530273...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[0]\t1.0000000000000000e+0\t1.8999999761581421e+0\t8.9999997615814209e-1\t4.7368420392192295e-1\t0.0000000000000000e+0\n\t[1]\t2.0000000000000000e+0\t2.9000000953674316e+0\t9.0000009536743164e-1\t3.1034485026573805e-1\t0.0000000000000000e+0\n\t[2]\t3.0000000000000000e+0\t3.9000000953674316e+0\t9.0000009536743164e-1\t2.3076924957937461e-1\t0.0000000000000000e+0\n\t[3]\t4.0000000000000000e+0\t4.9000000953674316e+0\t9.0000009536743164e-1\t1.8367348527570676e-1\t0.0000000000000000e+0\n\t[4]\t5.0000000000000000e+0\t5.9000000953674316e+0\t9.0000009536743164e-1\t1.5254238657963662e-1\t0.0000000000000000e+0\n\t...and 8152 more errors.\n\tMax AbsError of 9.0002441406250000e-1 at index of 511.\n\t[511]\t5.1200000000000000e+2\t5.1290002441406250e+2\t9.0002441406250000e-1\t1.7547755336738164e-3\t0.0000000000000000e+0\n\tMax RelError of 4.7368420392192295e-1 at index of 0.\n": "FAIL",
+   "X output1[34:8190] does not equal [1.100000023841858,2.0999999046325684,3.0999999046325684,4.099999904632568,5.099999904632568,6.099999904632568,7.099999904632568,8.100000381469727,9.100000381469727,10.100000381469727,11.100000381469727,12.100000381469727,13.100000381469727,14.100000381469727,15.100000381469727,16.100000381469727...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[0]\t1.0000000000000000e+0\t1.1000000238418579e+0\t1.0000002384185791e-1\t9.0909110613105290e-2\t0.0000000000000000e+0\n\t[1]\t2.0000000000000000e+0\t2.0999999046325684e+0\t9.9999904632568359e-2\t4.7619004368509764e-2\t0.0000000000000000e+0\n\t[2]\t3.0000000000000000e+0\t3.0999999046325684e+0\t9.9999904632568359e-2\t3.2258034744817511e-2\t0.0000000000000000e+0\n\t[3]\t4.0000000000000000e+0\t4.0999999046325684e+0\t9.9999904632568359e-2\t2.4390221209414906e-2\t0.0000000000000000e+0\n\t[4]\t5.0000000000000000e+0\t5.0999999046325684e+0\t9.9999904632568359e-2\t1.9607824804414951e-2\t0.0000000000000000e+0\n\t...and 8152 more errors.\n\tMax AbsError of 1.0009765625000000e-1 at index of 2047.\n\t[2047]\t2.0480000000000000e+3\t2.0481000976562500e+3\t1.0009765625000000e-1\t4.8873419987893697e-5\t0.0000000000000000e+0\n\tMax RelError of 9.0909110613105290e-2 at index of 0.\n": "FAIL",
+   "< [sub-sample accurate start] 2 out of 6 assertions were failed.": "FAIL",
+   "X output0 expected to be equal to the array [0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1...] but differs in 1 places:\n\tIndex\tActual\t\t\tExpected\n\t[38]\t1.0000000000000000e+0\t0.0000000000000000e+0": "FAIL",
+   "X output0[38] is not equal to 0. Got 1.": "FAIL",
+   "X output1 expected to be equal to the array [0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1...] but differs in 1 places:\n\tIndex\tActual\t\t\tExpected\n\t[44]\t1.0000000000000000e+0\t0.0000000000000000e+0": "FAIL",
+   "X output1[44] is not equal to 0. Got 1.": "FAIL",
+   "< [sub-sample-grain] 4 out of 16 assertions were failed.": "FAIL",
+   "X With playbackRate 0.25: output0[18] is not close to 1.0499999999999998 within a relative error of 4.542e-8 (RelErr=0.04761904761904746). Got 1.": "FAIL",
+   "X With playbackRate 4: output1[18] is not close to 1.7999999999999972 within a relative error of 4.542e-8 (RelErr=0.4444444444444436). Got 1.": "FAIL",
+   "< [sub-sample accurate start with playbackRate] 2 out of 5 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 3 out of 4 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-detached-execution-context.html": {
+  "status": "OK",
+  "subtests": {
+   "X decodeAudioData() upon a detached iframe rejected correctly but got TypeError instead of InvalidStateError. Got Promise.": "FAIL",
+   "< [decoding-on-detached-iframe] 1 out of 1 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-getoutputtimestamp-cross-realm.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"getoutputtimestamp-cross-realm\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-not-fully-active.html": {
+  "status": "OK",
+  "subtests": {
+   "removed frame": "FAIL",
+   "navigated frame": "FAIL",
+   "frame in removed frame": "FAIL",
+   "frame in navigated frame": "FAIL",
+   "frame in removed remote-site frame": "FAIL",
+   "frame in navigated remote-site frame": "FAIL",
+   "removed frame in remote-site frame": "FAIL",
+   "navigated frame in remote-site frame": "FAIL",
+   "frame in removed remote-site frame in remote-site frame": "FAIL",
+   "frame in navigated remote-site frame in remote-site frame": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-playbackstats.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that the stats increase during playback": "FAIL",
+   "Test that toJSON reflects the current stats": "FAIL",
+   "Test PlaybackStats.resetLatency()": "FAIL",
+   "Test that stats are unchanged within the same execution cycle.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-rendersizehint.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioContext with no hint hint": "FAIL",
+   "AudioContext with \"default\" hint": "FAIL",
+   "AudioContext with \"hardware\" hint": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 1": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 13": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 127": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 129": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 256": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 500": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 16383": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 3000, renderSizeHint 18000": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 288000": "FAIL",
+   "AudioContext [Honored Exactly]: sampleRate 44100.1, renderSizeHint 264600": "FAIL",
+   "AudioContext [Throws Exception]: sampleRate 48000, renderSizeHint 0": "FAIL",
+   "AudioContext [Throws Exception]: sampleRate 3000, renderSizeHint 18001": "FAIL",
+   "AudioContext [Throws Exception]: sampleRate 48000, renderSizeHint 288001": "FAIL",
+   "AudioContext [Throws Exception]: sampleRate 48000, renderSizeHint -1": "FAIL",
+   "Base latency scales with render quantum size": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-sinkid-constructor.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Setting sinkId to the empty string at construction should succeed.": "NOTRUN",
+   "Setting sinkId with a valid device identifier at construction should succeed.": "NOTRUN",
+   "Setting sinkId with an AudioSinkOptions at construction should succeed.": "NOTRUN",
+   "Invalid sinkId argument with a wrong type should throw an appropriate exception.": "NOTRUN",
+   "Invalid sinkId argument with a wrong ID should dispatch an onerror event.": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-sinkid-setsinkid.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "default AudioContext.sinkId should be the empty string.": "NOTRUN",
+   "setSinkId() with a valid device identifier and setting the same ID should succeed.": "NOTRUN",
+   "setSinkId() with AudioSinkOptions.type of \"none\" and setting the same option should succeed.": "NOTRUN",
+   "setSinkId() should fail with TypeError on an invalid AudioSinkOptions.type value.": "NOTRUN",
+   "setSinkId() should fail with NotFoundError on an invalid device identifier.": "NOTRUN",
+   "setSinkId() should fail with InvalidStateError when calling from a stopped AudioContext.": "NOTRUN",
+   "setSinkId() should fail with InvalidStateError when calling from a detached document.": "NOTRUN",
+   "pending setSinkId() should be rejected with InvalidStateError when AudioContext is closed.": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-sinkid-state-change.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Calling setSinkId() on a suspended AudioContext should fire only sink change events.": "NOTRUN",
+   "Calling setSinkId() on a running AudioContext should fire both state and sink change events.": "NOTRUN",
+   "setSinkId() promise should resolve before the sinkchange event is fired.": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-state-change-after-close.http.window.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Call close on a closed AudioContext": "TIMEOUT",
+   "Call resume on a closed AudioContext": "NOTRUN",
+   "Call suspend on a closed AudioContext": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-suspend-resume-close.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "testOfflineAudioContext": "FAIL",
+   "testSuspendResumeEventLoop": "TIMEOUT",
+   "testResumeInStateChangeForResumeCallback": "NOTRUN",
+   "testAudioContext": "NOTRUN",
+   "testMultiContextOutput": "NOTRUN",
+   "testMultiContextInput": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontext-suspend-resume.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test suspend() for offline context": "FAIL",
+   "Test state after context closed": "FAIL",
+   "Test resuming a running online context": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/audiocontextoptions.html": {
+  "status": "OK",
+  "subtests": {
+   "X high latency context baseLatency is not equal to 0.2. Got 0.1.": "FAIL",
+   "< [test-audiocontextoptions-latencyHint-double] 1 out of 10 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 3 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/callback-detached-buffer.html": {
+  "status": "OK",
+  "subtests": {
+   "error callback is invoked with DataCloneError": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/context-time-monotonic-on-setsinkid.https.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "currentTime and getOutputTimestamp().contextTime should not reset after setSinkId": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/processing-after-resume.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Test consistency of processing after resume()": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/promise-methods-after-discard.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "suspend()": "FAIL",
+   "resume()": "TIMEOUT",
+   "close()": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/suspend-after-construct.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-audiocontext-interface/suspend-with-navigation.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "suspend() with navigation": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-audionode-interface/audionode-connect-method-chaining.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify connect() method chaining for MediaElementSourceNode and MediaStreamSourceNode": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audionode-interface/audionode-disconnect-audioparam.html": {
+  "status": "OK",
+  "subtests": {
+   "X splitter.disconnect(gain1.gain, 2) threw \"InvalidAccessError\" instead of IndexSizeError.": "FAIL",
+   "< [exceptions] 1 out of 3 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 3 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audionode-interface/audionode-iframe.window.html": {
+  "status": "OK",
+  "subtests": {
+   "Call a constructor from iframe page and then destroy the iframe": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audionode-interface/audionode.html": {
+  "status": "OK",
+  "subtests": {
+   "Basic tests for AudioNode API.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/audioparam-cancel-and-hold.html": {
+  "status": "OK",
+  "subtests": {
+   "X linearRampToValueAtTime: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":0.000059605,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9605000000000003e-5\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9605000000000003e-5\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9605000000000003e-5\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9605000000000003e-5\n\t[486]\t1.0000000000000000e+0\t9.9974489212036133e-1\t2.5510787963867188e-4\t2.5517297627559060e-4\t5.9605000000000003e-5\n\t...and 11513 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9605000000000003e-5\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9605000000000003e-5\n": "FAIL",
+   "< [linear] 1 out of 3 assertions were failed.": "FAIL",
+   "X exponentialRampToValue(0.001, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9970632791519165e-1\t2.9367208480834961e-4\t2.9375835343643314e-4\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9941277503967285e-1\t5.8722496032714844e-4\t5.8756999609479467e-4\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9911928176879883e-1\t8.8071823120117188e-4\t8.8149457954808490e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9882590770721436e-1\t1.1740922927856445e-3\t1.1754724058777679e-3\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9853259325027466e-1\t1.4674067497253418e-3\t1.4695631966792969e-3\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 9.6605781465768814e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t3.3942185342311859e-2\t9.6605781465768814e-1\t2.8461862573515965e+1\t5.9604999999999997e-8\n\tMax RelError of 2.8461862573515965e+1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t3.3942185342311859e-2\t9.6605781465768814e-1\t2.8461862573515965e+1\t5.9604999999999997e-8\n": "FAIL",
+   "< [exponential] 1 out of 3 assertions were failed.": "FAIL",
+   "X Cancelling setValueCurveAtTime([1,0], 0.01, 0.49) at time 0.25: Expected 0.5102040767669678 for all values but found 31 unexpected values: \n\tIndex\tActual\n\t[1]\t0.5101615786552429\n\t[2]\t0.5101190209388733\n\t[3]\t0.5100765228271484\n\t[4]\t0.5100340247154236\n\t...and 27 more errors.": "FAIL",
+   "< [setValueCurve] 1 out of 3 assertions were failed.": "FAIL",
+   "X Post cancellation linearRampToValueAtTime: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9995750188827515e-1\t4.2498111724853516e-5\t4.2499917891112348e-5\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n": "FAIL",
+   "< [post cancel: Linear] 1 out of 4 assertions were failed.": "FAIL",
+   "X Post cancel exponentialRampToValueAtTime: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9995750188827515e-1\t4.2498111724853516e-5\t4.2499917891112348e-5\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n": "FAIL",
+   "< [post cancel: Exponential] 1 out of 4 assertions were failed.": "FAIL",
+   "X Post cancel setValueCurveAtTime: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9995750188827515e-1\t4.2498111724853516e-5\t4.2499917891112348e-5\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n": "FAIL",
+   "< [post cancel: ValueCurve] 1 out of 4 assertions were failed.": "FAIL",
+   "X Post cancel setTargetAtTime: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9995750188827515e-1\t4.2498111724853516e-5\t4.2499917891112348e-5\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n": "FAIL",
+   "< [post cancel: setTarget] 1 out of 4 assertions were failed.": "FAIL",
+   "X Post cancel setValueAtTime: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9995750188827515e-1\t4.2498111724853516e-5\t4.2499917891112348e-5\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n": "FAIL",
+   "< [post cancel: setValue] 1 out of 4 assertions were failed.": "FAIL",
+   "X After cancelling current setValueCurve event starting now, output: Expected 0.5 for all values but found 12000 unexpected values: \n\tIndex\tActual\n\t[12000]\t-1\n\t[12001]\t-0.9995833039283752\n\t[12002]\t-0.9991666674613953\n\t[12003]\t-0.9987499713897705\n\t...and 11996 more errors.": "FAIL",
+   "< [cancel setValueCurve now] 1 out of 1 assertions were failed.": "FAIL",
+   "X 1st linearRamp: linearRampToValue(0, 0.5) up to time 0.25 does not equal [0,0.0020833334419876337,0.004166666883975267,0.0062500000931322575,0.008333333767950535,0.010416666977107525,0.012500000186264515,0.014583333395421505,0.01666666753590107,0.01875000074505806,0.02083333395421505,0.02291666716337204,0.02500000037252903,0.02708333358168602,0.02916666679084301,0.03125...] with an element-wise tolerance of {\"absoluteThreshold\":5.9605e-8,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[481]\t1.0000000000000000e+0\t9.9995750188827515e-1\t4.2498111724853516e-5\t4.2499917891112348e-5\t5.9604999999999997e-8\n\t[482]\t1.0000000000000000e+0\t9.9991494417190552e-1\t8.5055828094482422e-5\t8.5063063203763466e-5\t5.9604999999999997e-8\n\t[483]\t1.0000000000000000e+0\t9.9987244606018066e-1\t1.2755393981933594e-4\t1.2757021190246769e-4\t5.9604999999999997e-8\n\t[484]\t1.0000000000000000e+0\t9.9982994794845581e-1\t1.7005205154418945e-4\t1.7008097416277448e-4\t5.9604999999999997e-8\n\t[485]\t1.0000000000000000e+0\t9.9978739023208618e-1\t2.1260976791381836e-4\t2.1265498043985539e-4\t5.9604999999999997e-8\n\t...and 11514 more errors.\n\tMax AbsError of 4.8975342512130737e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n\tMax RelError of 9.5983677154078428e-1 at index of 11999.\n\t[11999]\t1.0000000000000000e+0\t5.1024657487869263e-1\t4.8975342512130737e-1\t9.5983677154078428e-1\t5.9604999999999997e-8\n": "FAIL",
+   "X 2nd linearRamp(2, 0.5) does not equal [0.5102040767669678,0.5103282332420349,0.510452389717102,0.5105765461921692,0.5107007026672363,0.5108247995376587,0.5109489560127258,0.511073112487793,0.5111972689628601,0.5113214254379272,0.5114455819129944,0.5115697383880615,0.5116938948631287,0.5118180513381958,0.5119421482086182,0.5120663046836853...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t5.1020407676696777e-1\t5.1032823324203491e-1\t1.2415647506713867e-4\t2.4328749024601703e-4\t0.0000000000000000e+0\n\t[2]\t5.1020407676696777e-1\t5.1045238971710205e-1\t2.4831295013427734e-4\t4.8645663167899933e-4\t0.0000000000000000e+0\n\t[3]\t5.1020407676696777e-1\t5.1057654619216919e-1\t3.7246942520141602e-4\t7.2950751063529491e-4\t0.0000000000000000e+0\n\t[4]\t5.1020407676696777e-1\t5.1070070266723633e-1\t4.9662590026855469e-4\t9.7244021336729484e-4\t0.0000000000000000e+0\n\t[5]\t5.1020407676696777e-1\t5.1082479953765869e-1\t6.2072277069091797e-4\t1.2151382846970753e-3\t0.0000000000000000e+0\n\t...and 5994 more errors.\n\tMax AbsError of 7.4477386474609375e-1 at index of 5999.\n\t[5999]\t5.1020407676696777e-1\t1.2549779415130615e+0\t7.4477386474609375e-1\t5.9345574141977242e-1\t0.0000000000000000e+0\n\tMax RelError of 5.9345574141977242e-1 at index of 5999.\n\t[5999]\t5.1020407676696777e-1\t1.2549779415130615e+0\t7.4477386474609375e-1\t5.9345574141977242e-1\t0.0000000000000000e+0\n": "FAIL",
+   "< [linear, cancel, linear, cancel, linear] 2 out of 7 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 10 out of 17 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/audioparam-exceptional-values.html": {
+  "status": "OK",
+  "subtests": {
+   "X gain.gain.setValueCurveAtTime([1,2,Infinity,3],1,1) did not throw an exception.": "FAIL",
+   "X gain.gain.setValueCurveAtTime([1,NaN,2,3],1,1) threw \"NotSupportedError\" instead of EcmaScript error TypeError.": "FAIL",
+   "< [test setValueCurve] 2 out of 5 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 6 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/audioparam-nominal-range.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"Online createMediaElementSource\"": "FAIL",
+   "Executing \"Online createMediaStreamDestination\"": "FAIL",
+   "X Set DelayNode.delayTime.value = -1 is not equal to 0. Got -1.": "FAIL",
+   "X Set DelayNode.delayTime.value = 4 is not equal to 1.5. Got 4.": "FAIL",
+   "X DelayNode.delayTime was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Nominal ranges for AudioParam(s) of DelayNode are incorrect for: NaN Got false.": "FAIL",
+   "< [Offline createDelay] 4 out of 10 assertions were failed.": "FAIL",
+   "X Set StereoPannerNode.pan.value = -3 is not equal to -1. Got -3.": "FAIL",
+   "X Set StereoPannerNode.pan.value = 3 is not equal to 1. Got 3.": "FAIL",
+   "X StereoPannerNode.pan was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Nominal ranges for AudioParam(s) of StereoPannerNode are incorrect for: NaN Got false.": "FAIL",
+   "< [Offline createStereoPanner] 4 out of 10 assertions were failed.": "FAIL",
+   "X Set DynamicsCompressorNode.threshold.value = -201 is not equal to -100. Got -201.": "FAIL",
+   "X Set DynamicsCompressorNode.threshold.value = 1 is not equal to 0. Got 1.": "FAIL",
+   "X DynamicsCompressorNode.threshold was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Set DynamicsCompressorNode.knee.value = -1 is not equal to 0. Got -1.": "FAIL",
+   "X Set DynamicsCompressorNode.knee.value = 81 is not equal to 40. Got 81.": "FAIL",
+   "X DynamicsCompressorNode.knee was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Set DynamicsCompressorNode.ratio.value = 41 is not equal to 20. Got 41.": "FAIL",
+   "X DynamicsCompressorNode.ratio was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Set DynamicsCompressorNode.attack.value = -1 is not equal to 0. Got -1.": "FAIL",
+   "X Set DynamicsCompressorNode.attack.value = 3 is not equal to 1. Got 3.": "FAIL",
+   "X DynamicsCompressorNode.attack was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Set DynamicsCompressorNode.release.value = -1 is not equal to 0. Got -1.": "FAIL",
+   "X Set DynamicsCompressorNode.release.value = 3 is not equal to 1. Got 3.": "FAIL",
+   "X DynamicsCompressorNode.release was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Nominal ranges for AudioParam(s) of DynamicsCompressorNode are incorrect for: NaN Got false.": "FAIL",
+   "< [Offline createDynamicsCompressor] 15 out of 46 assertions were failed.": "FAIL",
+   "X Set BiquadFilterNode.frequency.value = -1 is not equal to 0. Got -1.": "FAIL",
+   "X Set BiquadFilterNode.frequency.value = 48001 is not equal to 24000. Got 48001.": "FAIL",
+   "X BiquadFilterNode.frequency was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Set BiquadFilterNode.detune.value = -307201 is not equal to -153600. Got -307201.": "FAIL",
+   "X Set BiquadFilterNode.detune.value = 307201 is not equal to 153600. Got 307201.": "FAIL",
+   "X BiquadFilterNode.detune was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X BiquadFilterNode.gain.maxValue is not equal to 1541.273681640625. Got 1541.2735595703125.": "FAIL",
+   "X Set BiquadFilterNode.gain.value = 3083.54736328125 is not equal to 1541.2735595703125. Got 3083.54736328125.": "FAIL",
+   "X BiquadFilterNode.gain was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Nominal ranges for AudioParam(s) of BiquadFilterNode are incorrect for: NaN Got false.": "FAIL",
+   "< [Offline createBiquadFilter] 10 out of 33 assertions were failed.": "FAIL",
+   "X Set OscillatorNode.frequency.value = -48001 is not equal to -24000. Got -48001.": "FAIL",
+   "X Set OscillatorNode.frequency.value = 48001 is not equal to 24000. Got 48001.": "FAIL",
+   "X OscillatorNode.frequency was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Set OscillatorNode.detune.value = -307201 is not equal to -153600. Got -307201.": "FAIL",
+   "X Set OscillatorNode.detune.value = 307201 is not equal to 153600. Got 307201.": "FAIL",
+   "X OscillatorNode.detune was clipped to lie within the nominal range is not equal to true. Got false.": "FAIL",
+   "X Nominal ranges for AudioParam(s) of OscillatorNode are incorrect for: NaN Got false.": "FAIL",
+   "< [Offline createOscillator] 7 out of 19 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 5 out of 24 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/audioparam-setValueCurve-exceptions.html": {
+  "status": "OK",
+  "subtests": {
+   "X setValueAtTime(1, 0.018750000000000003) did not throw an exception.": "FAIL",
+   "X linearRampToValueAtTime(1, 0.018750000000000003) did not throw an exception.": "FAIL",
+   "X exponentialRampToValueAtTime(1, 0.018750000000000003) did not throw an exception.": "FAIL",
+   "X setTargetAtTime(1, 0.018750000000000003, 1) did not throw an exception.": "FAIL",
+   "< [setValueCurve] 4 out of 6 assertions were failed.": "FAIL",
+   "X value setter did not throw an exception.": "FAIL",
+   "< [value setter] 1 out of 2 assertions were failed.": "FAIL",
+   "X setValueCurveAtTime([NaN, NaN], 0.043750000000000004, 0.01) threw \"NotSupportedError\" instead of EcmaScript error TypeError.": "FAIL",
+   "X setValueCurveAtTime([1, Infinity], 0.043750000000000004, 0.01) threw \"NotSupportedError\" instead of EcmaScript error TypeError.": "FAIL",
+   "X delayTime.setValueCurveAtTime([1, 5, Infinity], 0.043750000000000004, 0.01) threw \"NotSupportedError\" instead of EcmaScript error TypeError.": "FAIL",
+   "< [automations] 3 out of 13 assertions were failed.": "FAIL",
+   "X Handled setValueCurve exception so output: Expected 1 for all values but found 5872 unexpected values: \n\tIndex\tActual\n\t[128]\tNaN\n\t[129]\tNaN\n\t[130]\tNaN\n\t[131]\tNaN\n\t...and 5868 more errors.": "FAIL",
+   "< [catch-exception] 1 out of 1 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 4 out of 7 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/automation-rate.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioBufferSourceNode": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/event-insertion.html": {
+  "status": "OK",
+  "subtests": {
+   "X Multiple linear ramps: Output at frame 63 is not close to 1.984375 within a relative error of 0 (RelErr=3.968503937007874). Got 9.859375.": "FAIL",
+   "< [Multiple linear ramps at the same time] 1 out of 6 assertions were failed.": "FAIL",
+   "X Multiple exponential ramps: Output at frame 63 is not close to 1.978456026387951 within a relative error of 5.3924e-7 (RelErr=3.875830371457587). Got 9.646615982055664.": "FAIL",
+   "< [Multiple exponential ramps at the same time] 1 out of 6 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 2 out of 6 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-audiobuffersource-connections.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify k-rate AudioParam input works correctly for playbackRate": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-audioworklet-connections.https.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioWorklet k-rate AudioParam": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-audioworklet.https.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioWorklet k-rate AudioParam": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-biquad-connection.html": {
+  "status": "OK",
+  "subtests": {
+   "X k-rate frequency with input: output[0,2048] does not equal [0,0.02839340642094612,0.1450495570898056,0.36942505836486816,0.6520541310310364,0.9131435751914978,1.0783559083938599,1.1012734174728394,0.9707123637199402,0.7065789699554443,0.3498469591140747,-0.04851161316037178,-0.43676120042800903,-0.7688571214675903,-1.0084279775619507,-1.131049394607544...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t2.8345178812742233e-2\t2.8393406420946121e-2\t4.8227608203887939e-5\t1.6985495677725344e-3\t0.0000000000000000e+0\n\t[2]\t1.4466476440429688e-1\t1.4504955708980560e-1\t3.8479268550872803e-4\t2.6528359908778521e-3\t0.0000000000000000e+0\n\t[3]\t3.6827236413955688e-1\t3.6942505836486816e-1\t1.1526942253112793e-3\t3.1202383249617129e-3\t0.0000000000000000e+0\n\t[4]\t6.5005332231521606e-1\t6.5205413103103638e-1\t2.0008087158203125e-3\t3.0684702704921263e-3\t0.0000000000000000e+0\n\t[5]\t9.1087919473648071e-1\t9.1314357519149780e-1\t2.2643804550170898e-3\t2.4797638800034493e-3\t0.0000000000000000e+0\n\t...and 1018 more errors.\n\tMax AbsError of 6.8004986643791199e-1 at index of 641.\n\t[641]\t3.6070409417152405e-1\t1.0407539606094360e+0\t6.8004986643791199e-1\t6.5342039730475210e-1\t0.0000000000000000e+0\n\tMax RelError of 2.5992910638489764e+2 at index of 478.\n\t[478]\t3.6779227852821350e-1\t1.4095486840233207e-3\t3.6638272984419018e-1\t2.5992910638489764e+2\t0.0000000000000000e+0\n": "FAIL",
+   "< [Frequency AudioParam] 1 out of 11 assertions were failed.": "FAIL",
+   "X k-rate Q with input: output[0,2048] does not equal [0,0.9757021069526672,0.4275550842285156,-0.7883464097976685,-0.7730103731155396,0.4496113061904907,0.9700312614440918,-0.024541229009628296,-0.9807852506637573,-0.40524131059646606,0.803207516670227,0.7572088241577148,-0.4713967442512512,-0.9637761116027832,0.049067676067352295,0.9852776527404785...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t6.1369603872299194e-1\t9.7570210695266724e-1\t3.6200606822967529e-1\t3.7102109921674764e-1\t0.0000000000000000e+0\n\t[2]\t8.2298225164413452e-1\t4.2755508422851563e-1\t3.9542716741561890e-1\t9.2485666058475569e-1\t0.0000000000000000e+0\n\t[3]\t1.8489366769790649e-1\t-7.8834640979766846e-1\t9.7324007749557495e-1\t1.2345335317063979e+0\t0.0000000000000000e+0\n\t[4]\t-4.4533786177635193e-1\t-7.7301037311553955e-1\t3.2767251133918762e-1\t4.2389148028963303e-1\t0.0000000000000000e+0\n\t[5]\t-4.0544152259826660e-1\t4.4961130619049072e-1\t8.5505282878875732e-1\t1.9017600692329781e+0\t0.0000000000000000e+0\n\t...and 2042 more errors.\n\tMax AbsError of 1.6737884916365147e+0 at index of 130.\n\t[130]\t-1.5206161886453629e-2\t1.6585823297500610e+0\t1.6737884916365147e+0\t1.0091681682685869e+0\t0.0000000000000000e+0\n\tMax RelError of 1.1151652858087803e+3 at index of 1895.\n\t[1895]\t-1.5304213156923652e-3\t1.3736034816247411e-6\t1.5317949191739899e-3\t1.1151652858087803e+3\t0.0000000000000000e+0\n": "FAIL",
+   "X k-rate Q with input: output[2048:] does not equal [0.001436383812688291,0.002817161614075303,0.004582748748362064,0.0029107488226145506,-0.001067840727046132,-0.002866920782253146,-0.00145627127494663,-0.0006699468358419836,-0.0030350680463016033,-0.005679761059582233,-0.004727444611489773,-0.0013245480367913842,0.0001096195264835842,-0.0013177355285733938,-0.0017317390302196145,0.0012720527593046427...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[0]\t-2.2259051911532879e-3\t1.4363838126882911e-3\t3.6622890038415790e-3\t2.5496590615201611e+0\t0.0000000000000000e+0\n\t[1]\t-4.8083649016916752e-4\t2.8171616140753031e-3\t3.2979981042444706e-3\t1.1706811876772629e+0\t0.0000000000000000e+0\n\t[2]\t2.0192798692733049e-3\t4.5827487483620644e-3\t2.5634688790887594e-3\t5.5937364665801881e-1\t0.0000000000000000e+0\n\t[3]\t1.3680960983037949e-3\t2.9107488226145506e-3\t1.5426527243107557e-3\t5.2998483150637632e-1\t0.0000000000000000e+0\n\t[4]\t-1.4193081296980381e-3\t-1.0678407270461321e-3\t3.5146740265190601e-4\t3.2913841338879946e-1\t0.0000000000000000e+0\n\t...and 2043 more errors.\n\tMax AbsError of 3.6622890038415790e-3 at index of 0.\n\tMax RelError of 5.9097131440960504e+2 at index of 180.\n\t[180]\t1.0465120431035757e-3\t1.7678424910627655e-6\t1.0447442006125129e-3\t5.9097131440960504e+2\t0.0000000000000000e+0\n": "FAIL",
+   "< [Q AudioParam] 2 out of 9 assertions were failed.": "FAIL",
+   "X k-rate gain with input: output[0,2048] does not equal [0,0.9757021069526672,0.4275550842285156,-0.7883464097976685,-0.7730103731155396,0.4496113061904907,0.9700312614440918,-0.024541229009628296,-0.9807852506637573,-0.40524131059646606,0.803207516670227,0.7572088241577148,-0.4713967442512512,-0.9637761116027832,0.049067676067352295,0.9852776527404785...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t9.7564888000488281e-1\t9.7570210695266724e-1\t5.3226947784423828e-5\t5.4552457563777654e-5\t0.0000000000000000e+0\n\t[2]\t4.2748519778251648e-1\t4.2755508422851563e-1\t6.9886445999145508e-5\t1.6345600503207502e-4\t0.0000000000000000e+0\n\t[3]\t-7.8803533315658569e-1\t-7.8834640979766846e-1\t3.1107664108276367e-4\t3.9459384506184591e-4\t0.0000000000000000e+0\n\t[4]\t-7.7254343032836914e-1\t-7.7301037311553955e-1\t4.6694278717041016e-4\t6.0405759535728460e-4\t0.0000000000000000e+0\n\t[5]\t4.4916906952857971e-1\t4.4961130619049072e-1\t4.4223666191101074e-4\t9.8359773391384540e-4\t0.0000000000000000e+0\n\t...and 1049 more errors.\n\tMax AbsError of 3.2906824350357056e-1 at index of 127.\n\t[127]\t6.4663386344909668e-1\t9.7570210695266724e-1\t3.2906824350357056e-1\t3.3726302439924333e-1\t0.0000000000000000e+0\n\tMax RelError of 5.0215585632481616e+0 at index of 1025.\n\t[1025]\t9.7343981906305999e-6\t1.6165911347343354e-6\t8.1178070558962645e-6\t5.0215585632481616e+0\t0.0000000000000000e+0\n": "FAIL",
+   "< [Gain AudioParam] 1 out of 9 assertions were failed.": "FAIL",
+   "X k-rate detune with input: output[0,2048] does not equal [0,0.12810896337032318,0.47732436656951904,0.8133140802383423,0.9599840044975281,0.9983929991722107,0.9618627429008484,0.8107287883758545,0.5545527338981628,0.24036026000976562,-0.09643322229385376,-0.42483171820640564,-0.706647515296936,-0.9075677394866943,-1.0057729482650757,-0.9910215735435486...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t1.2661346793174744e-1\t1.2810896337032318e-1\t1.4954954385757446e-3\t1.1673620636931800e-2\t0.0000000000000000e+0\n\t[2]\t4.7041159868240356e-1\t4.7732436656951904e-1\t6.9127678871154785e-3\t1.4482327681691233e-2\t0.0000000000000000e+0\n\t[3]\t8.0713295936584473e-1\t8.1331408023834229e-1\t6.1811208724975586e-3\t7.5999186817055676e-3\t0.0000000000000000e+0\n\t[4]\t9.6178060770034790e-1\t9.5998400449752808e-1\t1.7966032028198242e-3\t1.8714928523837196e-3\t0.0000000000000000e+0\n\t[5]\t1.0013415813446045e+0\t9.9839299917221069e-1\t2.9485821723937988e-3\t2.9533281732128853e-3\t0.0000000000000000e+0\n\t...and 2042 more errors.\n\tMax AbsError of 1.4997755289077759e+0 at index of 257.\n\t[257]\t2.6814103126525879e-1\t-1.2316344976425171e+0\t1.4997755289077759e+0\t1.2177115303107455e+0\t0.0000000000000000e+0\n\tMax RelError of 9.6400041486492952e+1 at index of 253.\n\t[253]\t8.2409453392028809e-1\t-8.6383037269115448e-3\t8.3273283764719963e-1\t9.6400041486492952e+1\t0.0000000000000000e+0\n": "FAIL",
+   "X k-rate detune with input: output[2048:] does not equal [0.005766861606389284,0.005750633776187897,0.0057346029207110405,0.005718936212360859,0.005703762173652649,0.005689152516424656,0.005675117019563913,0.005661601200699806,0.005648493301123381,0.005635634995996952,0.0056228418834507465,0.005609922111034393,0.005596699193120003,0.005583031568676233,0.00556882843375206,0.005554059986025095...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[0]\t1.8493807147024199e-5\t5.7668616063892841e-3\t5.7483677992422599e-3\t9.9679308982783044e-1\t0.0000000000000000e+0\n\t[1]\t1.6824866179376841e-5\t5.7506337761878967e-3\t5.7338089100085199e-3\t9.9707425879751810e-1\t0.0000000000000000e+0\n\t[2]\t1.5346280633821152e-5\t5.7346029207110405e-3\t5.7192566400772193e-3\t9.9732391573645029e-1\t0.0000000000000000e+0\n\t[3]\t1.4225795894162729e-5\t5.7189362123608589e-3\t5.7047104164666962e-3\t9.9751251013022046e-1\t0.0000000000000000e+0\n\t[4]\t1.3590758499049116e-5\t5.7037621736526489e-3\t5.6901714151535998e-3\t9.9761722910505823e-1\t0.0000000000000000e+0\n\t...and 2043 more errors.\n\tMax AbsError of 8.5201331858115736e-3 at index of 2047.\n\t[2047]\t1.3678658433491364e-5\t-8.5064545273780823e-3\t8.5201331858115736e-3\t1.0016080328636880e+0\t0.0000000000000000e+0\n\tMax RelError of 4.6521115833816262e+0 at index of 444.\n\t[444]\t2.4828206733218394e-5\t4.3927311708102934e-6\t2.0435475562408101e-5\t4.6521115833816262e+0\t0.0000000000000000e+0\n": "FAIL",
+   "< [Detune AudioParam] 2 out of 9 assertions were failed.": "FAIL",
+   "X All k-rate AudioParams does not equal [0,0.3311063051223755,0.6248595118522644,0.8481203317642212,0.9757021069526672,0.9932118654251099,0.898674488067627,0.7027547359466553,0.4275550842285156,0.10412164032459259,-0.23105812072753906,-0.5401714444160461,-0.7883464097976685,-0.9475855827331543,-0.9999247789382935,-0.9394592046737671...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[531]\t-1.2621584534645081e-1\t-1.2849810719490051e-1\t2.2822618484497070e-3\t1.7761054215281697e-2\t0.0000000000000000e+0\n\t[532]\t-4.4802698493003845e-1\t-4.4961130619049072e-1\t1.5843212604522705e-3\t3.5237576071564078e-3\t0.0000000000000000e+0\n\t[533]\t-7.1644771099090576e-1\t-7.2000253200531006e-1\t3.5548210144042969e-3\t4.9372340462520486e-3\t0.0000000000000000e+0\n\t[534]\t-9.0812504291534424e-1\t-9.0916800498962402e-1\t1.0429620742797852e-3\t1.1471609961589970e-3\t0.0000000000000000e+0\n\t[535]\t-9.9389672279357910e-1\t-9.9576735496520996e-1\t1.8706321716308594e-3\t1.8785835489618108e-3\t0.0000000000000000e+0\n\t...and 1135 more errors.\n\tMax AbsError of 5.8280640840530396e-1 at index of 890.\n\t[890]\t-2.1559590101242065e-1\t-7.9840230941772461e-1\t5.8280640840530396e-1\t7.2996583493144584e-1\t0.0000000000000000e+0\n\tMax RelError of 2.2838670527214983e+1 at index of 633.\n\t[633]\t-1.4627133309841156e-1\t-6.1358846724033356e-3\t1.4013544842600822e-1\t2.2838670527214983e+1\t0.0000000000000000e+0\n": "FAIL",
+   "< [All k-rate inputs] 1 out of 44 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 5 out of 5 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-connections.html": {
+  "status": "OK",
+  "subtests": {
+   "Gain - k-rate GainNode.gain": "FAIL",
+   "StereoPanner - k-rate StereoPannerNode.pan": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-constant-source.html": {
+  "status": "OK",
+  "subtests": {
+   "X ConstantSource.offset k-rate input: output[0:128]: Expected 2 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t2.9990234375\n\t[2]\t3.998046875\n\t[3]\t4.9970703125\n\t[4]\t5.99609375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[128:256]: Expected 129.875 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t130.8740234375\n\t[2]\t131.873046875\n\t[3]\t132.8720703125\n\t[4]\t133.87109375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[256:384]: Expected 257.75 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t258.7490234375\n\t[2]\t259.748046875\n\t[3]\t260.7470703125\n\t[4]\t261.74609375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[384:512]: Expected 385.625 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t386.6240234375\n\t[2]\t387.623046875\n\t[3]\t388.6220703125\n\t[4]\t389.62109375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[512:640]: Expected 513.5 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t514.4990234375\n\t[2]\t515.498046875\n\t[3]\t516.4970703125\n\t[4]\t517.49609375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[640:768]: Expected 641.375 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t642.3740234375\n\t[2]\t643.373046875\n\t[3]\t644.3720703125\n\t[4]\t645.37109375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[768:896]: Expected 769.25 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t770.2490234375\n\t[2]\t771.248046875\n\t[3]\t772.2470703125\n\t[4]\t773.24609375\n\t...and 123 more errors.": "FAIL",
+   "X ConstantSource.offset k-rate input: output[896:1024]: Expected 897.125 for all values but found 127 unexpected values: \n\tIndex\tActual\n\t[1]\t898.1240234375\n\t[2]\t899.123046875\n\t[3]\t900.1220703125\n\t[4]\t901.12109375\n\t...and 123 more errors.": "FAIL",
+   "< [ConstantSource.offset] 8 out of 8 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 3 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-delay-connections.html": {
+  "status": "OK",
+  "subtests": {
+   "k-rate DelayNode.delayTime with input matches automation behavior": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-dynamics-compressor-connections.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify k-rate 'threshold' with input on DynamicsCompressorNode": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-oscillator-connections.html": {
+  "status": "OK",
+  "subtests": {
+   "X k-rate frequency with input does not equal [0,0.07662386447191238,0.15279719233512878,0.22807207703590393,0.30200594663619995,0.37416407465934753,0.4441221356391907,0.5114688277244568,0.5758081674575806,0.6367618441581726,0.6939714550971985,0.7471005916595459,0.7958369255065918,0.8398938179016113,0.8790122270584106,0.9129621982574463...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[2]\t1.5504692494869232e-1\t1.5279719233512878e-1\t2.2497326135635376e-3\t1.4723651522530716e-2\t0.0000000000000000e+0\n\t[3]\t2.3471748828887939e-1\t2.2807207703590393e-1\t6.6454112529754639e-3\t2.9137329476458966e-2\t0.0000000000000000e+0\n\t[4]\t3.1500107049942017e-1\t3.0200594663619995e-1\t1.2995123863220215e-2\t4.3029364182932128e-2\t0.0000000000000000e+0\n\t[5]\t3.9518088102340698e-1\t3.7416407465934753e-1\t2.1016806364059448e-2\t5.6170027502490470e-2\t0.0000000000000000e+0\n\t[6]\t4.7445866465568542e-1\t4.4412213563919067e-1\t3.0336529016494751e-2\t6.8306725970399398e-2\t0.0000000000000000e+0\n\t...and 633 more errors.\n\tMax AbsError of 1.9977177977561951e+0 at index of 610.\n\t[610]\t-9.9818837642669678e-1\t9.9952942132949829e-1\t1.9977177977561951e+0\t1.9986583237329645e+0\t0.0000000000000000e+0\n\tMax RelError of Infinity at index of 144.\n\t[144]\t6.8782955408096313e-2\t0.0000000000000000e+0\t6.8782955408096313e-2\tInfinity\t0.0000000000000000e+0\n": "FAIL",
+   "< [Test 1] 1 out of 8 assertions were failed.": "FAIL",
+   "X k-rate detune with input does not equal [0,0.3311063051223755,0.6248595118522644,0.8481203317642212,0.9757021069526672,0.9932118654251099,0.898674488067627,0.7027547359466553,0.4275550842285156,0.10412164032459259,-0.23105812072753906,-0.5401714444160461,-0.7883464097976685,-0.9475855827331543,-0.9999247789382935,-0.9394592046737671...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[2]\t6.2533491849899292e-1\t6.2485951185226440e-1\t4.7540664672851563e-4\t7.6082165304529456e-4\t0.0000000000000000e+0\n\t[3]\t8.4908759593963623e-1\t8.4812033176422119e-1\t9.6726417541503906e-4\t1.1404798814373194e-3\t0.0000000000000000e+0\n\t[4]\t9.7649741172790527e-1\t9.7570210695266724e-1\t7.9530477523803711e-4\t8.1511023658844932e-4\t0.0000000000000000e+0\n\t[5]\t9.9248296022415161e-1\t9.9321186542510986e-1\t7.2890520095825195e-4\t7.3388692416221724e-4\t0.0000000000000000e+0\n\t[6]\t8.9461553096771240e-1\t8.9867448806762695e-1\t4.0589570999145508e-3\t4.5166043476346091e-3\t0.0000000000000000e+0\n\t...and 633 more errors.\n\tMax AbsError of 1.9961621761322021e+0 at index of 98.\n\t[98]\t-9.9984955787658691e-1\t9.9631261825561523e-1\t1.9961621761322021e+0\t2.0035500299365516e+0\t0.0000000000000000e+0\n\tMax RelError of 1.6182567851524720e+2 at index of 121.\n\t[121]\t9.9907958507537842e-1\t6.1358846724033356e-3\t9.9294370040297508e-1\t1.6182567851524720e+2\t0.0000000000000000e+0\n": "FAIL",
+   "< [Test 2] 1 out of 8 assertions were failed.": "FAIL",
+   "X k-rate frequency input with a-rate detune does not equal [0,0.07662386447191238,0.15266045928001404,0.2276681512594223,0.30121535062789917,0.3728828430175781,0.44226619601249695,0.508978009223938,0.5726482272148132,0.6329298615455627,0.6894979476928711,0.7420487403869629,0.7903093099594116,0.8340274095535278,0.8729848861694336,0.9069863557815552...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[2]\t1.5490619838237762e-1\t1.5266045928001404e-1\t2.2457391023635864e-3\t1.4710679588906447e-2\t0.0000000000000000e+0\n\t[3]\t2.3429448902606964e-1\t2.2766815125942230e-1\t6.6263377666473389e-3\t2.9105246956992192e-2\t0.0000000000000000e+0\n\t[4]\t3.1415989995002747e-1\t3.0121535062789917e-1\t1.2944549322128296e-2\t4.2974401188866057e-2\t0.0000000000000000e+0\n\t[5]\t3.9379948377609253e-1\t3.7288284301757813e-1\t2.0916640758514404e-2\t5.6094403779066791e-2\t0.0000000000000000e+0\n\t[6]\t4.7243684530258179e-1\t4.4226619601249695e-1\t3.0170649290084839e-2\t6.8218302827811689e-2\t0.0000000000000000e+0\n\t...and 633 more errors.\n\tMax AbsError of 1.9980108737945557e+0 at index of 549.\n\t[549]\t9.9801516532897949e-1\t-9.9999570846557617e-1\t1.9980108737945557e+0\t1.9980194483637979e+0\t0.0000000000000000e+0\n\tMax RelError of 1.9723195392958772e+2 at index of 224.\n\t[224]\t9.5059531927108765e-1\t4.7953687608242035e-3\t9.4579995051026344e-1\t1.9723195392958772e+2\t0.0000000000000000e+0\n": "FAIL",
+   "< [Test 3] 1 out of 12 assertions were failed.": "FAIL",
+   "X k-rate detune input with a-rate frequency does not equal [0,0.07662386447191238,0.15504692494869232,0.2347174882888794,0.31500107049942017,0.395180881023407,0.4744586646556854,0.5519572496414185,0.6267285346984863,0.6977577209472656,0.7639767527580261,0.8242767453193665,0.8775222897529602,0.9225713014602661,0.9582991003990173,0.9836232662200928...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[2]\t1.5490619838237762e-1\t1.5504692494869232e-1\t1.4072656631469727e-4\t9.0763855111132379e-4\t0.0000000000000000e+0\n\t[3]\t2.3429448902606964e-1\t2.3471748828887939e-1\t4.2299926280975342e-4\t1.8021633832803526e-3\t0.0000000000000000e+0\n\t[4]\t3.1415989995002747e-1\t3.1500107049942017e-1\t8.4117054939270020e-4\t2.6703736214580532e-3\t0.0000000000000000e+0\n\t[5]\t3.9379948377609253e-1\t3.9518088102340698e-1\t1.3813972473144531e-3\t3.4956074892515650e-3\t0.0000000000000000e+0\n\t[6]\t4.7243684530258179e-1\t4.7445866465568542e-1\t2.0218193531036377e-3\t4.2613182216218390e-3\t0.0000000000000000e+0\n\t...and 633 more errors.\n\tMax AbsError of 1.9865093827247620e+0 at index of 375.\n\t[375]\t-9.9558180570602417e-1\t9.9092757701873779e-1\t1.9865093827247620e+0\t2.0046968404101628e+0\t0.0000000000000000e+0\n\tMax RelError of 4.8502317287770899e+2 at index of 191.\n\t[191]\t9.8214244842529297e-1\t-2.0291227847337723e-3\t9.8417157121002674e-1\t4.8502317287770899e+2\t0.0000000000000000e+0\n": "FAIL",
+   "< [Test 4] 1 out of 12 assertions were failed.": "FAIL",
+   "X k-rate inputs for both frequency and detune does not equal [0,0.07662386447191238,0.15279719233512878,0.22807207703590393,0.30200594663619995,0.37416407465934753,0.4441221356391907,0.5114688277244568,0.5758081674575806,0.6367618441581726,0.6939714550971985,0.7471005916595459,0.7958369255065918,0.8398938179016113,0.8790122270584106,0.9129621982574463...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[2]\t1.5490619838237762e-1\t1.5279719233512878e-1\t2.1090060472488403e-3\t1.3802649217684414e-2\t0.0000000000000000e+0\n\t[3]\t2.3429448902606964e-1\t2.2807207703590393e-1\t6.2224119901657104e-3\t2.7282655864909564e-2\t0.0000000000000000e+0\n\t[4]\t3.1415989995002747e-1\t3.0200594663619995e-1\t1.2153953313827515e-2\t4.0244086082411867e-2\t0.0000000000000000e+0\n\t[5]\t3.9379948377609253e-1\t3.7416407465934753e-1\t1.9635409116744995e-2\t5.2478071644429733e-2\t0.0000000000000000e+0\n\t[6]\t4.7243684530258179e-1\t4.4412213563919067e-1\t2.8314709663391113e-2\t6.3754331052740573e-2\t0.0000000000000000e+0\n\t...and 633 more errors.\n\tMax AbsError of 1.9997076988220215e+0 at index of 447.\n\t[447]\t9.9975818395614624e-1\t-9.9994951486587524e-1\t1.9997076988220215e+0\t1.9998086594304167e+0\t0.0000000000000000e+0\n\tMax RelError of 3.2331936739599541e+2 at index of 41.\n\t[41]\t-9.9499779939651489e-1\t-3.0679567717015743e-3\t9.9192984262481332e-1\t3.2331936739599541e+2\t0.0000000000000000e+0\n": "FAIL",
+   "< [Test 5] 1 out of 15 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 5 out of 5 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/k-rate-panner.html": {
+  "status": "OK",
+  "subtests": {
+   "Panner k-rate vs a-rate - positionX": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/nan-param.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioParam NaN should be flushed to default value": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/retrospective-exponentialRampToValueAtTime.html": {
+  "status": "OK",
+  "subtests": {
+   "X Test[128:] expected to be equal to the array [0.10000000149011612,0.10001351684331894,0.10002703964710236,0.10004056245088577,0.10005408525466919,0.1000676080584526,0.10008113086223602,0.10009466111660004,0.10010819137096405,0.10012172162532806,0.10013525933027267,0.10014878958463669,0.1001623272895813,0.1001758724451065,0.10018941015005112,0.10020295530557632...] but differs in 16256 places:\n\tIndex\tActual\t\t\tExpected\n\t[0]\t1.0086537897586823e-1\t1.0000000149011612e-1\n\t[1]\t1.0087896138429642e-1\t1.0001351684331894e-1\n\t[2]\t1.0089254379272461e-1\t1.0002703964710236e-1\n\t[3]\t1.0090612620115280e-1\t1.0004056245088577e-1\n\t...and 16252 more errors.": "FAIL",
+   "< [test] 1 out of 3 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/retrospective-linearRampToValueAtTime.html": {
+  "status": "OK",
+  "subtests": {
+   "X Test[128:] expected to be equal to the array [0.10000000149011612,0.1000492125749588,0.10009842365980148,0.10014764219522476,0.10019685328006744,0.10024606436491013,0.10029527544975281,0.10034448653459549,0.10039370507001877,0.10044291615486145,0.10049212723970413,0.10054133832454681,0.1005905494093895,0.10063976794481277,0.10068897902965546,0.10073819011449814...] but differs in 16256 places:\n\tIndex\tActual\t\t\tExpected\n\t[0]\t1.0313725471496582e-1\t1.0000000149011612e-1\n\t[1]\t1.0318627953529358e-1\t1.0004921257495880e-1\n\t[2]\t1.0323529690504074e-1\t1.0009842365980148e-1\n\t[3]\t1.0328431427478790e-1\t1.0014764219522476e-1\n\t...and 16252 more errors.": "FAIL",
+   "< [test] 1 out of 3 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/retrospective-setTargetAtTime.html": {
+  "status": "OK",
+  "subtests": {
+   "Test setTargetAtTime with start time in the past": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/retrospective-setValueAtTime.html": {
+  "status": "OK",
+  "subtests": {
+   "Test setValueAtTime with startTime in the past": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioparam-interface/retrospective-setValueCurveAtTime.html": {
+  "status": "OK",
+  "subtests": {
+   "X Test[128:] expected to be equal to the array [1,0.9999450445175171,0.999890148639679,0.999835193157196,0.9997802972793579,0.999725341796875,0.9996703863143921,0.999615490436554,0.999560534954071,0.9995056390762329,0.99945068359375,0.9993957281112671,0.999340832233429,0.999285876750946,0.9992309808731079,0.999176025390625...] but differs in 16256 places:\n\tIndex\tActual\t\t\tExpected\n\t[0]\t9.9648439884185791e-1\t1.0000000000000000e+0\n\t[1]\t9.9642944335937500e-1\t9.9994504451751709e-1\n\t[2]\t9.9637448787689209e-1\t9.9989014863967896e-1\n\t[3]\t9.9631959199905396e-1\t9.9983519315719604e-1\n\t...and 16252 more errors.": "FAIL",
+   "< [test] 1 out of 3 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-addmodule-resolution.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Test the invocation order of AudioWorklet.addModule() and BaseAudioContext": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-audioparam-iterable.https.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-audioparam-range.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Valid parameter descriptors should have successful registration.": "FAIL",
+   "Invalid parameter descriptors should fail registration.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-audioparam-size.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"Initializing AudioWorklet and Context\"": "FAIL",
+   "Executing \"Verify Size of AudioParam Arrays\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-audioparam.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Verifying AudioParam in AudioWorkletNode": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-denormals.https.window.html": {
+  "status": "OK",
+  "subtests": {
+   "Test denormal behavior in AudioWorkletGlobalScope": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-messageport-wasm.https.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioWorkletGlobalScope: global port can exchange a WebAssembly.Module": "FAIL",
+   "AudioWorkletProcessor: processor port can exchange a WebAssembly.Module": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-messageport.https.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioWorklet: shared port exists before addModule()": "FAIL",
+   "AudioWorkletGlobalScope: shared port is available at module evaluation time and supports message passing": "FAIL",
+   "AudioWorkletProcessor: initialization message": "FAIL",
+   "AudioWorkletProcessor: message via instance port": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-postmessage-sharedarraybuffer.https.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-registerprocessor-called-on-globalthis.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"registerprocessor-called-on-globalthis\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-registerprocessor-constructor.https.window.html": {
+  "status": "OK",
+  "subtests": {
+   "Verifies two TypeError cases from registerProcessor() method.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-registerprocessor-dynamic.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Dynamic registration in AudioWorkletGlobalScope": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-rendersizehint.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Worklet inherits context render quantum size": "FAIL",
+   "Worklet process block size matches hint": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-suspend.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"load-worklet-and-suspend\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworklet-throw-onmessage.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Throwing in an onmessage handler in the AudioWorkletGlobalScope shouldn't stop AudioWorkletProcessor": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletglobalscope-creation-time.https.html": {
+  "status": "OK",
+  "subtests": {
+   "currentTime vs currentFrames in Audio Worklet global scope": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletglobalscope-sample-rate.https.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletglobalscope-timing-info.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Check the timing information from AudioWorkletProcessor": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-automatic-pull.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"setup-worklet\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-channel-count.https.html": {
+  "status": "OK",
+  "subtests": {
+   "setup-buffer-and-worklet-verify-rendered-buffer": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-construction.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"construction-after-module-loading\"": "FAIL",
+   "X Creating a node before loading a module should throw. threw \"ReferenceError\" instead of InvalidStateError.": "FAIL",
+   "< [construction-before-module-loading] 1 out of 1 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 2 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-constructor-no-coop-coep.https.html": {
+  "status": "OK",
+  "subtests": {
+   "non cross-origin isolated shared memory clone error in AudioWorkletNodeOptions processorOptions": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-constructor-options.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Construct AudioWorkletNode without options and check default values": "FAIL",
+   "Construct AudioWorkletNode with explicit AudioNodeOptions": "FAIL",
+   "Validate channelCount boundaries for AudioWorkletNode": "FAIL",
+   "Validate allowed and disallowed channelCountMode options": "FAIL",
+   "Validate allowed and disallowed channelInterpretation values": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-disconnected-input.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Input array length should be zero for disconnected input": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-lifetime.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Test AudioWorkletNode lifetime when process() returns false": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-onerror.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Test if |onprocessorerror| is called for an exception thrown from the processor constructor.": "NOTRUN",
+   "Test if |onprocessorerror| is called for a transfered object that cannot be deserialized on the AudioWorkletGlobalScope.": "NOTRUN",
+   "Test if |onprocessorerror| is called upon failure of process() method.": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletnode-output-channel-count.https.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioWorkletNode channel count: dynamic propagation and honoring outputChannelCount (single serialized test).": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-no-process-function.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Test an AudioWorkletProcessor with undefined process function.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-options.https.html": {
+  "status": "OK",
+  "subtests": {
+   "valid-processor-data: processorOptions round-trip": "FAIL",
+   "empty-option: default processorOptions behavior": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-param-getter-overridden.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Test if AudioWorkletProcessor with invalid parameters array getter": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-process-frozen-array.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"check-frozen-array\"": "FAIL",
+   "Executing \"transfer-frozen-array\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-process-zero-outputs.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"check-zero-outputs\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-promises.https.html": {
+  "status": "OK",
+  "subtests": {
+   "test": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/audioworkletprocessor-unconnected-outputs.https.window.html": {
+  "status": "OK",
+  "subtests": {
+   "Test if unconnected outputs provides a non-zero length array for channels": "FAIL",
+   "Test if outputs connected to AudioParam provides a non-zero length array for channels": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/baseaudiocontext-audioworklet.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"Test if AudioWorklet exists\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/extended-audioworkletnode-with-parameters.https.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/process-getter.https.html": {
+  "status": "OK",
+  "subtests": {
+   "'process' getter on prototype": "FAIL",
+   "'process' getter on instance": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/process-parameters.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "3 inputs; 0 outputs": "NOTRUN",
+   "0 inputs; 3 outputs": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/processor-construction-port.https.html": {
+  "status": "OK",
+  "subtests": {
+   "super() after new AudioWorkletProcessor()": "FAIL",
+   "new AudioWorkletProcessor() after super()": "FAIL",
+   "new AudioWorkletProcessor() after new AudioWorkletProcessor()": "FAIL",
+   "Singleton AudioWorkletProcessor": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/simple-input-output.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Simple AudioWorklet I/O": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-audioworklet-interface/suspended-context-messageport.https.html": {
+  "status": "OK",
+  "subtests": {
+   "realtime suspended": "FAIL",
+   "offline before start": "FAIL",
+   "offline on complete": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-channelmergernode-interface/active-processing.https.html": {
+  "status": "OK",
+  "subtests": {
+   "initialize: AudioWorklet module loading": "FAIL",
+   "test: Active processing emits expected channel-count changes": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-channelmergernode-interface/ctor-channelmerger.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioNodeOptions behavior for ChannelMergerNode": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-channelsplitternode-interface/ctor-channelsplitter.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioNodeOptions immutability": "FAIL",
+   "constructor options": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-constantsourcenode-interface/constant-source-onended-not-connected.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "ConstantSourceNode fires onended when not connected to the destination": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-convolvernode-interface/active-processing.https.html": {
+  "status": "OK",
+  "subtests": {
+   "AudioWorklet module should load successfully": "FAIL",
+   "ConvolverNode should stop active processing after source stops": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-convolvernode-interface/convolution-mono-mono.html": {
+  "status": "OK",
+  "subtests": {
+   "X Deviation (in dB) of triangular portion of convolution is not less than or equal to -124.41. Got Infinity.": "FAIL",
+   "< [test] 1 out of 4 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-convolvernode-interface/convolver-response-4-chan.html": {
+  "status": "OK",
+  "subtests": {
+   "X 1: Channel 0 does not equal [0,0,0.9485262632369995,0.8472317457199097,1.77188241481781,1.7117778062820435,1.668781042098999,1.722577691078186,1.6410207748413086,1.8474150896072388,1.1939717531204224,0.20856010913848877,-0.5265976190567017,-1.5727124214172363,-1.800194263458252,-1.6267805099487305...] with an element-wise tolerance of {\"absoluteThreshold\":7.152557373046875e-7,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[4]\t8.2335615158081055e-1\t1.7718824148178101e+0\t9.4852626323699951e-1\t5.3532122408615335e-1\t7.1525573730468750e-7\n\t[5]\t8.6454606056213379e-1\t1.7117778062820435e+0\t8.4723174571990967e-1\t4.9494259278900499e-1\t7.1525573730468750e-7\n\t[6]\t8.4542489051818848e-1\t1.6687810420989990e+0\t8.2335615158081055e-1\t4.9338776676488971e-1\t7.1525573730468750e-7\n\t[7]\t8.5803163051605225e-1\t1.7225776910781860e+0\t8.6454606056213379e-1\t5.0189089585910174e-1\t7.1525573730468750e-7\n\t[8]\t7.9559588432312012e-1\t1.6410207748413086e+0\t8.4542489051818848e-1\t5.1518232034566624e-1\t7.1525573730468750e-7\n\t...and 1269 more errors.\n\tMax AbsError of 9.9012911319732666e-1 at index of 237.\n\t[237]\t-8.5459387302398682e-1\t-1.8447229862213135e+0\t9.9012911319732666e-1\t5.3673593303322120e-1\t7.1525573730468750e-7\n\tMax RelError of Infinity at index of 514.\n\t[514]\t-9.4852626323699951e-1\t0.0000000000000000e+0\t9.4852626323699951e-1\tInfinity\t7.1525573730468750e-7\n": "FAIL",
+   "X 1: Channel 1 does not equal [0,0,0,0.9485262632369995,0.8472317457199097,1.77188241481781,1.7117778062820435,1.668781042098999,1.722577691078186,1.6410207748413086,1.8474150896072388,1.1939717531204224,0.20856010913848877,-0.5265976190567017,-1.5727124214172363,-1.800194263458252...] with an element-wise tolerance of {\"absoluteThreshold\":7.152557373046875e-7,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[5]\t8.2335615158081055e-1\t1.7718824148178101e+0\t9.4852626323699951e-1\t5.3532122408615335e-1\t7.1525573730468750e-7\n\t[6]\t8.6454606056213379e-1\t1.7117778062820435e+0\t8.4723174571990967e-1\t4.9494259278900499e-1\t7.1525573730468750e-7\n\t[7]\t8.4542489051818848e-1\t1.6687810420989990e+0\t8.2335615158081055e-1\t4.9338776676488971e-1\t7.1525573730468750e-7\n\t[8]\t8.5803163051605225e-1\t1.7225776910781860e+0\t8.6454606056213379e-1\t5.0189089585910174e-1\t7.1525573730468750e-7\n\t[9]\t7.9559588432312012e-1\t1.6410207748413086e+0\t8.4542489051818848e-1\t5.1518232034566624e-1\t7.1525573730468750e-7\n\t...and 1268 more errors.\n\tMax AbsError of 9.9012911319732666e-1 at index of 238.\n\t[238]\t-8.5459387302398682e-1\t-1.8447229862213135e+0\t9.9012911319732666e-1\t5.3673593303322120e-1\t7.1525573730468750e-7\n\tMax RelError of Infinity at index of 515.\n\t[515]\t-9.4852626323699951e-1\t0.0000000000000000e+0\t9.4852626323699951e-1\tInfinity\t7.1525573730468750e-7\n": "FAIL",
+   "< [1-channel input] 2 out of 2 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 10 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-convolvernode-interface/realtime-conv.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test convolver with real-time context": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-convolvernode-interface/transferred-buffer-output.html": {
+  "status": "OK",
+  "subtests": {
+   "X Convolver channel 0 output[0:1279]: Expected 0 for all values but found 1280 unexpected values: \n\tIndex\tActual\n\t[0]\t1\n\t[1]\t2\n\t[2]\t3\n\t[3]\t4\n\t...and 1276 more errors.": "FAIL",
+   "X Convolver channel 1 output[0:1279]: Expected 0 for all values but found 1280 unexpected values: \n\tIndex\tActual\n\t[0]\t2\n\t[1]\t4\n\t[2]\t6\n\t[3]\t8\n\t...and 1276 more errors.": "FAIL",
+   "< [Test Convolver with transferred buffer] 2 out of 2 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-delaynode-interface/delaynode-channel-count-1.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that DelayNode output channelCount matches that of the delayed input": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-delaynode-interface/delaynode-maxdelaylimit.html": {
+  "status": "OK",
+  "subtests": {
+   "X Setting Delay length to NaN threw \"NotSupportedError\" instead of EcmaScript error TypeError.": "FAIL",
+   "< [test] 1 out of 6 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-destinationnode-interface/destination.html": {
+  "status": "OK",
+  "subtests": {
+   "\n      AudioDestinationNode\n    ": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-iirfilternode-interface/iirfilter-basic.html": {
+  "status": "OK",
+  "subtests": {
+   "X createIIRFilter([1], [1, NaN, Infinity]) did not throw an exception.": "FAIL",
+   "X createIIRFilter([1, NaN, Infinity], [1]) did not throw an exception.": "FAIL",
+   "X createIIRFilter([1, 'abc', []], [1]) did not throw an exception.": "FAIL",
+   "< [exceptions-createIIRFilter] 3 out of 14 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 5 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/cors-check.https.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/mediaElementAudioSourceToScriptProcessorTest.html": {
+  "status": "OK",
+  "subtests": {
+   "Element Source tests completed": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/mediaElementAudioSource_volumeChange.html": {
+  "status": "OK",
+  "subtests": {
+   "createMediaElementSource() output reflects HTMLMediaElement effective volume changes (volume/muted)(src-file)": "FAIL",
+   "createMediaElementSource() output reflects HTMLMediaElement effective volume changes (volume/muted)(src-stream)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/no-cors.https.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-mediaelementaudiosourcenode-interface/setSinkId-with-MediaElementAudioSourceNode.https.html": {
+  "status": "ERROR",
+  "subtests": {
+   "setSinkId on default audio output should always work": "NOTRUN",
+   "setSinkId fails with NotFoundError on made up deviceid": "NOTRUN",
+   "setSinkId() with output device ID exposed by selectAudioOutput() should resolve": "NOTRUN"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediastreamaudiodestinationnode-interface/closed-audiocontext-construction.html": {
+  "status": "OK",
+  "subtests": {
+   "Constructing MediaStreamAudioDestinationNode on a closed AudioContext succeeds": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediastreamaudiodestinationnode-interface/ctor-mediastreamaudiodestination.html": {
+  "status": "OK",
+  "subtests": {
+   "MediaStreamAudioDestinationNode: invalid constructor cases": "FAIL",
+   "MediaStreamAudioDestinationNode: default constructor behavior": "FAIL",
+   "MediaStreamAudioDestinationNode applies channelCount from options": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediastreamaudiosourcenode-interface/mediastreamaudiosourcenode-ctor.html": {
+  "status": "ERROR"
+ },
+ "/webaudio/the-audio-api/the-mediastreamaudiosourcenode-interface/mediastreamaudiosourcenode-from-context-with-different-rate.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Test closing one AudioContext stops only it (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences nothing (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test closing one AudioContext stops only it (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences nothing (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing one AudioContext stops only it (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences nothing (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing one AudioContext stops only it (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences only its detector (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences nothing (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (cloned tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector when destination rates are the same (cloned tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@32000)": "FAIL",
+   "Test closing one AudioContext stops only it (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test closing one AudioContext stops only it (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing one AudioContext stops only it (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamTrackAudioSourceNode@44100, MediaStreamTrackAudioSourceNode@96000)": "FAIL",
+   "Test closing one AudioContext stops only it (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending one AudioContext silences only it (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disconnecting one source node silences only it (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping one MediaStream's tracks silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test disabling one MediaStream's tracks silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test stopping the input MediaStream's tracks silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test suspending the input AudioContext silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test closing the input AudioContext silences all detectors (shared tracks, MediaStreamTrackAudioSourceNode@32000, MediaStreamAudioSourceNode@44100, MediaStreamAudioSourceNode@96000)": "FAIL",
+   "Test removing tracks from one MediaStream does not silence any detector when destination rates are the same (shared tracks, MediaStreamAudioSourceNode@32000, MediaStreamAudioSourceNode@32000)": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-mediastreamaudiosourcenode-interface/mediastreamaudiosourcenode-routing.html": {
+  "status": "OK",
+  "subtests": {
+   "MediaStreamAudioSourceNode captures the right track.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-offlineaudiocontext-interface/offlineaudiocontext-detached-execution-context.html": {
+  "status": "OK",
+  "subtests": {
+   "X decodeAudioData() upon a detached iframe rejected correctly but got TypeError instead of InvalidStateError. Got Promise.": "FAIL",
+   "< [decoding-on-detached-iframe] 1 out of 1 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-offlineaudiocontext-interface/offlineaudiocontext-rendersizehint.html": {
+  "status": "OK",
+  "subtests": {
+   "OfflineAudioContext with no hint hint": "FAIL",
+   "OfflineAudioContext with \"default\" hint": "FAIL",
+   "OfflineAudioContext with \"hardware\" hint": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 1": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 13": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 127": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 129": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 256": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 500": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 16383": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 3000, renderSizeHint 18000": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 48000, renderSizeHint 288000": "FAIL",
+   "OfflineAudioContext [Honored Exactly]: sampleRate 44100.1, renderSizeHint 264600": "FAIL",
+   "OfflineAudioContext [Throws Exception]: sampleRate 48000, renderSizeHint 0": "FAIL",
+   "OfflineAudioContext [Throws Exception]: sampleRate 3000, renderSizeHint 18001": "FAIL",
+   "OfflineAudioContext [Throws Exception]: sampleRate 48000, renderSizeHint 288001": "FAIL",
+   "OfflineAudioContext [Throws Exception]: sampleRate 48000, renderSizeHint -1": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-offlineaudiocontext-interface/offlineaudiocontext-suspend-rendersizehint.https.html": {
+  "status": "OK",
+  "subtests": {
+   "Offline suspend quantizes to custom render quantum size": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-offlineaudiocontext-interface/startrendering-after-discard.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "startRendering()": "TIMEOUT"
+  }
+ },
+ "/webaudio/the-audio-api/the-oscillatornode-interface/ctor-oscillator.html": {
+  "status": "OK",
+  "subtests": {
+   "X new OscillatorNode(c, {\"type\":\"custom\",\"periodicWave\":{}}) incorrectly threw InvalidStateError: \"Failed to set the 'type' property on 'OscillatorNode': 'type' cannot be set directly to 'custom'.  Use setPeriodicWave() to create a custom Oscillator type.\".": "FAIL",
+   "< [constructor options] 1 out of 11 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 5 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-oscillatornode-interface/detune-limiting.html": {
+  "status": "OK",
+  "subtests": {
+   "Oscillator with detune automation becomes silent above Nyquist": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-oscillatornode-interface/osc-basic-waveform.html": {
+  "status": "OK",
+  "subtests": {
+   "Executing \"Test 4\"": "FAIL",
+   "Executing \"Test 5\"": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/distance-linear.html": {
+  "status": "OK",
+  "subtests": {
+   "X 0.014142168685793877 is not close to 0.014142135623731043 within a relative error of 0.000002272 (RelErr=0.0000023378408829948382). Got 0.014142168685793877.": "FAIL",
+   "X 0.007071084342896938 is not close to 0.007071067811865482 within a relative error of 0.000002272 (RelErr=0.000002337840888514707). Got 0.007071084342896938.": "FAIL",
+   "X Max error in distance gains is not less than or equal to 0.000002272. Got 0.000002337840888514707.": "FAIL",
+   "< [test] 3 out of 102 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/offline-hrtf-active-immediately.html": {
+  "status": "OK",
+  "subtests": {
+   "Test offline HRTF PannerNode is effective before rendering": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/panner-automation-position.html": {
+  "status": "OK",
+  "subtests": {
+   "X 1-channel [0, 0, 1] -> [0, 0, 10000]: distanceModel: inverse, rolloff: 1, left channel does not equal [0.7071067690849304,0.013321999460458755,0.0067243436351418495,0.004497151356190443,0.0033782348036766052,0.002705172635614872,0.0022557489573955536,0.0019343806197866797,0.0016931620193645358,0.0015054333489388227,0.0013551785377785563,0.0012321951799094677,0.0011296762386336923,0.00104290631134063,0.0009685150580480695,0.0009040298755280674...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t7.0710676908493042e-1\t1.3321999460458755e-2\t6.9378476962447166e-1\t5.2078126236508687e+1\t0.0000000000000000e+0\n\t[2]\t7.0710676908493042e-1\t6.7243436351418495e-3\t7.0038242544978857e-1\t1.0415625129411073e+2\t0.0000000000000000e+0\n\t[3]\t7.0710676908493042e-1\t4.4971513561904430e-3\t7.0260961772873998e-1\t1.5623437195672324e+2\t0.0000000000000000e+0\n\t[4]\t7.0710676908493042e-1\t3.3782348036766052e-3\t7.0372853428125381e-1\t2.0831249903510880e+2\t0.0000000000000000e+0\n\t[5]\t7.0710676908493042e-1\t2.7051726356148720e-3\t7.0440159644931555e-1\t2.6039062615654791e+2\t0.0000000000000000e+0\n\t...and 250 more errors.\n\tMax AbsError of 7.0699987337138737e-1 at index of 127.\n\t[127]\t7.0710676908493042e-1\t1.0689571354305372e-4\t7.0699987337138737e-1\t6.6139216432343983e+3\t0.0000000000000000e+0\n\tMax RelError of 6.6139216432343983e+3 at index of 127.\n\t[127]\t7.0710676908493042e-1\t1.0689571354305372e-4\t7.0699987337138737e-1\t6.6139216432343983e+3\t0.0000000000000000e+0\n": "FAIL",
+   "X 1-channel [0, 0, 1] -> [0, 0, 10000]: distanceModel: inverse, rolloff: 1, right channel does not equal [0.7071067690849304,0.013321999460458755,0.0067243436351418495,0.004497151356190443,0.0033782348036766052,0.002705172635614872,0.0022557489573955536,0.0019343806197866797,0.0016931620193645358,0.0015054333489388227,0.0013551785377785563,0.0012321951799094677,0.0011296762386336923,0.00104290631134063,0.0009685150580480695,0.0009040298755280674...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t7.0710676908493042e-1\t1.3321999460458755e-2\t6.9378476962447166e-1\t5.2078126236508687e+1\t0.0000000000000000e+0\n\t[2]\t7.0710676908493042e-1\t6.7243436351418495e-3\t7.0038242544978857e-1\t1.0415625129411073e+2\t0.0000000000000000e+0\n\t[3]\t7.0710676908493042e-1\t4.4971513561904430e-3\t7.0260961772873998e-1\t1.5623437195672324e+2\t0.0000000000000000e+0\n\t[4]\t7.0710676908493042e-1\t3.3782348036766052e-3\t7.0372853428125381e-1\t2.0831249903510880e+2\t0.0000000000000000e+0\n\t[5]\t7.0710676908493042e-1\t2.7051726356148720e-3\t7.0440159644931555e-1\t2.6039062615654791e+2\t0.0000000000000000e+0\n\t...and 250 more errors.\n\tMax AbsError of 7.0699987337138737e-1 at index of 127.\n\t[127]\t7.0710676908493042e-1\t1.0689571354305372e-4\t7.0699987337138737e-1\t6.6139216432343983e+3\t0.0000000000000000e+0\n\tMax RelError of 6.6139216432343983e+3 at index of 127.\n\t[127]\t7.0710676908493042e-1\t1.0689571354305372e-4\t7.0699987337138737e-1\t6.6139216432343983e+3\t0.0000000000000000e+0\n": "FAIL",
+   "< [0: 1-channel inverse rolloff: 1] 2 out of 2 assertions were failed.": "FAIL",
+   "X 2-channel [0, 0, 1] -> [0, 0, 10000]: distanceModel: inverse, rolloff: 1, left channel does not equal [1,0.018840152770280838,0.009509658440947533,0.006359932478517294,0.0047775455750525,0.003825691994279623,0.003190110670402646,0.0027356273494660854,0.0023944927379488945,0.0021290043368935585,0.0019165119156241417,0.0017425871919840574,0.0015976035501807928,0.0014748922549188137,0.0013696871465072036,0.001278491341508925...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t1.0000000000000000e+0\t1.8840152770280838e-2\t9.8115984722971916e-1\t5.2078125861985441e+1\t0.0000000000000000e+0\n\t[2]\t1.0000000000000000e+0\t9.5096584409475327e-3\t9.9049034155905247e-1\t1.0415624785156437e+2\t0.0000000000000000e+0\n\t[3]\t1.0000000000000000e+0\t6.3599324785172939e-3\t9.9364006752148271e-1\t1.5623437369466103e+2\t0.0000000000000000e+0\n\t[4]\t1.0000000000000000e+0\t4.7775455750524998e-3\t9.9522245442494750e-1\t2.0831249828820546e+2\t0.0000000000000000e+0\n\t[5]\t1.0000000000000000e+0\t3.8256919942796230e-3\t9.9617430800572038e-1\t2.6039061939519775e+2\t0.0000000000000000e+0\n\t...and 249 more errors.\n\tMax AbsError of 9.9984882662829477e-1 at index of 127.\n\t[127]\t1.0000000000000000e+0\t1.5117337170522660e-4\t9.9984882662829477e-1\t6.6139215878435452e+3\t0.0000000000000000e+0\n\tMax RelError of 6.6139215878435452e+3 at index of 127.\n\t[127]\t1.0000000000000000e+0\t1.5117337170522660e-4\t9.9984882662829477e-1\t6.6139215878435452e+3\t0.0000000000000000e+0\n": "FAIL",
+   "X 2-channel [0, 0, 1] -> [0, 0, 10000]: distanceModel: inverse, rolloff: 1, right channel does not equal [2,0.037680305540561676,0.019019316881895065,0.012719864957034588,0.009555091150105,0.007651383988559246,0.006380221340805292,0.005471254698932171,0.004788985475897789,0.004258008673787117,0.0038330238312482834,0.003485174383968115,0.0031952071003615856,0.0029497845098376274,0.002739374293014407,0.00255698268301785...] with an element-wise tolerance of {\"absoluteThreshold\":0,\"relativeThreshold\":0}.\n\tIndex\tActual\t\t\tExpected\t\tAbsError\t\tRelError\t\tTest threshold\n\t[1]\t2.0000000000000000e+0\t3.7680305540561676e-2\t1.9623196944594383e+0\t5.2078125861985441e+1\t0.0000000000000000e+0\n\t[2]\t2.0000000000000000e+0\t1.9019316881895065e-2\t1.9809806831181049e+0\t1.0415624785156437e+2\t0.0000000000000000e+0\n\t[3]\t2.0000000000000000e+0\t1.2719864957034588e-2\t1.9872801350429654e+0\t1.5623437369466103e+2\t0.0000000000000000e+0\n\t[4]\t2.0000000000000000e+0\t9.5550911501049995e-3\t1.9904449088498950e+0\t2.0831249828820546e+2\t0.0000000000000000e+0\n\t[5]\t2.0000000000000000e+0\t7.6513839885592461e-3\t1.9923486160114408e+0\t2.6039061939519775e+2\t0.0000000000000000e+0\n\t...and 249 more errors.\n\tMax AbsError of 1.9996976532565895e+0 at index of 127.\n\t[127]\t2.0000000000000000e+0\t3.0234674341045320e-4\t1.9996976532565895e+0\t6.6139215878435452e+3\t0.0000000000000000e+0\n\tMax RelError of 6.6139215878435452e+3 at index of 127.\n\t[127]\t2.0000000000000000e+0\t3.0234674341045320e-4\t1.9996976532565895e+0\t6.6139215878435452e+3\t0.0000000000000000e+0\n": "FAIL",
+   "< [0: 2-channel inverse rolloff: 1] 2 out of 2 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 2 out of 8 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/panner-hrtf-negative-elevation.html": {
+  "status": "OK",
+  "subtests": {
+   "X Relative max difference between +90 and -45 responses is not greater than or equal to 0.01. Got 0.": "FAIL",
+   "< [negative-elevation] 1 out of 2 assertions were failed.": "FAIL",
+   "# AUDIT TASK RUNNER FINISHED: 1 out of 1 tasks were failed.": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/panner-non-finite-distance-params.html": {
+  "status": "OK",
+  "subtests": {
+   "linear distance model with refDistance == maxDistance must not produce NaN/Inf samples": "FAIL",
+   "exponential distance model with refDistance == 0 must not produce NaN/Inf samples": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/panner-rolloff-clamping.html": {
+  "status": "OK",
+  "subtests": {
+   "rolloffFactor clamping for linear distance model": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/pannernode-setposition-throws.html": {
+  "status": "OK",
+  "subtests": {
+   "setPosition z": "FAIL",
+   "setOrientation y": "FAIL",
+   "setOrientation z": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-pannernode-interface/test-pannernode-automation.html": {
+  "status": "OK",
+  "subtests": {
+   "PannerNode AudioParam automation works properly": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-periodicwave-interface/createPeriodicWaveInfiniteValuesThrows.html": {
+  "status": "OK",
+  "subtests": {
+   "createPeriodicWave with Infinity real values should throw": "FAIL",
+   "createPeriodicWave with Infinity imag values should throw": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-scriptprocessornode-interface/scriptprocessor-rendersizehint.https.html": {
+  "status": "OK",
+  "subtests": {
+   "ScriptProcessor handles block size with renderSizeHint 1 & bufferSize 256": "FAIL",
+   "ScriptProcessor handles block size with renderSizeHint 256 & bufferSize 256": "FAIL",
+   "ScriptProcessor handles block size with renderSizeHint 100 & bufferSize 256": "FAIL",
+   "ScriptProcessor handles block size with renderSizeHint 4096 & bufferSize 4096": "FAIL",
+   "ScriptProcessor handles block size with renderSizeHint 66000 & bufferSize 16384": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-scriptprocessornode-interface/simple-input-output.html": {
+  "status": "OK",
+  "subtests": {
+   "ScriptProcessor with stopped input source": "FAIL"
+  }
+ },
+ "/webaudio/the-audio-api/the-waveshapernode-interface/silent-inputs.html": {
+  "status": "OK",
+  "subtests": {
+   "test-0: curve output is non-zero for silent inputs": "FAIL",
+   "test-1: 2x curve output is non-zero for silent inputs": "FAIL",
+   "test-2: curve output is non-zero for no inputs": "FAIL"
+  }
+ },
  "/webgl/compressed-tex-sub-image-2d-without-base-image.html": {
   "status": "OK",
   "subtests": {
