@@ -119,7 +119,7 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }} -p browser-core -p browser-launcher
       - name: Package
         run: cargo xtask package --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.target }}
           path: dist/*.zip
