@@ -13,7 +13,6 @@ use crate::decode::{self, DocKind};
 use crate::host::{CountingNetProvider, FrameMessage, NavProvider, RendererHost, Shared, Shell};
 use crate::input::to_ui_event;
 use blitz_dom::{BaseDocument, DocumentConfig, EventDriver, FontContext, NodeId, NoopEventHandler};
-use blitz_html::HtmlDocument;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use common::display_list::{DisplayListRecorder, SentResources};
 use common::ipc::{self, IpcSender};
@@ -888,7 +887,7 @@ impl Renderer {
         // "already sent" set: fonts are shared across documents.
 
         let config = self.document_config(url);
-        let mut doc = parse_document(html, config, self.config.javascript);
+        let mut doc = script::parse_html_document(html, config, self.config.javascript);
         // Stylesheets inserted by scripts from now on don't block rendering.
         doc.set_parser_done();
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -1551,42 +1550,6 @@ fn document_title(doc: &BaseDocument) -> String {
     doc.find_title_node()
         .map(|n| n.text_content().split_whitespace().collect::<Vec<_>>().join(" "))
         .unwrap_or_default()
-}
-
-/// Parse an HTML document with html5ever. Unlike `HtmlDocument::from_html` this honours
-/// the scripting flag: with JavaScript enabled, `<noscript>` content is raw text (as in
-/// every browser), so e.g. `<noscript><style>body{display:none}</style></noscript>` is inert.
-fn parse_document(html: &str, config: DocumentConfig, scripting: bool) -> BaseDocument {
-    use html5ever::tendril::TendrilSink;
-    let trimmed = html.trim_start_matches('\u{feff}').trim_start();
-    if trimmed.starts_with("<?xml") {
-        return HtmlDocument::from_xml(html, config).into_inner();
-    }
-    let mut config = config;
-    if let Some(ss) = &mut config.ua_stylesheets {
-        if !ss.iter().any(|s| s == blitz_dom::DEFAULT_CSS) {
-            ss.push(blitz_dom::DEFAULT_CSS.to_string());
-        }
-    }
-    let mut doc = BaseDocument::new(config);
-    {
-        let mut mutr = doc.mutate();
-        let sink = blitz_html::DocumentHtmlParser::new(&mut mutr);
-        let opts = html5ever::ParseOpts {
-            tokenizer: Default::default(),
-            tree_builder: html5ever::tree_builder::TreeBuilderOpts {
-                exact_errors: false,
-                scripting_enabled: scripting,
-                iframe_srcdoc: false,
-                drop_doctype: true,
-                quirks_mode: html5ever::tree_builder::QuirksMode::NoQuirks,
-            },
-        };
-        let _ = html5ever::parse_document(sink, opts)
-            .from_utf8()
-            .read_from(&mut html.as_bytes());
-    }
-    doc
 }
 
 fn dispatch(page: &mut Page, ui: blitz_traits::events::UiEvent) {

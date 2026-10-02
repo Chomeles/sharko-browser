@@ -219,8 +219,76 @@ pub trait ScriptHost {
 /// using `DocumentMutator::set_inner_html`). The runtime's own `innerHTML` /
 /// `parseHTMLFragment` natives use a built-in side-effect-free fragment parser.
 pub fn configure_document(config: &mut blitz_dom::DocumentConfig) {
-    config.html_parser_provider = Some(Arc::new(blitz_html::HtmlProvider));
+    config.html_parser_provider = Some(Arc::new(SharkoHtmlProvider));
 }
+
+/// The parser provider for sub-documents (`<iframe src>`, `srcdoc`): `blitz_html::HtmlProvider`
+/// sniffs XHTML doctypes into XML parsing, which truncates script text containing `<`
+/// (btloader's trusted iframe, sueddeutsche.de); documents go through [`parse_html_document`].
+pub struct SharkoHtmlProvider;
+
+impl blitz_dom::HtmlParserProvider for SharkoHtmlProvider {
+    fn parse_inner_html<'m, 'doc>(
+        &self,
+        mutr: &'m mut blitz_dom::DocumentMutator<'doc>,
+        element_id: blitz_dom::NodeId,
+        html: &str,
+    ) {
+        blitz_html::HtmlProvider.parse_inner_html(mutr, element_id, html);
+    }
+
+    fn parse_document(
+        &self,
+        html: &str,
+        config: blitz_dom::DocumentConfig,
+    ) -> Box<dyn blitz_dom::Document> {
+        Box::new(blitz_dom::PlainDocument(parse_html_document(html, config, true)))
+    }
+}
+
+/// Parse an HTML document with html5ever. Unlike `HtmlDocument::from_html` this never sniffs
+/// an XHTML doctype/namespace into XML parsing (a `text/html` response is HTML whatever its
+/// doctype: `Promise<Response>` in a script of an XHTML-doctype page is script text, not a
+/// tag; only an `<?xml` prolog selects XML here) and honours
+/// the scripting flag: with JavaScript enabled, `<noscript>` content is raw text (as in
+/// every browser), so e.g. `<noscript><style>body{display:none}</style></noscript>` is inert.
+pub fn parse_html_document(
+    html: &str,
+    config: blitz_dom::DocumentConfig,
+    scripting: bool,
+) -> blitz_dom::BaseDocument {
+    use html5ever::tendril::TendrilSink;
+    let trimmed = html.trim_start_matches('\u{feff}').trim_start();
+    if trimmed.starts_with("<?xml") {
+        return blitz_html::HtmlDocument::from_xml(html, config).into_inner();
+    }
+    let mut config = config;
+    if let Some(ss) = &mut config.ua_stylesheets {
+        if !ss.iter().any(|s| s == blitz_dom::DEFAULT_CSS) {
+            ss.push(blitz_dom::DEFAULT_CSS.to_string());
+        }
+    }
+    let mut doc = blitz_dom::BaseDocument::new(config);
+    {
+        let mut mutr = doc.mutate();
+        let sink = blitz_html::DocumentHtmlParser::new(&mut mutr);
+        let opts = html5ever::ParseOpts {
+            tokenizer: Default::default(),
+            tree_builder: html5ever::tree_builder::TreeBuilderOpts {
+                exact_errors: false,
+                scripting_enabled: scripting,
+                iframe_srcdoc: false,
+                drop_doctype: true,
+                quirks_mode: html5ever::tree_builder::QuirksMode::NoQuirks,
+            },
+        };
+        let _ = html5ever::parse_document(sink, opts)
+            .from_utf8()
+            .read_from(&mut html.as_bytes());
+    }
+    doc
+}
+
 
 /// The `<!DOCTYPE>` at the start of an HTML source as `(name, public id, system id)`, or
 /// `None` if there is none (for [`ScriptRuntime::set_doctype`]).

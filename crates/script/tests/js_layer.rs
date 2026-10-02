@@ -620,6 +620,21 @@ fn js_layer_javascript_url_iframe_has_initial_document() {
     drop(page);
 }
 
+/// A sub-document with an XHTML doctype is still HTML (it is served as `text/html`): its
+/// script text keeps `<` characters (`Promise<Response>` in a comment truncated the script
+/// when it was sniffed into XML parsing: btloader's trusted iframe on sueddeutsche.de).
+#[test]
+fn js_layer_xhtml_doctype_iframe_parses_as_html() {
+    let mut page = js_env(
+        r#"<!DOCTYPE html><html><body><iframe id="f" srcdoc="<!DOCTYPE html PUBLIC &quot;-//W3C//DTD XHTML 1.0 Transitional//EN&quot; &quot;http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd&quot;><html xmlns=&quot;http://www.w3.org/1999/xhtml&quot;><head><script>/* @returns {Promise<Response>} */ window.ok = 7;</script></head><body></body></html>"></iframe></body></html>"#,
+    );
+    assert_eq!(
+        page.eval("const w = f.contentWindow; [w.ok, w.document.scripts[0].textContent.includes('Promise<Response>')]"),
+        r#"[7,true]"#
+    );
+    drop(page);
+}
+
 /// Inserting a node of another realm moves the same object (DOM "adopt"): identity,
 /// parent, ownerDocument, expandos stay, the other realm's tree loses it, and the old
 /// realm's `instanceof` no longer holds (Chromium: `x instanceof frame.Node`).
