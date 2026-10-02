@@ -268,6 +268,7 @@
   // ---------------------------------------------------------------------------------------
   const shadowInfo = new WeakMap(); // shadow root -> info
   const shadowOfHost = new WeakMap(); // host wrapper -> shadow root
+  const shadowHostIds = new Set();    // node ids of elements that have a shadow root
   function isShadowRoot(w) { return shadowInfo.has(w); }
   L.isShadowRoot = isShadowRoot;
 
@@ -386,6 +387,7 @@
       lightFrag: 0, cleared: new Set(), declarative: !!init.declarative,
     });
     shadowOfHost.set(host, sr);
+    shadowHostIds.add(idOf(host));
     // Stylesheets inside the host are scoped to it from now on (native style scoping).
     if (typeof N.setShadowHost === 'function') N.setShadowHost(idOf(host), true);
     // The shadow root shares the host's node id, so its children ARE the host's until the
@@ -2263,9 +2265,36 @@
   }
   L.qsa = qsa;
 
+  // The shadow content shares its host's node id, so the native serializer would emit it
+  // instead of the host's light children (HTML serialization never enters shadow trees).
+  // Subtrees without a shadow host take the native path.
+  function hasShadowHostIn(id) {
+    for (const h of shadowHostIds) if (h === id || N.contains(id, h)) return true;
+    return false;
+  }
+  function lightChildIds(id) {
+    const li = lightIdsOf(wrap(id));
+    return li !== null ? li : N.childIds(id);
+  }
+  function serializeLightNode(id) {
+    if (N.nodeType(id) !== 1 || !hasShadowHostIn(id)) return N.outerHTML(id);
+    const shallow = N.outerHTML(N.cloneNode(id, false));
+    const m = /<\/[^<>]*>$/.exec(shallow);
+    if (m === null) return shallow; // void element
+    let inner = '';
+    for (const c of lightChildIds(id)) inner += serializeLightNode(c);
+    return shallow.slice(0, m.index) + inner + m[0];
+  }
+  L.serializeLightNode = serializeLightNode;
   function innerHTMLGet(w) {
     if (lnOf(w) === 'template' && nsOf(w) === HTML && L.templateInfo !== null) return N.innerHTML(L.templateInfo(w));
-    return N.innerHTML(idOf(w));
+    const id = idOf(w);
+    if (shadowHostIds.size !== 0 && hasShadowHostIn(id)) {
+      let out = '';
+      for (const c of lightChildIds(id)) out += serializeLightNode(c);
+      return out;
+    }
+    return N.innerHTML(id);
   }
   function innerHTMLSet(w, v) {
     const html = v === null || v === undefined ? '' : `${v}`;
@@ -2556,7 +2585,7 @@
     },
     get innerHTML() { return innerHTMLGet(this); },
     set innerHTML(v) { innerHTMLSet(this, v); },
-    get outerHTML() { return N.outerHTML(idOf(this)); },
+    get outerHTML() { return shadowHostIds.size !== 0 ? serializeLightNode(idOf(this)) : N.outerHTML(idOf(this)); },
     set outerHTML(v) {
       const id = idOf(this);
       const p = N.parent(id);

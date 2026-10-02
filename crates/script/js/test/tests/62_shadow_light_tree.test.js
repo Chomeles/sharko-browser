@@ -25,3 +25,19 @@ test('shadow host: light children, slots, assignedNodes', async () => {
   `);
   assert.strictEqual(r, '3,DIV,2,xyt,true,SLOT,true,B,2,DIV,4,I,3');
 });
+
+test('innerHTML/outerHTML of a shadow host serialize the light tree, also for nested hosts', async () => {
+  const e = await createEnv({ html: '<body><div id=h><b>light</b>text</div><section id=wrap><p>a</p><div id=h2><i>l2</i></div></section></body>' });
+  const r = e.run(`
+    const h = document.getElementById('h');
+    h.attachShadow({ mode: 'open' }).innerHTML = '<slot></slot><u>shadow</u>';
+    const h2 = document.getElementById('h2');
+    h2.attachShadow({ mode: 'open' }).replaceChildren(document.createComment(''));
+    [h.innerHTML, h.outerHTML, h.shadowRoot.innerHTML,
+     document.getElementById('wrap').innerHTML, h2.outerHTML,
+     document.createElement('div').innerHTML].join('|');
+  `);
+  assert.strictEqual(r,
+    '<b>light</b>text|<div id="h"><b>light</b>text</div>|<slot><b>light</b>text</slot><u>shadow</u>|' +
+    '<p>a</p><div id="h2"><i>l2</i></div>|<div id="h2"><i>l2</i></div>|');
+});
