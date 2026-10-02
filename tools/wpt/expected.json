@@ -41106,6 +41106,2079 @@
    "Targeting with embedded null in target": "TIMEOUT"
   }
  },
+ "/html/canvas/offscreen/2d.conformance.requirements.missingargs.html": {
+  "status": "OK",
+  "subtests": {
+   "Missing arguments cause TypeError": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-context/2d.canvas.context.casesensitive.html": {
+  "status": "OK",
+  "subtests": {
+   "Context name \"2D\" is unrecognised; matching is case sensitive": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-context/2d.canvas.context.emptystring.html": {
+  "status": "OK",
+  "subtests": {
+   "getContext with empty string returns null": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-context/2d.canvas.context.invalid.args.html": {
+  "status": "OK",
+  "subtests": {
+   "Calling getContext with invalid arguments.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-context/2d.canvas.context.prototype.html": {
+  "status": "OK",
+  "subtests": {
+   "checks OffscreenCanvasRenderingContext2D prototype": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-context/2d.canvas.context.type.prototype.html": {
+  "status": "OK",
+  "subtests": {
+   "window.CanvasRenderingContext2D.prototype are not [[Writable]] and not [[Configurable]], and its methods are [[Configurable]].": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-context/2d.getContext.options.any.html": {
+  "status": "OK",
+  "subtests": {
+   "2d": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-host/2d.canvas.host.size.attributes.parse.em.html": {
+  "status": "OK",
+  "subtests": {
+   "Parsing of non-negative integers": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-host/2d.canvas.host.size.attributes.parse.junk.html": {
+  "status": "OK",
+  "subtests": {
+   "Parsing of non-negative integers": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-host/2d.canvas.host.size.attributes.parse.minus.html": {
+  "status": "OK",
+  "subtests": {
+   "Parsing of non-negative integers": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-host/2d.canvas.host.size.attributes.parse.percent.html": {
+  "status": "OK",
+  "subtests": {
+   "Parsing of non-negative integers": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-host/2d.canvas.host.size.attributes.parse.trailingjunk.html": {
+  "status": "OK",
+  "subtests": {
+   "Parsing of non-negative integers": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/canvas-host/2d.canvas.host.size.invalid.attributes.idl.html": {
+  "status": "OK",
+  "subtests": {
+   "Getting/setting width/height IDL attributes": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/color-type/2d.color.type.u8p3.to.u8srgb.to.u8p3.html": {
+  "status": "OK",
+  "subtests": {
+   "test srgb unorm8 canvas storing 8-bit display-p3 data accurately": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/color-type/2d.color.type.u8srgb.to.u8p3.to.u8srgb.html": {
+  "status": "OK",
+  "subtests": {
+   "test display-p3 unorm8 canvas not storing 8-bit srgb data accurately": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.clear.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.clear": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.copy.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.copy": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.destination-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.destination-atop": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.destination-in.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.destination-in": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.destination-out.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.destination-out": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.destination-over.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.destination-over": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.lighter.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.lighter": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.source-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.source-atop": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.source-in.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.source-in": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.source-out.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.source-out": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.source-over.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.source-over": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.canvas.xor.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.canvas.xor": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.globalAlpha.image.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.globalAlpha.image": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.globalAlpha.imagepattern.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.globalAlpha.imagepattern": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.clear.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.clear": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.copy.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.copy": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.destination-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.destination-atop": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.destination-in.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.destination-in": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.destination-out.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.destination-out": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.destination-over.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.destination-over": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.lighter.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.lighter": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.source-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.source-atop": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.source-in.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.source-in": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.source-out.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.source-out": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.source-over.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.source-over": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.image.xor.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.image.xor": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.operation.clear.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.operation.clear": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.solid.clear.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.solid.clear": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.transparent.clear.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.composite.transparent.clear": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.fill.copy.html": {
+  "status": "OK",
+  "subtests": {
+   "fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.fill.destination-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.fill.destination-in.html": {
+  "status": "OK",
+  "subtests": {
+   "fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.fill.source-in.html": {
+  "status": "OK",
+  "subtests": {
+   "fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.fill.source-out.html": {
+  "status": "OK",
+  "subtests": {
+   "fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.image.copy.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.image.destination-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.image.destination-in.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.image.source-in.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.image.source-out.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.pattern.copy.html": {
+  "status": "OK",
+  "subtests": {
+   "Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.pattern.destination-atop.html": {
+  "status": "OK",
+  "subtests": {
+   "Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.pattern.destination-in.html": {
+  "status": "OK",
+  "subtests": {
+   "Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.pattern.source-in.html": {
+  "status": "OK",
+  "subtests": {
+   "Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/compositing/2d.composite.uncovered.pattern.source-out.html": {
+  "status": "OK",
+  "subtests": {
+   "Pattern fill() draws pixels not covered by the source object as (0,0,0,0), and does not leave the pixels unchanged.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/conformance-requirements/2d.conformance.requirements.missingargs.html": {
+  "status": "OK",
+  "subtests": {
+   "Missing arguments cause TypeError": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.3arg.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.3arg": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.5arg.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.5arg": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.9arg.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.9arg.basic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.9arg.destpos.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.9arg.destpos": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.9arg.destsize.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.9arg.destsize": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.9arg.sourcepos.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.9arg.sourcepos": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.9arg.sourcesize.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.9arg.sourcesize": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.alpha.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.alpha": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.clip.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.clip": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.composite.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.composite": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.floatsource.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.floatsource": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.negativedest.html": {
+  "status": "OK",
+  "subtests": {
+   "Negative destination width/height represents the correct rectangle": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.negativedir.html": {
+  "status": "OK",
+  "subtests": {
+   "Negative dimensions do not affect the direction of the image": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.negativesource.html": {
+  "status": "OK",
+  "subtests": {
+   "Negative source width/height represents the correct rectangle": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.nonfinite.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() with Infinity/NaN is ignored": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.nowrap.html": {
+  "status": "OK",
+  "subtests": {
+   "Stretched images do not get pixels wrapping around the edges": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.path.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.path": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.svg.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage() of an SVG image": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.transform.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.drawImage.transform": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.zerosource.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage with zero-sized source rectangle draws nothing without exception": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-images-to-the-canvas/2d.drawImage.zerosource.image.html": {
+  "status": "OK",
+  "subtests": {
+   "drawImage with zero-sized source rectangle from image draws nothing without exception": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-rectangles-to-the-canvas/2d.fillRect.shadow.html": {
+  "status": "OK",
+  "subtests": {
+   "fillRect draws shadows": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-rectangles-to-the-canvas/2d.strokeRect.shadow.html": {
+  "status": "OK",
+  "subtests": {
+   "strokeRect draws shadows": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/drawing-rectangles-to-the-canvas/2d.strokeRect.zero.2.html": {
+  "status": "OK",
+  "subtests": {
+   "strokeRect of 0x0 pixels draws nothing, including caps and joins": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html": {
+  "status": "OK",
+  "subtests": {
+   "CSSHSL works as color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.fillStyle.CSSRGB.html": {
+  "status": "OK",
+  "subtests": {
+   "CSSRGB works as color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.fillStyle.colormix.html": {
+  "status": "OK",
+  "subtests": {
+   "color-mix works as color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.fillStyle.parse.system.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.fillStyle.parse.system": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.fillStyle.relativecolor.html": {
+  "status": "OK",
+  "subtests": {
+   "Relative color works as color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.conic.invalid.inputs.html": {
+  "status": "OK",
+  "subtests": {
+   "Conic gradient function with invalid inputs": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.conic.negative.rotation.html": {
+  "status": "OK",
+  "subtests": {
+   "Conic gradient with negative rotation": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.conic.positive.rotation.html": {
+  "status": "OK",
+  "subtests": {
+   "Conic gradient with positive rotation": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.object.invalidoffset.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.object.invalidoffset": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.cone.behind.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.cone.behind": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.cone.beside.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.cone.beside": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.cone.bottom.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.cone.bottom": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.cone.cylinder.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.cone.cylinder": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.cone.shape2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.cone.shape2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.equal.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.equal": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.inside2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.inside2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.inside3.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.inside3": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.outside2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.outside2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.outside3.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.outside3": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.touch1.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.touch1": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.touch2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.touch2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.radial.touch3.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.gradient.radial.touch3": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.gradient.relativecolor.html": {
+  "status": "OK",
+  "subtests": {
+   "Relative color works as CanvasGradient color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.basic.image.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.basic.image": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.basic.type.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.basic.type": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.crosscanvas.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.crosscanvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.norepeat.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.norepeat.basic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.norepeat.coord1.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.norepeat.coord1": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.norepeat.coord2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.norepeat.coord2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.norepeat.coord3.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.norepeat.coord3": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.norepeat.outside.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.norepeat.outside": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.norepeat.outside_arc.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.norepeat.outside_arc": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.orientation.image.html": {
+  "status": "OK",
+  "subtests": {
+   "Image patterns do not get flipped when painted": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeat.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeat.basic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeat.coord1.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeat.coord1": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeat.coord2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeat.coord2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeat.coord3.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeat.coord3": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeat.outside.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeat.outside": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeatx.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeatx.basic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeatx.coord1.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeatx.coord1": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeatx.outside.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeatx.outside": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeaty.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeaty.basic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeaty.coord1.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeaty.coord1": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.paint.repeaty.outside.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.paint.repeaty.outside": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.repeat.empty.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.repeat.empty": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.repeat.undefined.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.repeat.undefined": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.pattern.transform.invalid.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.pattern.transform.invalid": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.strokeStyle.colormix.html": {
+  "status": "OK",
+  "subtests": {
+   "color-mix works as color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/fill-and-stroke-styles/2d.strokeStyle.relativecolor.html": {
+  "status": "OK",
+  "subtests": {
+   "Relative color works as color input": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.blur.exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on gaussianBlur filter": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.colorMatrix.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test the functionality of ColorMatrix filters": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.convolveMatrix.exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on CanvasFilter() convolveMatrix": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.dropShadow.exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on CanvasFilter() dropShadow object": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test CanvasFilter() object": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.canvasFilterObject.turbulence.inputTypes.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on CanvasFilter() turbulence object": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.layers.colorMatrix.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test the functionality of ColorMatrix filters": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.layers.convolveMatrix.exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on CanvasFilter() convolveMatrix": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.layers.dropShadow.exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on CanvasFilter() dropShadow object": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.layers.turbulence.inputTypes.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test exceptions on CanvasFilter() turbulence object": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/filters/2d.filter.value.html": {
+  "status": "OK",
+  "subtests": {
+   "test if ctx.filter works correctly": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.beginLayer-options.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Checks beginLayer works for different option parameter values": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.ctm.getTransform.html": {
+  "status": "OK",
+  "subtests": {
+   "Tests getTransform inside layers.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.exceptions-are-no-op.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Checks that the context state is left unchanged if beginLayer throws.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.invalid-calls.beginLayer-reset-endLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "Raises exception on beginLayer() + reset() + endLayer().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.invalid-calls.beginLayer-restore.html": {
+  "status": "OK",
+  "subtests": {
+   "Raises exception on beginLayer() + restore().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.invalid-calls.beginLayer-save-endLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "Raises exception on beginLayer() + save() + endLayer().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.invalid-calls.endLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "Raises exception on lone endLayer calls.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.invalid-calls.save-beginLayer-restore.html": {
+  "status": "OK",
+  "subtests": {
+   "Raises exception on save() + beginLayer() + restore().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.invalid-calls.save-endLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "Raises exception on save() + endLayer().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.layer-rendering-state-reset-in-layer.html": {
+  "status": "OK",
+  "subtests": {
+   "Tests that rendering states are reset in layers and restored after.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.malformed-operations-with-promises.html": {
+  "status": "OK",
+  "subtests": {
+   "Throws if convertToBlob is called while layers are open.": "FAIL",
+   "Throws if createImageBitmap is called while layers are open.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.malformed-operations.html": {
+  "status": "OK",
+  "subtests": {
+   "Throws if createPattern is called while layers are open.": "FAIL",
+   "Throws if drawImage is called while layers are open.": "FAIL",
+   "Throws if getImageData is called while layers are open.": "FAIL",
+   "Throws if putImageData is called while layers are open.": "FAIL",
+   "Throws if transferToImageBitmap is called while layers are open.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.valid-calls.beginLayer-endLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "No exception raised on beginLayer() + endLayer().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.valid-calls.beginLayer-save.html": {
+  "status": "OK",
+  "subtests": {
+   "No exception raised on beginLayer() + save().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.valid-calls.beginLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "No exception raised on lone beginLayer() calls.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/layers/2d.layer.valid-calls.save-beginLayer.html": {
+  "status": "OK",
+  "subtests": {
+   "No exception raised on save() + beginLayer().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/line-styles/2d.line.join.round.html": {
+  "status": "OK",
+  "subtests": {
+   "lineJoin 'round' is rendered correctly": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/context-attributes/getContextAttributes.html": {
+  "status": "OK",
+  "subtests": {
+   "Test default offscreen context creation attributes": "FAIL",
+   "Test offscreen context creation attributes colorSpace: 'display-p3'": "FAIL",
+   "Test offscreen context creation attributes colorSpace: 'srgb-linear'": "FAIL",
+   "Test offscreen context creation attributes colorSpace: 'display-p3-linear'": "FAIL",
+   "Test offscreen context creation attributes desynchronized: true": "FAIL",
+   "Test context creation attributes colorType: unorm8": "FAIL",
+   "Test context creation attributes colorType: float16": "FAIL",
+   "Test offscreen context creation attributes toneMapping: {}": "FAIL",
+   "Test offscreen context creation attributes toneMapping: {mode: 'standard'}": "FAIL",
+   "Test offscreen context creation attributes toneMapping: {mode: 'extended'}": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/convert-to-blob/offscreencanvas.convert.to.blob.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test that call convertToBlob on a detached OffscreenCanvas throws exception": "FAIL",
+   "Test that call convertToBlob on a OffscreenCanvas with tainted origin throws exception": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/convert-to-blob/offscreencanvas.convert.to.blob.w.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test that convertToBlob with default arguments produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with default type/1.0 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with default type/0.2 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with png/default quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with png/1.0 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with png/0.2 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with jpeg/default quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with jpeg/1.0 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with jpeg/0.2 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with webp/default quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with webp/1.0 quality produces correct result in a worker": "FAIL",
+   "Test that convertToBlob with webp/0.2 quality produces correct result in a worker": "FAIL",
+   "Test that call convertToBlob on a detached OffscreenCanvas throws exception in a worker": "FAIL",
+   "Test that call convertToBlob on a OffscreenCanvas with size 0 throws exception in a worker": "FAIL",
+   "Test that call convertToBlob on a OffscreenCanvas with tainted origin throws exception in a worker": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-element-image/animated-gif-worker.tentative.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Canvas.drawElementImage: animated gif in worker": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-element-image/canvas-transform-update-worker.tentative.html": {
+  "status": "ERROR",
+  "subtests": {
+   "drawElementImage on worker dispatches elementgeometryupdate and updates element transform by default": "FAIL",
+   "drawElementImage on worker updates element transform with explicit {preserveElementGeometry: false}": "NOTRUN",
+   "drawElementImage on worker does not update element transform with {preserveElementGeometry: true}": "NOTRUN",
+   "Multiple drawElementImage calls in same worker turn batch into a single elementgeometryupdate event": "NOTRUN",
+   "clearElementGeometry on worker clears geometry and dispatches elementgeometryupdate event": "NOTRUN"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-element-image/getElementTransform-worker.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Element transform at the origin should be an identity matrix": "FAIL",
+   "Element transform should account for x and y": "FAIL",
+   "Element transform should account for width and height scale": "FAIL",
+   "Element transform should not include transform on the element": "FAIL",
+   "Element transform should account for the current transform matrix with translation": "FAIL",
+   "Element transform should not be affected by zoom on the canvas": "FAIL",
+   "Element transform should account for the current transform matrix with rotation": "FAIL",
+   "Element transform should not account for transform-origin": "FAIL",
+   "Element transform should account for canvas grid pixel scale": "FAIL",
+   "Element transform should account for canvas css pixel scale": "FAIL",
+   "Element transform should account for canvas pixel scale, zoom, CTM, and x and y": "FAIL",
+   "Element transform should account for sx and sy offset": "FAIL",
+   "Draw/Element transform should preserve is2D for 2D matrices": "FAIL",
+   "Draw/Element transform should preserve is2D for 3D matrices": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-element-image/offscreenCanvas-drawElementImage-worker.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas.drawElementImage should work in a worker thread": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-element-image/offscreenCanvas-drawElementImage.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas.drawElementImage should draw an ElementImage": "FAIL",
+   "Passing an Element to OffscreenCanvas methods on the main thread throws InvalidStateError": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-element-image/video-worker.tentative.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "captureElementImage repaints video frames in worker": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/draw-generic-family/2d.text.draw.generic.family.w.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Test that drawing sans-serif produces the same result between canvas and OffscreenCanvas in a Worker": "TIMEOUT",
+   "Test that drawing fantasy produces the same result between canvas and OffscreenCanvas in a Worker": "TIMEOUT",
+   "Test that drawing monospace produces the same result between canvas and OffscreenCanvas in a Worker": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/filter/offscreencanvas.filter.w.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "offscreencanvas": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/image-smoothing/image.smoothing.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that image smoothing is actually on by default.": "FAIL",
+   "Test that image smoothing works when imageSmoothingEnabled is set to true": "FAIL",
+   "Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with fillRect and createPattern().": "FAIL",
+   "Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with fill() and createPattern().": "FAIL",
+   "Test that imageSmoothingEnabled = false (nearest-neighbor interpolation) works with stroke() and createPattern().": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.constructor.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that OffscreenCanvas constructor handles invalid arguments correctly": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.getcontext.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that getContext with un-supported string throws a TypeError.": "FAIL",
+   "Test that OffscreenCanvasRenderingContext2D with alpha disabled makes the OffscreenCanvas opaque": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.resize.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify that writing to the width or height attribute of a placeholder canvas throws an exception": "FAIL",
+   "Verify that writing to the width or height attribute of a placeholder canvas throws an exception even when not changing the value of the attribute.": "FAIL",
+   "Verify that resizing an OffscreenCanvas with a 2d context propagates the new size to its placeholder canvas asynchronously.": "FAIL",
+   "Verify that resizing an OffscreenCanvas with a webgl context propagates the new size to its placeholder canvas asynchronously.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transfer.lowlatency.nocrash.html": {
+  "status": "OK",
+  "subtests": {
+   "Tests that transferring a low latency canvas does not cause a crash. See crbug.com/1255153": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transfer.to.imagebitmap.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that transferToImageBitmap returns an ImageBitmap with correct color": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transfer.to.imagebitmap.w.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that transferToImageBitmap returns an ImageBitmap with correct color in a worker": "FAIL",
+   "Test that call transferToImageBitmap twice returns an ImageBitmap with correct color in a worker": "FAIL",
+   "Test that call transferToImageBitmap twice on a alpha-disabled context returns an ImageBitmap with correct color in a worker": "FAIL",
+   "Test that call transferToImageBitmap preserves transform in a worker": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transfercontrol.to.offscreen.w.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test that an OffscreenCanvas generated by transferControlToOffscreen gets correct width and height when it is transferred to a worker": "FAIL",
+   "Test that an OffscreenCanvas generated by transferControlToOffscreen gets correct width and height when it is transferred between workers": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transferrable.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that offscreenCanvas's size is correct after being transferred to a worker.": "FAIL",
+   "Test that transfer an OffscreenCanvas that already have a 2d context throws exception.": "FAIL",
+   "Test that transfer an OffscreenCanvas twice throws exception.": "FAIL",
+   "Test that calling getContext('2d') on a detached OffscreenCanvas throws exception.": "FAIL",
+   "Test that calling getContext('webgl') on a detached OffscreenCanvas throws exception.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transferrable.sw.https.window.html": {
+  "status": "ERROR",
+  "subtests": {
+   "Sending and receiving OffscreenCanvas between window and service worker": "NOTRUN"
+  }
+ },
+ "/html/canvas/offscreen/manual/the-offscreen-canvas/offscreencanvas.transferrable.w.html": {
+  "status": "TIMEOUT",
+  "subtests": {
+   "Test that OffscreenCanvas's size is correct after being transferred from a worker.": "FAIL",
+   "Test that transfer an OffscreenCanvas that has a 2d context throws exception in a worker.": "FAIL",
+   "Test that transfer an OffscreenCanvas that has a webgl context throws exception in a worker.": "FAIL",
+   "Test that transfer an OffscreenCanvas twice throws exception in a worker.": "TIMEOUT",
+   "Test that calling getContext('2d') on a detached OffscreenCanvas throws exception in a worker.": "TIMEOUT",
+   "Test that calling getContext('webgl') on a detached OffscreenCanvas throws exception in a worker.": "TIMEOUT"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.arc.scale.1.html": {
+  "status": "OK",
+  "subtests": {
+   "Non-uniformly scaled arcs are the right shape": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.isPointInPath.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify the winding rule in isPointInPath works for for rect path.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.isPointInPath.edge.html": {
+  "status": "OK",
+  "subtests": {
+   "isPointInPath() counts points on the path as being inside": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.isPointInStroke.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "detects whether point is in the area contained by the stroke of the path": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.isPointInStroke.scaleddashes.html": {
+  "status": "OK",
+  "subtests": {
+   "isPointInStroke() should return correct results on dashed paths at high scale factors": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.isPointInpath.invalid.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify isPointInPath throws exceptions with invalid inputs.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.roundrect.badinput.html": {
+  "status": "OK",
+  "subtests": {
+   "roundRect() throws or does not throw errors given the strange inputs.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.roundrect.negative.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.path.roundrect.negative": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.roundrect.nonfinite.html": {
+  "status": "OK",
+  "subtests": {
+   "roundRect() with Infinity/NaN is ignored": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.stroke.prune.arc.html": {
+  "status": "OK",
+  "subtests": {
+   "Zero-length line segments from arcTo and arc are removed before stroking": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.stroke.prune.closed.html": {
+  "status": "OK",
+  "subtests": {
+   "Zero-length line segments from closed paths are removed before stroking": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.stroke.prune.curve.html": {
+  "status": "OK",
+  "subtests": {
+   "Zero-length line segments from quadraticCurveTo and bezierCurveTo are removed before stroking": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.stroke.prune.line.html": {
+  "status": "OK",
+  "subtests": {
+   "Zero-length line segments from lineTo are removed before stroking": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/path-objects/2d.path.stroke.prune.rect.html": {
+  "status": "OK",
+  "subtests": {
+   "Zero-length line segments from rect and strokeRect are removed before stroking": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.create1.zero.html": {
+  "status": "OK",
+  "subtests": {
+   "createImageData(null) throws TypeError": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.create2.nonfinite.html": {
+  "status": "OK",
+  "subtests": {
+   "createImageData() throws TypeError if arguments are not finite": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.createImageBitmap.srgb.rgba.float16.html": {
+  "status": "OK",
+  "subtests": {
+   "Verify round-trip of 16-bit float sRGB data ImageData through ImageBitmap": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.get.large.crash.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that canvas crash when image data cannot be allocated.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.object.properties.html": {
+  "status": "OK",
+  "subtests": {
+   "ImageData objects have the right properties": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.put.basic.rgba.float16.html": {
+  "status": "OK",
+  "subtests": {
+   "putImageData() puts 16-bit floating point image data from getImageData() onto the canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/pixel-manipulation/2d.imageData.put.nonfinite.html": {
+  "status": "OK",
+  "subtests": {
+   "putImageData() throws TypeError if arguments are not finite": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.alpha.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadow color alpha components are used": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.alpha.3.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are affected by globalAlpha": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.alpha.4.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows with alpha components are correctly affected by globalAlpha": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.alpha.5.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows of shapes with alpha components are drawn correctly": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.canvas.alpha.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn correctly for partially-transparent canvases": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.canvas.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for canvases": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.canvas.transparent.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for transparent parts of canvases": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.clip.1.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows of clipped shapes are still drawn within the clipping region": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.clip.3.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows of clipped shapes are still drawn within the clipping region": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.composite.1.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn using globalCompositeOperation": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.composite.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn using globalCompositeOperation": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.enable.blur.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn if shadowBlur is set": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.enable.x.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn if shadowOffsetX is set": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.enable.y.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn if shadowOffsetY is set": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.gradient.alpha.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn correctly for partially-transparent gradient fills": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.gradient.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for gradient fills": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.gradient.transparent.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for transparent parts of gradient fills": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.image.alpha.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn correctly for partially-transparent images": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.image.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for images": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.image.scale.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn correctly for scaled images": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.image.section.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for areas outside image source rectangles": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.image.transparent.1.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for transparent images": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.image.transparent.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for transparent parts of images": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.offset.negativeX.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows can be offset with negative x": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.offset.negativeY.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows can be offset with negative y": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.offset.positiveX.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows can be offset with positive x": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.offset.positiveY.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows can be offset with positive y": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.outside.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows of shapes outside the visible area can be offset onto the visible area": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.pattern.alpha.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn correctly for partially-transparent fill patterns": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.pattern.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for fill patterns": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.pattern.transparent.1.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for transparent fill patterns": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.pattern.transparent.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are not drawn for transparent parts of fill patterns": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.stroke.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for strokes": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.stroke.cap.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for stroke caps": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.stroke.join.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows are drawn for stroke joins": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.transform.1.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadows take account of transformations": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/shadows/2d.shadow.transform.2.html": {
+  "status": "OK",
+  "subtests": {
+   "Shadow offsets are not affected by transformations": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.center.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign center is the center of the em squares (not the bounding box)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.end.ltr.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign end with ltr is the right edge": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.end.rtl.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign end with rtl is the left edge": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.left.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign left is the left of the first em square (not the bounding box)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.right.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign right is the right of the last em square (not the bounding box)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.start.ltr.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign start with ltr is the left edge": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.align.start.rtl.html": {
+  "status": "OK",
+  "subtests": {
+   "textAlign start with rtl is the right edge": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.baseline.alphabetic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.draw.baseline.alphabetic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.baseline.bottom.html": {
+  "status": "OK",
+  "subtests": {
+   "textBaseline bottom is the bottom of the em square (not the bounding box)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.baseline.hanging.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.draw.baseline.hanging": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.baseline.ideographic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.draw.baseline.ideographic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.baseline.middle.html": {
+  "status": "OK",
+  "subtests": {
+   "textBaseline middle is the middle of the em square (not the bounding box)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.baseline.top.html": {
+  "status": "OK",
+  "subtests": {
+   "textBaseline top is the top of the em square (not the bounding box)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.fill.maxWidth.bound.html": {
+  "status": "OK",
+  "subtests": {
+   "fillText handles maxWidth based on line size, not bounding box size": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.fontface.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.draw.fontface": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.fontface.notinpage.html": {
+  "status": "OK",
+  "subtests": {
+   "@font-face fonts should work even if they are not used in the page": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.fontface.repeat.html": {
+  "status": "OK",
+  "subtests": {
+   "Draw with the font immediately, then wait a bit until and draw again. (This crashes some version of WebKit.)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.space.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "U+0020 is rendered the correct size (1em wide)": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.space.collapse.end.html": {
+  "status": "OK",
+  "subtests": {
+   "Space characters at the end of a line are NOT collapsed": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.space.collapse.nonspace.html": {
+  "status": "OK",
+  "subtests": {
+   "Non-space characters are not converted to U+0020 and collapsed": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.space.collapse.other.html": {
+  "status": "OK",
+  "subtests": {
+   "Space characters are converted to U+0020, and are NOT collapsed": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.space.collapse.space.html": {
+  "status": "OK",
+  "subtests": {
+   "Space characters are converted to U+0020, and are NOT collapsed": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.draw.space.collapse.start.html": {
+  "status": "OK",
+  "subtests": {
+   "Space characters at the start of a line are NOT collapsed": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.absolute.spacing.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing letter spacing and word spacing with absolute length": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.font-relative.spacing.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing letter spacing and word spacing with font-relative length": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.fontKerning.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing basic functionalities of fontKerning for canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.fontKerning.with.uppercase.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing basic functionalities of fontKerning for canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.fontStretch.settings.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing value setting of fontStretch in Canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.fontVariant.settings.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing basic functionalities of fontVariant for canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.invalid.spacing.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing letter spacing and word spacing with invalid units": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.letterSpacing.change.font.html": {
+  "status": "OK",
+  "subtests": {
+   "Set letter spacing and word spacing to font dependent value and verify it works after font change.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.letterSpacing.measure.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing letter spacing with different length units": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.nonfinite.spacing.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing letter spacing and word spacing with nonfinite inputs": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.textRendering.settings.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing basic functionalities of textRendering in Canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.wordSpacing.change.font.html": {
+  "status": "OK",
+  "subtests": {
+   "Set word spacing and word spacing to font dependent value and verify it works after font change.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.drawing.style.wordSpacing.measure.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing word spacing with different length units": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.parse.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.parse.basic": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.parse.complex.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.parse.complex": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.parse.complex2.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.parse.complex2": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.parse.family.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.parse.family": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.parse.invalid.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.parse.invalid": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.relative_size.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.relative_size": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.font.weight.html": {
+  "status": "OK",
+  "subtests": {
+   "OffscreenCanvas test: 2d.text.font.weight": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.fontVariantCaps2.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing small caps setting in fontVariant": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.actualBoundingBox.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing actualBoundingBox": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.actualBoundingBox.small-font.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing that actualBoundingBox metrics are precise at small font sizes": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.actualBoundingBox.whitespace.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing actualBoundingBox with leading/trailing whitespace": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.baselines.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing baselines": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.emHeights-low-ascent.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing emHeights with reduced ascent metric": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.emHeights-zero-descent.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing emHeights with zero descent metric": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.emHeights.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing emHeights": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.fillTextCluster-options.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that fillTextCluster() correctly applies the options passed as a dictionary.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.fillTextCluster-range.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that getTextClusters() and fillTextCluster() correctly render different ranges of the input text.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.fontBoundingBox-reduced-ascent.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing fontBoundingBox for OffscreenCanvas with reduced ascent metric": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.fontBoundingBox-zero-descent.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing fontBoundingBox for OffscreenCanvas with zero descent metric": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.fontBoundingBox.ahem.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing fontBoundingBox for font ahem": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.fontBoundingBox.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing fontBoundingBox measurements": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.getActualBoundingBox-exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getActualBoundingBox() throws when using invalid indexes.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.getActualBoundingBox-full-text.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test TextMetrics::getActualBoundingBox() for the full length of the string for some edge cases, with direction ltr and no-directional-override": "FAIL",
+   "Test TextMetrics::getActualBoundingBox() for the full length of the string for some edge cases, with direction rtl and no-directional-override": "FAIL",
+   "Test TextMetrics::getActualBoundingBox() for the full length of the string for some edge cases, with direction ltr and directional-override": "FAIL",
+   "Test TextMetrics::getActualBoundingBox() for the full length of the string for some edge cases, with direction rtl and directional-override": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.getActualBoundingBox.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test TextMetrics::getActualBoundingBox(), with text align left , and 0px letter spacing.": "FAIL",
+   "Test TextMetrics::getActualBoundingBox(), with text align center , and 0px letter spacing.": "FAIL",
+   "Test TextMetrics::getActualBoundingBox(), with text align right , and 0px letter spacing.": "FAIL",
+   "Test TextMetrics::getActualBoundingBox(), with text align left , and 10px letter spacing.": "FAIL",
+   "Test TextMetrics::getActualBoundingBox(), with text align center , and 10px letter spacing.": "FAIL",
+   "Test TextMetrics::getActualBoundingBox(), with text align right , and 10px letter spacing.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.index-from-offset-edge-cases.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test the edge cases for getIndexFromOffset, where the point is at the edge of glyph and at the midpoint.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.index-from-offset-edges.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction ltr and text align left.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction rtl and text align left.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction ltr and text align center.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction rtl and text align center.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction ltr and text align right.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction rtl and text align right.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction ltr and text align start.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction rtl and text align start.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction ltr and text align end.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() gives correct edges when the requested point is outside the range, with direction rtl and text align end.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.index-from-offset.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align left, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align left, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align center, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align center, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align right, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align right, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align start, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align start, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align end, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align end, 0px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align left, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align left, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align center, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align center, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align right, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align right, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align start, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align start, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align end, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align end, 10px letter spacing and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align left, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align left, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align center, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align center, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align right, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align right, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align start, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align start, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align end, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align end, 0px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align left, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align left, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align center, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align center, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align right, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align right, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align start, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align start, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction ltr, text align end, 10px letter spacing and directional-override.": "FAIL",
+   "Check that TextMetrics::getIndexFromOffset() matches its DOM equivalent, where possible, with direction rtl, text align end, 10px letter spacing and directional-override.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.lang.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing the lang attribute": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.lang.inherit.html": {
+  "status": "OK",
+  "subtests": {
+   "Testing the lang attribute": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.selection-rects-baselines.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getSelectionRects() works correctly with textBaseline.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.selection-rects-exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getSelectionRects() throws when using invalid indexes.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.selection-rects.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align left, 0px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align left, 0px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align center, 0px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align center, 0px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align right, 0px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align right, 0px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align left, 10px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align left, 10px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align center, 10px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align center, 10px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align right, 10px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align right, 10px letter spacing, and no-directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align left, 0px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align left, 0px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align center, 0px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align center, 0px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align right, 0px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align right, 0px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align left, 10px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align left, 10px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align center, 10px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align center, 10px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction ltr, text align right, 10px letter spacing, and directional-override.": "FAIL",
+   "Check that TextMetrics::getSelectionRects() matches its DOM equivalent, with direction rtl, text align right, 10px letter spacing, and directional-override.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.strokeTextCluster-options.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that strokeTextCluster() correctly applies the options passed as a dictionary.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.strokeTextCluster-range.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that getTextClusters() and strokeTextCluster() correctly render different ranges of the input text.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.text-clusters-exceptions.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Check that TextMetrics::getTextClusters() throws when using invalid indexes.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.text-clusters-position.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that TextMetrics::getTextClusters() returns clusters that are positioned according to the target align and baseline passed as options.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.text-clusters-split.tentative.html": {
+  "status": "OK",
+  "subtests": {
+   "Test that getTextClusters() splits the input correctly into the minimal clusters, keeping emojis together.": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.width.basic.html": {
+  "status": "OK",
+  "subtests": {
+   "The width of character is same as font used": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.width.empty.html": {
+  "status": "OK",
+  "subtests": {
+   "The empty string has zero width": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.width.nullCharacter.html": {
+  "status": "OK",
+  "subtests": {
+   "Null character does not take up space": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/text/2d.text.measure.width.space.html": {
+  "status": "OK",
+  "subtests": {
+   "Space characters are converted to U+0020 and NOT collapsed": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/wide-gamut-canvas/2d.color.space.getImageData.convert.html": {
+  "status": "OK",
+  "subtests": {
+   "Test getImageData color conversions from a srgb canvas": "FAIL",
+   "Test getImageData color conversions from a srgb-linear canvas": "FAIL",
+   "Test getImageData color conversions from a display-p3 canvas": "FAIL",
+   "Test getImageData color conversions from a display-p3-linear canvas": "FAIL"
+  }
+ },
+ "/html/canvas/offscreen/wide-gamut-canvas/2d.color.space.toBlob.toDataURL.png.linear.float.html": {
+  "status": "OK",
+  "subtests": {
+   "Test convertToBlob creates a png image using an appropriate encoding to not lose precision from a srgb-linear float16 canvas": "FAIL",
+   "Test convertToBlob creates a png image using an appropriate encoding to not lose precision from a display-p3-linear float16 canvas": "FAIL"
+  }
+ },
  "/html/dom/access-key-label.html": {
   "status": "OK",
   "subtests": {
