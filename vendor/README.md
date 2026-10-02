@@ -401,3 +401,4 @@ Patches so far:
     `style::traversal::resolve_style` (Servo's recipe for resolved-style requests), without
     storing it. wordpress.com's logo marquee sums `margin-inline-end` of hidden items; with 0
     its width loop ran until `Invalid string length` and aborted the page's DOMContentLoaded.
+- `blitz-dom/src/mutator.rs` `load_linked_stylesheet`: the request mode of a `<link rel=stylesheet>` is `cors` when the element has a `crossorigin` attribute, else `no-cors` (HTML "obtain the resource"); the network stack sends `Origin` and runs the CORS check, and the CSSOM treats a sheet that loaded through a cors request as origin-clean. Before, every cross-origin linked sheet hid its `cssRules` (SecurityError), also with `crossorigin` and `Access-Control-Allow-Origin` (GitHub, Meta, Slack, Discord).

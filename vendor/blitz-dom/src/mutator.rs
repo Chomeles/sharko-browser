@@ -1215,11 +1215,17 @@ impl<'doc> DocumentMutator<'doc> {
                 .insert(handler.request_id());
         }
 
-        self.doc.net_provider.fetch(
-            self.doc.id(),
-            self.doc.build_request(url, "style"),
-            Box::new(handler),
+        // PATCH: HTML "obtain the resource" for `<link rel=stylesheet>`: the request mode is
+        // `cors` when the element has a `crossorigin` attribute, else `no-cors`. The network
+        // stack sends `Origin` and performs the CORS check for cors-mode requests; a sheet
+        // that loaded through a cors request is origin-clean (CSSOM: its rules are readable).
+        let mut request = self.doc.build_request(url, "style");
+        let mode = if node.attr(local_name!("crossorigin")).is_some() { "cors" } else { "no-cors" };
+        request.headers.insert(
+            blitz_traits::net::http::HeaderName::from_static("sec-fetch-mode"),
+            blitz_traits::net::http::HeaderValue::from_static(mode),
         );
+        self.doc.net_provider.fetch(self.doc.id(), request, Box::new(handler));
     }
 
     fn unload_stylesheet(&mut self, node_id: NodeId) {

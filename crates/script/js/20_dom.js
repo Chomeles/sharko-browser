@@ -4047,10 +4047,13 @@
     d.text = text;
     d.rules = makeRules(splitRules(text), s, null);
   }
-  // A linked sheet from another origin hides its rules (as in browsers).
+  // CSSOM "origin-clean flag": a linked sheet from another origin hides its rules, unless
+  // the <link> has `crossorigin` (then the engine fetched it in cors mode and a sheet that
+  // loaded passed the CORS check).
   function checkSheetAccess(s, what) {
     const d = sheetDataOf(s);
     if (!d.linked || d.href === null) return;
+    if (N.getAttr(idOf(d.owner), 'crossorigin') !== null) return;
     const p = N.urlParse(d.href, null);
     const origin = p === null ? null : p[10];
     if (origin !== null && origin !== 'null' && origin === L.docOrigin()) return;

@@ -64,6 +64,7 @@ impl NetProvider for BlitzNetProvider {
         let signal = request.signal.clone();
         let callback_signal = signal.clone();
         let destination = infer_destination(&request);
+        let cors_origin = cors_initiator(&request);
         let net_request = to_net_request(request, destination);
         let url = net_request.url.clone();
         let waker = Arc::clone(&self.waker);
@@ -78,8 +79,19 @@ impl NetProvider for BlitzNetProvider {
                         return;
                     }
                 }
-                if response.is_ok() {
+                let cors_failure = response.is_ok()
+                    && cors_origin
+                        .as_deref()
+                        .is_some_and(|origin| !cors_check(origin, response.header("access-control-allow-origin")));
+                if response.is_ok() && !cors_failure {
                     handler.bytes(response.url, Bytes::from(response.body));
+                } else if cors_failure {
+                    // Fetch "CORS check" failed: a network error, the resource does not apply.
+                    log::debug!("resource load blocked by CORS: {url}");
+                    if empty_body_on_error {
+                        let final_url = if response.url.is_empty() { url } else { response.url };
+                        handler.bytes(final_url, Bytes::new());
+                    }
                 } else {
                     log::debug!(
                         "resource load failed: {url}: {}",
@@ -109,6 +121,33 @@ impl NetProvider for BlitzNetProvider {
 /// `url()`, `@font-face`, `<iframe>`): the Fetch destination, which the URL and `Accept`
 /// can't tell (`/css2?family=X` is a stylesheet). Not sent on the wire.
 pub const DESTINATION_HEADER: &str = "sec-fetch-dest";
+
+/// For a cors-mode request (the loader's `sec-fetch-mode: cors` marker, set for
+/// `<link crossorigin>`) to another origin: the initiator's origin (from `Referer`), the
+/// value the CORS check compares `Access-Control-Allow-Origin` against. `None` for
+/// no-cors and same-origin requests, which need no check.
+fn cors_initiator(request: &Request) -> Option<String> {
+    let mode = request.headers.get("sec-fetch-mode").and_then(|v| v.to_str().ok())?;
+    if mode != "cors" {
+        return None;
+    }
+    let referrer = request.headers.get(http::header::REFERER).and_then(|v| v.to_str().ok())?;
+    let referrer = url::Url::parse(referrer).ok()?;
+    if referrer.origin() == request.url.origin() {
+        return None;
+    }
+    Some(referrer.origin().ascii_serialization())
+}
+
+/// Fetch "CORS check" for a request without credentials: `Access-Control-Allow-Origin`
+/// must be `*` or exactly the initiator's origin (one value, byte-for-byte).
+fn cors_check(origin: &str, allow_origin: Option<&str>) -> bool {
+    match allow_origin.map(str::trim) {
+        Some("*") => true,
+        Some(allowed) => allowed == origin,
+        None => false,
+    }
+}
 
 /// Infers the request destination from the loader's marker, `Accept` or the URL's file
 /// extension.
@@ -394,6 +433,28 @@ mod tests {
         let mut r = req("https://fonts.googleapis.com/css2?family=Roboto");
         r.headers.insert(http::header::ACCEPT, http::HeaderValue::from_static("text/css,*/*;q=0.1"));
         assert_eq!(infer_destination(&r), Destination::Style);
+    }
+
+    #[test]
+    fn cors_mode_links_are_checked_against_allow_origin() {
+        // `<link rel=stylesheet crossorigin>` from https://a.com to a CDN: cors mode.
+        let mut r = req("https://cdn.example.net/x.css");
+        r.headers.insert("sec-fetch-mode", http::HeaderValue::from_static("cors"));
+        r.headers.insert(http::header::REFERER, http::HeaderValue::from_static("https://a.com/page"));
+        assert_eq!(cors_initiator(&r).as_deref(), Some("https://a.com"));
+        assert!(cors_check("https://a.com", Some("*")));
+        assert!(cors_check("https://a.com", Some("https://a.com")));
+        assert!(!cors_check("https://a.com", Some("https://b.com")));
+        assert!(!cors_check("https://a.com", Some("https://a.com, https://b.com")));
+        assert!(!cors_check("https://a.com", None));
+        // Same-origin cors requests and no-cors requests need no check.
+        let mut same = req("https://a.com/x.css");
+        same.headers.insert("sec-fetch-mode", http::HeaderValue::from_static("cors"));
+        same.headers.insert(http::header::REFERER, http::HeaderValue::from_static("https://a.com/page"));
+        assert_eq!(cors_initiator(&same), None);
+        let mut plain = req("https://cdn.example.net/x.css");
+        plain.headers.insert(http::header::REFERER, http::HeaderValue::from_static("https://a.com/page"));
+        assert_eq!(cors_initiator(&plain), None);
     }
 
     #[test]
