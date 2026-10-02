@@ -2429,6 +2429,20 @@
     }
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
+    // blob: URLs live in this layer's registry (the network stack cannot serve them): <script src=blob:>, module
+    // scripts and the other subresource loads answer from it like fetch() does (File API §9.4).
+    if (url.length > 5 && url.slice(0, 5).toLowerCase() === 'blob:') {
+      blobFetches.add(reqId);
+      L.postTask(() => {
+        if (!blobFetches.delete(reqId)) return;
+        pendingFetches.delete(reqId);
+        fetchProgress.delete(reqId);
+        const blob = method === 'GET' ? blobURLs.get(stripFragment(url)) : undefined;
+        if (blob === undefined) { done(0, '', url, [], null, 'Failed to fetch blob URL'); return; }
+        done(200, 'OK', url, ['Content-Type', blob.type, 'Content-Length', String(blob.size)], copyToArrayBuffer(L.blobBytes(blob)), null);
+      });
+      return reqId;
+    }
     try {
       N.fetch(reqId, method, url, flat, body, mode, credentials || 'same-origin', cache || 'default', redirect || 'follow', typeof progress === 'function', dest || '');
     } catch (e) {
@@ -2439,8 +2453,10 @@
     }
     return reqId;
   };
+  const blobFetches = new Set();
   L.cancelNativeFetch = function (reqId) {
     fetchProgress.delete(reqId);
+    if (blobFetches.delete(reqId)) { pendingFetches.delete(reqId); return; }
     if (pendingFetches.delete(reqId)) N.abortFetch(reqId);
   };
   L.onFetchProgress = function (reqId, loaded, total, upload) {
