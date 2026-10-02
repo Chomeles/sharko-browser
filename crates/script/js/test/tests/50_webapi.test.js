@@ -552,3 +552,38 @@ test('Cookie Store API: set/get/getAll/delete over document.cookie', async () =>
   `);
   assert.strictEqual(String(r), 'object|true|null|{"name":"a","value":"1"}|2|true|null|["b"]|true');
 });
+
+test('BroadcastChannel in a data: URL worker is isolated from the page (opaque origin)', async () => {
+  const e = await env({});
+  e.run(`window.got = [];
+    const bc = new BroadcastChannel('t'); bc.onmessage = (ev) => got.push('page:' + ev.data);
+    const src = "const b = new BroadcastChannel('t'); b.postMessage('from-worker'); postMessage('done');";
+    window.w = new Worker('data:text/javascript,' + encodeURIComponent(src));
+    w.onmessage = (ev) => got.push(ev.data);`);
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), ['done']);
+  e.run(`new BroadcastChannel('t2').postMessage('x'); window.got2 = [];
+    const c = new BroadcastChannel('t2'); c.onmessage = (ev) => got2.push(ev.origin);
+    new BroadcastChannel('t2').postMessage('y');`);
+  await e.flush();
+  assert.strictEqual(e.run('got2.length'), 1);
+});
+
+test('Request: clone() leaves the original unused; new Request(used GET request) works; a consumed body is rejected', async () => {
+  const e = await env({});
+  const r = await settle(e, `
+    const out = [];
+    const post = new Request('/y', { method: 'POST', body: 'hi' });
+    const copy = post.clone();
+    out.push(post.bodyUsed, copy.bodyUsed);
+    const again = new Request(post);            // still allowed: the original was not used by clone()
+    out.push(again.method, post.bodyUsed);      // the constructor moves the body (Fetch step 36)
+    const get = new Request('/g'); fetch(get).catch(() => {}); get.text().catch(() => {});
+    out.push(new Request(get).url.endsWith('/g'), get.bodyUsed);
+    let err; try { new Request(post); } catch (x) { err = x instanceof TypeError && /already been used/.test(x.message); }
+    out.push(err, await copy.text());
+    const resp = new Response('x'); resp.clone(); out.push(resp.bodyUsed);
+    return out.join('|');
+  `);
+  assert.strictEqual(String(r), 'false|false|POST|true|true|false|true|hi|false');
+});

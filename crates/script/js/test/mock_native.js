@@ -55,6 +55,7 @@ class MockNative {
     this.rects = new Map();
     this.scroll = new Map();
     this.images = new Map();
+    this.surfaces = new Map();
     this.focused = 0;
     this.hist = [{ url: this.url }];
     this.histIndex = 0;
@@ -556,6 +557,7 @@ class MockNative {
         const active = M.frame ? M.frame.group.active : null;
         return M.hooks.windowPostMessage(message, targetOrigin, transfer, active && active !== M.global ? active : null);
       },
+      linkSheetText: (id) => 'a { color: red }\nb { color: blue }',
       setAdoptedSheets: (hostId, sources, bases) => { if (hostId !== 0) M.n(hostId); M.adoptedSheets.set(hostId, sources.map((s, i) => [s, bases[i]])); },
       setDefined: (id) => { M.n(id); M.definedIds.add(id); },
       appendChild: (p, c) => nat.insertBefore(p, c, 0),
@@ -875,6 +877,28 @@ class MockNative {
       historyLength: () => M.hist.length,
       openWindow: (url, target, features) => { M.opened.push({ url: String(url), target: String(target), features: String(features) }); },
       imageSize: (id) => { const s = M.images.get(id); return s ? M.arr(s) : null; },
+      // canvas surfaces: straight RGBA bytes per canvas node (enough for WebGL presentation and read-back)
+      canvasReset: (id, w, h) => { M.surfaces.set(id, { w, h, data: new Uint8Array(w * h * 4) }); },
+      canvasPutImageData: (id, bytes, w, h, dx, dy, rx, ry, rw, rh) => {
+        const s = M.surfaces.get(id); if (!s) return;
+        const src = M.bytesOf(bytes);
+        for (let y = ry; y < ry + rh; y++) for (let x = rx; x < rx + rw; x++) {
+          const tx = dx + x, ty = dy + y;
+          if (tx < 0 || ty < 0 || tx >= s.w || ty >= s.h || x < 0 || y < 0 || x >= w || y >= h) continue;
+          for (let k = 0; k < 4; k++) s.data[(ty * s.w + tx) * 4 + k] = src[(y * w + x) * 4 + k];
+        }
+      },
+      canvasGetImageData: (id, x, y, w, h) => {
+        const s = M.surfaces.get(id); const out = new Uint8Array(w * h * 4);
+        if (s) for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const sx = x + xx, sy = y + yy; if (sx < 0 || sy < 0 || sx >= s.w || sy >= s.h) continue; for (let k = 0; k < 4; k++) out[(yy * w + xx) * 4 + k] = s.data[(sy * s.w + sx) * 4 + k]; }
+        return M.ab(Buffer.from(out));
+      },
+      webglEnabled: () => process.env.SHARKO_WEBGL_OFF !== '1',
+      canvasToDataURL: (id, w, h) => {
+        const s = M.surfaces.get(id);
+        const hash = nodeCrypto.createHash('sha1').update(s ? Buffer.from(s.data) : Buffer.alloc(0)).digest('hex');
+        return `data:image/png;base64,${Buffer.from(`${w}x${h}:${hash}`).toString('base64')}`;
+      },
       parseHTMLDocument: (html) => {
         // like Rust: a detached DocumentFragment holding the parsed doctype + <html> (scripting disabled)
         const d = M.createNode({ type: 11 });

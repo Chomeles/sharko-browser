@@ -387,3 +387,18 @@ Patches so far:
     parse time, so `color: transparent` gradient headings (bsky.app sign-up dialog) painted a
     plain rectangle or nothing. Layers with that clip are painted into an isolated layer and
     intersected (`DestIn`) with the opaque glyphs of the element's subtree, as in Blink/Gecko.
+95. `blitz-dom/src/document.rs` (`get_fragment_target`, `is_in_shadow_tree`): "scroll to the
+    fragment" ignores elements inside an emulated shadow tree (their ids and `<a name>` share
+    the host's subtree). Light children slotted into a `<slot>` stay matchable. WPT
+    shadow-dom/scroll-to-the-fragment-in-shadow-tree.html.
+96. `blitz-dom/src/node/node.rs` (`Node::matches_defined`, `is_custom_element_name`),
+    `stylo.rs`: `:defined` does not match an HTML element with a custom element name (minus the
+    reserved hyphenated SVG/MathML names) or an `is` value until it is upgraded; non-HTML
+    elements are always defined. The script crate's `matches()` engine uses the same predicate.
+97. `blitz-dom/src/stylo.rs` (`resolve_undisplayed_style`), `crates/script/src/style.rs`:
+    `getComputedStyle` of an element inside a `display: none` subtree returned `none`/empty
+    because Stylo does not traverse such subtrees. The style is now resolved on demand with
+    `style::traversal::resolve_style` (Servo's recipe for resolved-style requests), without
+    storing it. wordpress.com's logo marquee sums `margin-inline-end` of hidden items; with 0
+    its width loop ran until `Invalid string length` and aborted the page's DOMContentLoaded.
+- `blitz-dom/src/mutator.rs` `load_linked_stylesheet`: the request mode of a `<link rel=stylesheet>` is `cors` when the element has a `crossorigin` attribute, else `no-cors` (HTML "obtain the resource"); the network stack sends `Origin` and runs the CORS check, and the CSSOM treats a sheet that loaded through a cors request as origin-clean. Before, every cross-origin linked sheet hid its `cssRules` (SecurityError), also with `crossorigin` and `Access-Control-Allow-Origin` (GitHub, Meta, Slack, Discord).

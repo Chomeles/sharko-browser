@@ -4,3 +4,12 @@
 *.png binary
 *.dat binary
 *.woff2 binary
+# Language statistics on GitHub: the browser is the crates (Rust and the embedded JS layer) and
+# the vendored engines it is built from; repro pages, test servers and dossiers are not browser code.
+vendor/** linguist-vendored=false
+tools/** linguist-vendored
+docs/** linguist-documentation
+.github/** linguist-vendored
+# Append-only lists that every lane extends: keep both sides instead of conflicting on the last line.
+vendor/README.md merge=union
+docs/compat/HISTORY.md merge=union

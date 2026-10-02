@@ -703,6 +703,9 @@ pub(crate) fn scroll_to_url_fragment(st: &RuntimeState, url: &url::Url) {
     if let Ok(doc) = st.doc()
         && doc.try_root_element().is_some()
     {
+        // The target's box must exist: a link clicked right after script built the DOM
+        // would otherwise find no layout and not scroll.
+        crate::layout::ensure_layout(st, doc);
         let before = doc.viewport_scroll();
         doc.scroll_to_fragment(&percent_decode(frag));
         if doc.viewport_scroll() != before {

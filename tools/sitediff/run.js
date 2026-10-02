@@ -174,6 +174,8 @@ function proxyOpt(proxy) {
 }
 
 const BLOCKED = /nur einen moment|just a moment|attention required|access denied|verify you are|are you a robot|captcha|pardon our interruption|bot detection|zugriff verweigert|403 forbidden|request blocked/i;
+// The same walls recognised by their body text (the title is often the site's own or empty).
+const WALL_TEXT = /sicherheitsüberprüfung wird durchgeführt|verify(?:ing)? (?:that )?you are (?:a )?human|checking (?:if the site connection is secure|your browser)|ungewöhnlichen datenverkehr|unusual traffic from your|confirm you.re not a robot|you have been blocked|access to this page has been denied|request blocked|something went wrong.{0,80}reference (?:id|number)/i;
 
 async function runChromium(browser, url, dir) {
   const ctx = await browser.newContext({
@@ -396,6 +398,12 @@ function compare(c, s) {
     return d;
   }
   if (sp.probeErrors && sp.probeErrors.length) add('probe-error', 20, sp.probeErrors.join('; ').slice(0, 300));
+
+  // A challenge or block page instead of the site: the server refused Sharko, so the
+  // diff below measures the wall, not the engine. Tagged with weight 0 (the other tags
+  // still score it) so the gate can count walls apart from rendering.
+  const walled = (p) => !!p && (BLOCKED.test(p.title || '') || WALL_TEXT.test((p.text || '').slice(0, 3000)));
+  if (walled(sp) && !walled(cp)) add('bot-wall', 0, `Sharko got a challenge or block page: "${(sp.title || sp.text || '').slice(0, 80)}"`);
 
   // Navigation
   const host = (u) => {

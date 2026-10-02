@@ -1,0 +1,1620 @@
+{
+ "tri_flat": {
+  "px": [
+   [
+    255,
+    128,
+    64,
+    255
+   ],
+   [
+    255,
+    128,
+    64,
+    255
+   ],
+   [
+    0,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    0,
+    0,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "tri_varying": {
+  "px": [
+   [
+    179,
+    36,
+    40,
+    255
+   ],
+   [
+    36,
+    179,
+    40,
+    255
+   ],
+   [
+    20,
+    36,
+    199,
+    255
+   ],
+   [
+    68,
+    84,
+    104,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "depth_blend": {
+  "first": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "rejected": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "blended": [
+   128,
+   255,
+   128,
+   191
+  ],
+  "err": 0
+ },
+ "cull_scissor": {
+  "back": [
+   255,
+   255,
+   255,
+   255
+  ],
+  "front": [
+   255,
+   255,
+   255,
+   255
+  ],
+  "inside": [
+   255,
+   255,
+   255,
+   255
+  ],
+  "outside": [
+   0,
+   0,
+   0,
+   255
+  ],
+  "edge": [
+   [
+    0,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    255,
+    255,
+    255
+   ],
+   [
+    255,
+    255,
+    255,
+    255
+   ],
+   [
+    0,
+    0,
+    0,
+    255
+   ]
+  ]
+ },
+ "texture_filters": {
+  "nearest_clamp": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ]
+  ],
+  "linear_clamp": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    191,
+    64,
+    0,
+    255
+   ],
+   [
+    64,
+    191,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ]
+  ],
+  "nearest_repeat": [
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ]
+  ],
+  "nearest_mirror": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "mipmaps_cube": {
+  "lvl0": [
+   [
+    0,
+    0,
+    255,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ]
+  ],
+  "cube": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    0,
+    255,
+    255
+   ],
+   [
+    255,
+    255,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    255,
+    255
+   ],
+   [
+    0,
+    255,
+    255,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "errors": [
+  1280,
+  1280,
+  1282,
+  1280,
+  1281,
+  1282,
+  1282,
+  1282,
+  1280,
+  1280,
+  0,
+  0,
+  1286,
+  1282,
+  1281,
+  1282,
+  0
+ ],
+ "context_params": {
+  "VERSION": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+  "SHADING_LANGUAGE_VERSION": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+  "VENDOR": "WebKit",
+  "RENDERER": "WebKit WebGL",
+  "MAX_VERTEX_ATTRIBS": 16,
+  "MAX_TEXTURE_IMAGE_UNITS": 32,
+  "DEPTH_BITS": 24,
+  "STENCIL_BITS": 0,
+  "RED_BITS": 8,
+  "ALPHA_BITS": 8,
+  "VIEWPORT": [
+   0,
+   0,
+   4,
+   4
+  ],
+  "SCISSOR_BOX": [
+   0,
+   0,
+   4,
+   4
+  ],
+  "COLOR_CLEAR_VALUE": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "DEPTH_RANGE": [
+   0,
+   1
+  ],
+  "ALIASED_LINE_WIDTH_RANGE": [
+   1,
+   1
+  ],
+  "BLEND_EQUATION_RGB": 32774,
+  "FRONT_FACE": 2305,
+  "CULL_FACE_MODE": 1029,
+  "UNPACK_ALIGNMENT": 4,
+  "COLOR_WRITEMASK": [
+   true,
+   true,
+   true,
+   true
+  ],
+  "IMPLEMENTATION_COLOR_READ_FORMAT": 6408,
+  "IMPLEMENTATION_COLOR_READ_TYPE": 5121,
+  "ext": true,
+  "attrs": [
+   "alpha",
+   "antialias",
+   "depth",
+   "desynchronized",
+   "failIfMajorPerformanceCaveat",
+   "powerPreference",
+   "premultipliedAlpha",
+   "preserveDrawingBuffer",
+   "stencil",
+   "xrCompatible"
+  ],
+  "lostId": "[object WebGLRenderingContext]",
+  "highp": [
+   127,
+   127,
+   23
+  ]
+ },
+ "webgl2_basics": {
+  "status": true,
+  "o0": [
+   0,
+   0,
+   255,
+   255
+  ],
+  "o1": [
+   143,
+   143,
+   0,
+   255
+  ],
+  "ints": [
+   178,
+   230,
+   51,
+   255
+  ],
+  "err": 0
+ },
+ "instanced_elements": {
+  "row": [
+   0,
+   255,
+   255,
+   0,
+   0,
+   255,
+   255,
+   0
+  ],
+  "err": 0
+ },
+ "stencil_masks": {
+  "eq": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "ne": [
+   0,
+   0,
+   0,
+   255
+  ],
+  "err": 0
+ },
+ "float_fbo": {
+  "f": [
+   1.5,
+   -2,
+   1000.25,
+   0.125
+  ],
+  "status": true,
+  "err": 0
+ },
+ "glsl_math": {
+  "px": [
+   175,
+   159,
+   178,
+   255
+  ],
+  "err": 0
+ },
+ "compile_errors": {
+  "syntax": false,
+  "undeclared": false,
+  "noPrecision": false,
+  "ok": true,
+  "mismatch": false,
+  "link": false
+ },
+ "uniform_reflection": {
+  "attrs": [
+   [
+    "a",
+    1,
+    35666
+   ],
+   [
+    "b",
+    1,
+    35664
+   ]
+  ],
+  "uniforms": [
+   [
+    "m",
+    1,
+    35676
+   ],
+   [
+    "arr[0]",
+    2,
+    35665
+   ],
+   [
+    "l.x",
+    1,
+    5126
+   ],
+   [
+    "l.y",
+    1,
+    35664
+   ],
+   [
+    "s",
+    1,
+    35678
+   ]
+  ],
+  "sorted": [
+   "arr[0]",
+   "l.x",
+   "l.y",
+   "m",
+   "s"
+  ],
+  "locs": [
+   true,
+   true,
+   true,
+   true
+  ],
+  "attrLocs": [
+   true,
+   -1
+  ]
+ },
+ "offscreen_2d": {
+  "size": [
+   10,
+   6
+  ],
+  "pix": [
+   10,
+   200,
+   30,
+   255
+  ],
+  "same": true,
+  "back": true,
+  "other": null,
+  "tag": "[object OffscreenCanvasRenderingContext2D]",
+  "ctor": "OffscreenCanvasRenderingContext2D",
+  "measure": true,
+  "clear": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "isOff": true,
+  "resize": [
+   4,
+   [
+    0,
+    0,
+    0,
+    0
+   ]
+  ]
+ },
+ "offscreen_webgl": {
+  "px": [
+   51,
+   102,
+   204,
+   255
+  ],
+  "canvas": true,
+  "bmp": [
+   6,
+   4
+  ],
+  "drawn": [
+   51,
+   102,
+   204,
+   255,
+   51,
+   102,
+   204,
+   255
+  ],
+  "tag": "[object WebGLRenderingContext]",
+  "second": null,
+  "size": [
+   6,
+   4
+  ]
+ },
+ "offscreen_blob_bitmap": {
+  "blob": [
+   "image/png",
+   true
+  ],
+  "dims": [
+   2,
+   2,
+   1,
+   2,
+   3,
+   2,
+   4,
+   4
+  ],
+  "closed": [
+   0,
+   0
+  ],
+  "sub": [
+   0,
+   255,
+   0,
+   255,
+   9,
+   9,
+   9,
+   255
+  ],
+  "err": "InvalidStateError",
+  "err2": "RangeError",
+  "bitmapCanvas": [
+   2,
+   2
+  ],
+  "bctxCanvas": true,
+  "tag": "[object ImageBitmap]"
+ },
+ "offscreen_transfer": {
+  "size": [
+   5,
+   3
+  ],
+  "shown": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "err": "InvalidStateError",
+  "err2": "InvalidStateError",
+  "tag": "[object OffscreenCanvas]"
+ },
+ "audio_surface": {
+  "ctx": {
+   "state0": "running",
+   "rate": true,
+   "base": 0.01,
+   "out": 0,
+   "dest": [
+    2,
+    1,
+    0,
+    2,
+    "explicit",
+    "speakers"
+   ],
+   "time": 0,
+   "keys": []
+  },
+  "osc": [
+   "sine",
+   440,
+   0,
+   true,
+   true,
+   "a-rate",
+   2,
+   "max",
+   "speakers",
+   0,
+   1
+  ],
+  "comp": [
+   -24,
+   30,
+   12,
+   0.003000000026077032,
+   0.25,
+   0,
+   2,
+   "clamped-max",
+   "k-rate",
+   -100,
+   0,
+   20
+  ],
+  "an": [
+   2048,
+   1024,
+   -100,
+   -30,
+   0.8,
+   2,
+   "max"
+  ],
+  "gain": [
+   1,
+   2,
+   "max",
+   -3.4028234663852886e+38,
+   3.4028234663852886e+38
+  ],
+  "biquad": [
+   "lowpass",
+   350,
+   1,
+   0,
+   0,
+   true
+  ],
+  "delay": [
+   0,
+   1
+  ],
+  "pan": [
+   0,
+   -1,
+   1,
+   "clamped-max",
+   2
+  ],
+  "sm": [
+   6,
+   6,
+   "explicit",
+   "discrete",
+   6,
+   1,
+   "explicit"
+  ],
+  "src": [
+   false,
+   0,
+   0,
+   1,
+   null
+  ],
+  "shaper": [
+   null,
+   "none"
+  ],
+  "cs": [
+   1
+  ],
+  "l": [
+   0,
+   -1,
+   1
+  ],
+  "names": [
+   [
+    "BaseAudioContext",
+    "destination,sampleRate,currentTime,listener,state,onstatechange,createAnalyser,createBiquadFilter,createBuffer,createBufferSource,createChannelMerger,createChannelSplitter,createConstantSource,createConvolver,createDelay,createDynamicsCompressor,createGain,createIIRFilter,createOscillator,createPanner,createPeriodicWave,createScriptProcessor,createStereoPanner,createWaveShaper,decodeAudioData,constructor",
+    0
+   ],
+   [
+    "AudioContext",
+    "baseLatency,outputLatency,close,createMediaElementSource,createMediaStreamDestination,createMediaStreamSource,getOutputTimestamp,resume,suspend,onerror,constructor",
+    0
+   ],
+   [
+    "OfflineAudioContext",
+    "oncomplete,length,resume,startRendering,suspend,constructor",
+    1
+   ],
+   [
+    "AudioBuffer",
+    "length,duration,sampleRate,numberOfChannels,copyFromChannel,copyToChannel,getChannelData,constructor",
+    1
+   ],
+   [
+    "AudioNode",
+    "context,numberOfInputs,numberOfOutputs,channelCount,channelCountMode,channelInterpretation,connect,disconnect,constructor",
+    0
+   ],
+   [
+    "AudioParam",
+    "value,automationRate,defaultValue,minValue,maxValue,cancelAndHoldAtTime,cancelScheduledValues,exponentialRampToValueAtTime,linearRampToValueAtTime,setTargetAtTime,setValueAtTime,setValueCurveAtTime,constructor",
+    0
+   ],
+   [
+    "OscillatorNode",
+    "type,frequency,detune,setPeriodicWave,constructor",
+    1
+   ],
+   [
+    "DynamicsCompressorNode",
+    "threshold,knee,ratio,reduction,attack,release,constructor",
+    1
+   ],
+   [
+    "AnalyserNode",
+    "fftSize,frequencyBinCount,minDecibels,maxDecibels,smoothingTimeConstant,getByteFrequencyData,getByteTimeDomainData,getFloatFrequencyData,getFloatTimeDomainData,constructor",
+    1
+   ],
+   [
+    "GainNode",
+    "gain,constructor",
+    1
+   ],
+   [
+    "BiquadFilterNode",
+    "type,frequency,detune,Q,gain,getFrequencyResponse,constructor",
+    1
+   ],
+   [
+    "PeriodicWave",
+    "constructor",
+    1
+   ],
+   [
+    "AudioBufferSourceNode",
+    "buffer,playbackRate,detune,loop,loopStart,loopEnd,start,constructor",
+    1
+   ]
+  ],
+  "base": "destination,sampleRate,currentTime,listener,state,onstatechange,createAnalyser,createBiquadFilter,createBuffer,createBufferSource,createChannelMerger,createChannelSplitter,createConstantSource,createDelay,createDynamicsCompressor,createGain,createIIRFilter,createOscillator,createPeriodicWave,createScriptProcessor,createStereoPanner,createWaveShaper,decodeAudioData,constructor",
+  "tags": [
+   "[object AudioContext]",
+   "[object OscillatorNode]",
+   "[object DynamicsCompressorNode]",
+   "[object AudioDestinationNode]",
+   "[object AudioParam]",
+   "[object AudioListener]"
+  ],
+  "errors": [
+   "TypeError",
+   "TypeError",
+   "TypeError"
+  ],
+  "closed": "closed"
+ },
+ "audio_fingerprint": {
+  "sum": 124.043,
+  "sampled": [
+   0,
+   0.23653487861156464,
+   0.244709312915802,
+   0.2523788809776306,
+   0.2603645920753479,
+   0.2679221034049988,
+   0.27509891986846924,
+   0.2825899124145508,
+   0.2896851897239685,
+   0.2893829345703125,
+   0.296600878238678,
+   0.2925978899002075,
+   0.2899581789970398,
+   0.297149121761322,
+   0.29192137718200684,
+   0.2908688485622406,
+   0.29755648970603943,
+   0.29069897532463074,
+   0.29128843545913696,
+   0.29746511578559875,
+   0.2895147204399109,
+   0.2922539710998535,
+   0.29719722270965576,
+   0.28823187947273254,
+   0.2926177382469177,
+   0.2965853810310364,
+   0.2879393696784973,
+   0.2936323583126068,
+   0.29616981744766235,
+   0.2876981496810913,
+   0.2939201295375824,
+   0.29552537202835083,
+   0.28777867555618286,
+   0.2945259213447571,
+   0.2949177622795105,
+   0.28799813985824585,
+   0.29523351788520813,
+   0.29395216703414917,
+   0.2884863615036011,
+   0.2957206964492798,
+   0.2932397127151489,
+   0.2893269658088684,
+   0.2965368330478668,
+   0.29245033860206604,
+   0.28979042172431946,
+   0.29697680473327637,
+   0.2917703092098236,
+   0.29070553183555603,
+   0.2973919212818146,
+   0.29055318236351013,
+   0.29112374782562256,
+   0.2972998023033142,
+   0.2893720269203186,
+   0.2920922338962555,
+   0.29703646898269653,
+   0.2880800664424896,
+   0.2924477756023407,
+   0.2964257597923279,
+   0.28779008984565735,
+   0.293472021818161,
+   0.2960117757320404,
+   0.287545770406723,
+   0.29375317692756653,
+   0.29537180066108704,
+   0.2876215875148773,
+   0.29435479640960693,
+   0.2947657108306885,
+   0.28783610463142395,
+   0.2950689196586609,
+   0.29379451274871826,
+   0.28832104802131653,
+   0.2955493628978729,
+   0.2930887043476105,
+   0.28916406631469727,
+   0.2963710129261017,
+   0.29229995608329773,
+   0.28962284326553345,
+   0.2968081533908844,
+   0.2916189432144165,
+   0.2905435562133789,
+   0.29722660779953003,
+   0.2904094159603119,
+   0.29095667600631714,
+   0.2971338629722595,
+   0.28922754526138306,
+   0.2919287085533142,
+   0.2968776822090149,
+   0.2879282534122467,
+   0.2922815680503845,
+   0.29626694321632385,
+   0.28764259815216064,
+   0.29331111907958984,
+   0.29585331678390503,
+   0.2873922288417816,
+   0.2935846149921417,
+   0.29527899622917175,
+   0.28746530413627625,
+   0.2941861152648926,
+   0.2946440577507019,
+   0.2876759469509125
+  ],
+  "reduction": -19.004104614257812,
+  "props": [
+   44100,
+   1,
+   44100,
+   1
+  ]
+ },
+ "audio_oscillators": {
+  "sine": [
+   0.18696138262748718,
+   0.8119378685951233,
+   -0.8716678023338318,
+   -0.07686138898134232,
+   0.9364847540855408,
+   -0.7128756046295166,
+   -0.33531704545021057,
+   0.9956485033035278,
+   -0.5043116807937622,
+   -0.5703626275062561,
+   0.9852984547615051,
+   -0.26053881645202637,
+   -0.7655866146087646,
+   0.9061564803123474,
+   0.0014255649875849485,
+   -0.9073588252067566,
+   0.7637491226196289,
+   0.2632896602153778,
+   -0.9857814311981201,
+   0.5680190324783325,
+   0.5067719221115112,
+   -0.9953787326812744,
+   0.33263063430786133,
+   0.7148715853691101,
+   -0.9354808926582336,
+   0.0740179568529129,
+   0.8730617761611938,
+   -0.8102703094482422,
+   -0.18976177275180817,
+   0.9702958464622498,
+   -0.6284882426261902,
+   -0.4402921497821808
+  ],
+  "square": [
+   0.8143287301063538,
+   0.8322895169258118,
+   -0.8502457737922668,
+   -0.9971780180931091,
+   0.8504639267921448,
+   -0.8298636078834534,
+   -0.8296388387680054,
+   0.859742283821106,
+   -0.8647782802581787,
+   -0.8327270150184631,
+   0.8367611765861511,
+   -0.8747211694717407,
+   -0.865211009979248,
+   0.8452403545379639,
+   0.030423521995544434,
+   -0.8467258810997009,
+   0.8656563758850098,
+   0.8698973059654236,
+   -0.836089551448822,
+   0.8346564769744873,
+   0.8666451573371887,
+   -0.8588724732398987,
+   0.8261370062828064,
+   0.8306606411933899,
+   -0.8518776893615723,
+   0.994026780128479,
+   0.8486469984054565,
+   -0.8321356177330017,
+   -0.8216243386268616,
+   0.8604297637939453,
+   -0.8584749698638916,
+   -0.8263958692550659
+  ],
+  "sawtooth": [
+   0.3348243236541748,
+   0.6812393665313721,
+   -0.8167303800582886,
+   -0.49292030930519104,
+   -0.16403505206108093,
+   0.1640367954969406,
+   0.49292129278182983,
+   0.8167253732681274,
+   -0.6812351942062378,
+   -0.33482232689857483,
+   -0.03713497519493103,
+   0.24036654829978943,
+   0.48518481850624084,
+   -0.06498390436172485,
+   -0.48342472314834595,
+   -0.23498256504535675,
+   0.048459164798259735,
+   0.35505664348602295,
+   0.7222641706466675,
+   -0.8470323085784912,
+   -0.4840039610862732,
+   -0.14963319897651672,
+   0.17741328477859497,
+   0.4983963370323181,
+   0.7703970670700073,
+   -0.6410784125328064,
+   -0.3160892724990845,
+   -0.026823364198207855,
+   0.24629779160022736,
+   0.4912205934524536,
+   -0.19330677390098572,
+   -0.4849054515361786
+  ],
+  "triangle": [
+   0.3350735306739807,
+   -0.0788457915186882,
+   -0.49807825684547424,
+   -0.9246652126312256,
+   -0.6691807508468628,
+   -0.25309398770332336,
+   0.16603019833564758,
+   0.5835884809494019,
+   0.9704899787902832,
+   0.5855178833007812,
+   0.1680079698562622,
+   -0.25123053789138794,
+   -0.6673507690429688,
+   -0.9265011548995972,
+   -0.5000055432319641,
+   -0.08076684176921844,
+   0.33320656418800354,
+   0.7472967505455017,
+   0.8327012062072754,
+   0.4145020842552185,
+   -0.0014289111131802201,
+   -0.4175367057323456,
+   -0.8361201882362366,
+   -0.7444095015525818,
+   -0.3302711844444275,
+   0.08379558473825455,
+   0.5030375719070435,
+   0.9293369054794312,
+   0.6644640564918518,
+   0.2482953667640686,
+   -0.17111524939537048,
+   -0.5885512828826904
+  ],
+  "custom": [
+   "custom",
+   0.642349898815155,
+   0.20112921297550201,
+   -0.7959040403366089,
+   0.6823398470878601,
+   -0.06511561572551727,
+   -0.47568315267562866,
+   0.5573909878730774,
+   -0.2613433301448822,
+   -0.08755344152450562,
+   0.28302356600761414,
+   -0.3333333432674408,
+   0.28302302956581116,
+   -0.08755283057689667,
+   -0.26134341955184937,
+   0.5573900938034058,
+   null
+  ]
+ },
+ "audio_params_and_nodes": {
+  "automation": [
+   0.20000000298023224,
+   0.30000001192092896,
+   0.4000001549720764,
+   0.5000001192092896,
+   0.6000000238418579,
+   0.7000002264976501,
+   0.8000001907348633,
+   0.9000000953674316,
+   1,
+   1,
+   1,
+   1,
+   0.5,
+   0.3066187798976898,
+   0.1880301684141159,
+   0.11530715227127075,
+   0.0707106813788414,
+   0.043362442404031754,
+   0.026591477915644646,
+   0.016306893900036812,
+   0.009999999776482582,
+   0.009999999776482582,
+   0.009999999776482582,
+   0.009999999776482582,
+   0.009999990463256836,
+   0.1847473382949829,
+   0.3208407759666443,
+   0.4268304109573364,
+   0.5093752145767212,
+   0.573661208152771,
+   0.6237271428108215,
+   0.6627185344696045,
+   0.6930851340293884,
+   0.7167347073554993,
+   0.7351529002189636,
+   0.7494970560073853,
+   0.7606683373451233,
+   0.7693684697151184,
+   0.7761440873146057,
+   0.7814210057258606
+  ],
+  "curve": [
+   0,
+   1,
+   1,
+   1,
+   0,
+   0.375,
+   0.75,
+   0.9375,
+   0.75,
+   0.5625,
+   0.125,
+   -0.4375,
+   -1,
+   -1,
+   -1,
+   -1,
+   0,
+   0,
+   0,
+   0
+  ],
+  "pan": [
+   [
+    0,
+    2.1624927626362478e-7,
+    3.4599884202179965e-7,
+    6.919976840435993e-7,
+    6.919976840435993e-7,
+    6.919976840435993e-7,
+    0.0000010379964123785612,
+    0.0000013839953680871986,
+    0.0000017299942101089982,
+    0.0000020759928247571224
+   ],
+   [
+    0,
+    8.957338337722831e-8,
+    1.433174077192234e-7,
+    2.866348154384468e-7,
+    2.866348154384468e-7,
+    2.866348154384468e-7,
+    4.2995222315767023e-7,
+    5.732696308768936e-7,
+    7.165870670178265e-7,
+    8.599044463153405e-7
+   ]
+  ],
+  "buffer": [
+   0,
+   0,
+   -0.5999999046325684,
+   0.4750000834465027,
+   0.2999997138977051,
+   -0.9500004053115845,
+   0.350000262260437,
+   0.5499993562698364,
+   -0.7000007629394531,
+   0.22500044107437134,
+   0.7999989986419678,
+   -0.4500011205673218,
+   0.10000061988830566,
+   0.9500013589859009,
+   -0.20000147819519043,
+   -0.09999680519104004,
+   0.7000017166137695,
+   0.04999816417694092,
+   -0.5999960899353027,
+   0.4750010371208191,
+   0.29999780654907227,
+   -0.9500023126602173,
+   0.3500012159347534,
+   0.5499974489212036,
+   -0.7000026702880859,
+   0.22500139474868774,
+   0.799997091293335,
+   -0.4500030279159546,
+   0.10000157356262207,
+   0.9500032663345337
+  ],
+  "delayBiquad": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0.6864244341850281,
+   0.7775223851203918,
+   -0.6864280700683594,
+   -0.7775214314460754,
+   0.6864284873008728,
+   0.7775214314460754,
+   -0.6864285469055176,
+   -0.777521550655365,
+   0.6864285469055176,
+   0.777519941329956,
+   -0.686428427696228,
+   -0.7775198817253113,
+   0.6864283680915833,
+   0.7775205969810486,
+   -0.6864288449287415
+  ],
+  "highpass": [
+   0,
+   -0.004428597167134285,
+   0.01364860124886036,
+   0.0005468807648867369,
+   -0.006910259835422039,
+   -0.0021164000499993563,
+   -0.010240294970571995,
+   0.35363122820854187
+  ],
+  "bandpass": [
+   0,
+   0.010192771442234516,
+   0.02703716978430748,
+   0.05009860545396805,
+   0.030072927474975586,
+   0.04003298282623291,
+   -0.501326322555542,
+   0.13834305107593536
+  ],
+  "notch": [
+   0,
+   0.15711845457553864,
+   0.2998417019844055,
+   0.4291876256465912,
+   0.6056101322174072,
+   0.7676445841789246,
+   -0.3423171043395996,
+   -0.7570289969444275
+  ],
+  "allpass": [
+   0,
+   0.146925687789917,
+   0.2728045582771301,
+   0.37908902764320374,
+   0.5755372047424316,
+   0.7276116609573364,
+   0.1590092033147812,
+   -0.8953720331192017
+  ],
+  "peaking": [
+   0,
+   0.14535096287727356,
+   0.34265896677970886,
+   0.5351202487945557,
+   0.6425142288208008,
+   0.8355302214622498,
+   -1.218557596206665,
+   -0.4964708089828491
+  ],
+  "lowshelf": [
+   0,
+   0.2593981623649597,
+   0.5768575668334961,
+   0.8878282308578491,
+   1.2048430442810059,
+   1.5411123037338257,
+   -1.0859400033950806,
+   -1.3711034059524536
+  ],
+  "highshelf": [
+   0,
+   0.20611587166786194,
+   0.36788004636764526,
+   0.5137805938720703,
+   0.6635284423828125,
+   0.8377229571342468,
+   -1.0355989933013916,
+   -0.5265964269638062
+  ],
+  "shaperSwap": [
+   [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   [
+    0,
+    -0.047074705362319946,
+    -0.09385919570922852,
+    0.000001817941665649414,
+    -0.0470728874206543,
+    -0.09385738521814346
+   ]
+  ],
+  "iir": {
+   "s": [
+    0,
+    -0.08494286984205246,
+    0.3300376236438751,
+    -0.5248871445655823,
+    0.6398273706436157,
+    -0.6573596596717834
+   ],
+   "mag": [
+    0.6660885214805603,
+    0.5525758862495422,
+    0.037669528275728226
+   ],
+   "ph": [
+    -0.10487490147352219,
+    -1.1568427085876465,
+    -2.7692816257476807
+   ]
+  },
+  "analyser": {
+   "peak": 32,
+   "peakDb": -13.55561351776123,
+   "byte": 255,
+   "td": [
+    0,
+    -0.7071067690849304,
+    -1,
+    -0.7071067690849304,
+    0,
+    0.7071067690849304
+   ],
+   "bt": [
+    128,
+    37,
+    0,
+    37,
+    128,
+    218
+   ]
+  }
+ },
+ "audio_errors": {
+  "badChannels": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to construct 'OfflineAudioContext': The number of channels provided (0) is outside the range [1, 32]."
+  ],
+  "badRate": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to construct 'OfflineAudioContext': The sampleRate provided (100) is outside the range [3000, 768000]."
+  ],
+  "badLength": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to construct 'OfflineAudioContext': The number of frames provided (0) is less than the minimum bound (1)."
+  ],
+  "startTwice": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to execute 'start' on 'AudioScheduledSourceNode': cannot call start more than once."
+  ],
+  "stopBeforeStart": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to execute 'stop' on 'AudioScheduledSourceNode': cannot call stop without calling start first."
+  ],
+  "negStart": [
+   "RangeError",
+   "RangeError",
+   "Failed to execute 'start' on 'AudioScheduledSourceNode': The start time provided (-1) is less than the minimum bound (0)."
+  ],
+  "connectSelfParam": [
+   "ok",
+   "ok"
+  ],
+  "connectOtherCtx": [
+   "DOMException",
+   "InvalidAccessError",
+   "Failed to execute 'connect' on 'AudioNode': cannot connect to an AudioNode belonging to a different audio context."
+  ],
+  "disconnectNone": [
+   "DOMException",
+   "InvalidAccessError",
+   "Failed to execute 'disconnect' on 'AudioNode': the given destination is not connected."
+  ],
+  "badOutput": [
+   "DOMException",
+   "IndexSizeError",
+   "Failed to execute 'connect' on 'AudioNode': output index (3) exceeds number of outputs (1)."
+  ],
+  "expZero": [
+   "RangeError",
+   "RangeError",
+   "Failed to execute 'exponentialRampToValueAtTime' on 'AudioParam': The float target value provided (0) should not be in the range (-1.40130e-45, 1.40130e-45)."
+  ],
+  "negTime": [
+   "RangeError",
+   "RangeError",
+   "Failed to execute 'setValueAtTime' on 'AudioParam': Time must be a finite non-negative number: -1"
+  ],
+  "curveShort": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to execute 'setValueCurveAtTime' on 'AudioParam': The curve length provided (1) is less than the minimum bound (2)."
+  ],
+  "customType": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to set the 'type' property on 'OscillatorNode': 'type' cannot be set directly to 'custom'.  Use setPeriodicWave() to create a custom Oscillator type."
+  ],
+  "badFft": [
+   "DOMException",
+   "IndexSizeError",
+   "Failed to set the 'fftSize' property on 'AnalyserNode': The value provided (100) is not a power of two."
+  ],
+  "analyserDb": [
+   "DOMException",
+   "IndexSizeError",
+   "Failed to set the 'minDecibels' property on 'AnalyserNode': The minDecibels provided (0) is greater than the maximum bound (-30)."
+  ],
+  "compMode": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to set the 'channelCountMode' property on 'AudioNode': The provided value 'max' is not an allowed value for ChannelCountMode"
+  ],
+  "compChannels": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to set the 'channelCount' property on 'AudioNode': The channelCount provided (3) is outside the range [1, 2]."
+  ],
+  "kRate": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to set the 'automationRate' property on 'AudioParam': DynamicsCompressor.threshold.automationRate is fixed and cannot be changed to \"a-rate\""
+  ],
+  "delayMax": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to execute 'createDelay' on 'BaseAudioContext': The max delay time provided (0) is outside the range (0, 180)."
+  ],
+  "bufferArgs": [
+   "DOMException",
+   "NotSupportedError",
+   "Failed to execute 'createBuffer' on 'BaseAudioContext': The number of frames provided (0) is less than or equal to the minimum bound (0)."
+  ],
+  "copyIdx": [
+   "DOMException",
+   "IndexSizeError",
+   "Failed to execute 'getChannelData' on 'AudioBuffer': channel index (2) exceeds number of channels (1)"
+  ],
+  "destChannels": [
+   "ok",
+   1
+  ],
+  "twiceRender": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to execute 'startRendering' on 'OfflineAudioContext': cannot call startRendering on an OfflineAudioContext in a stopped state."
+  ],
+  "decodeBad": [
+   "DOMException",
+   "EncodingError",
+   "Unable to decode audio data"
+  ],
+  "suspendLate": [
+   "DOMException",
+   "InvalidStateError",
+   "Failed to execute 'suspend' on 'OfflineAudioContext': the rendering is already finished"
+  ]
+ },
+ "audio_context_lifecycle": {
+  "s0": "running",
+  "afterSuspend": "suspended",
+  "afterClose": "closed",
+  "events": [
+   "closed",
+   "closed",
+   "closed"
+  ],
+  "resumeClosed": "InvalidStateError",
+  "offState": "suspended",
+  "rendering": "running",
+  "complete": [
+   "complete",
+   256,
+   2,
+   "OfflineAudioCompletionEvent"
+  ],
+  "same": true,
+  "finalState": "closed",
+  "ended": "ended"
+ }
+}

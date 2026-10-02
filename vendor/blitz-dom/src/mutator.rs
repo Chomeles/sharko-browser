@@ -1215,11 +1215,17 @@ impl<'doc> DocumentMutator<'doc> {
                 .insert(handler.request_id());
         }
 
-        self.doc.net_provider.fetch(
-            self.doc.id(),
-            self.doc.build_request(url, "style"),
-            Box::new(handler),
+        // PATCH: HTML "obtain the resource" for `<link rel=stylesheet>`: the request mode is
+        // `cors` when the element has a `crossorigin` attribute, else `no-cors`. The network
+        // stack sends `Origin` and performs the CORS check for cors-mode requests; a sheet
+        // that loaded through a cors request is origin-clean (CSSOM: its rules are readable).
+        let mut request = self.doc.build_request(url, "style");
+        let mode = if node.attr(local_name!("crossorigin")).is_some() { "cors" } else { "no-cors" };
+        request.headers.insert(
+            blitz_traits::net::http::HeaderName::from_static("sec-fetch-mode"),
+            blitz_traits::net::http::HeaderValue::from_static(mode),
         );
+        self.doc.net_provider.fetch(self.doc.id(), request, Box::new(handler));
     }
 
     fn unload_stylesheet(&mut self, node_id: NodeId) {
@@ -1662,6 +1668,38 @@ mod test {
             mutator.remove_node(first_id);
         }
         assert_eq!(document.get_element_by_id("dup"), Some(second_id));
+    }
+
+    #[test]
+    fn fragment_target_skips_shadow_tree_content() {
+        let mut document = BaseDocument::new(DocumentConfig::default());
+        let root_id = document.root_node().id;
+        let (host, inner, outer, slot, slotted) = {
+            let mut m = document.mutate();
+            let host = m.create_element(qual_name!("div"), vec![]);
+            let inner = m.create_element(qual_name!("div"), vec![]);
+            let outer = m.create_element(qual_name!("div"), vec![]);
+            let slot = m.create_element(qual_name!("slot"), vec![]);
+            let slotted = m.create_element(qual_name!("div"), vec![]);
+            m.append_children(root_id, &[host, outer]);
+            m.append_children(host, &[inner, slot]);
+            m.append_children(slot, &[slotted]);
+            for n in [inner, outer, slotted] {
+                m.set_attribute(n, qual_name!("id"), "t");
+            }
+            (host, inner, outer, slot, slotted)
+        };
+        let _ = slot;
+        document.set_shadow_host(host, true);
+        // Shadow content loses against a later document-tree element, slotted light content wins
+        // by tree order.
+        assert_eq!(document.get_fragment_target("t"), Some(slotted));
+        {
+            let mut m = document.mutate();
+            m.remove_node(slotted);
+        }
+        assert_eq!(document.get_fragment_target("t"), Some(outer));
+        let _ = inner;
     }
 
     #[derive(Default)]
