@@ -1,0 +1,614 @@
+{
+ "tri_flat": {
+  "px": [
+   [
+    255,
+    128,
+    64,
+    255
+   ],
+   [
+    255,
+    128,
+    64,
+    255
+   ],
+   [
+    0,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    0,
+    0,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "tri_varying": {
+  "px": [
+   [
+    179,
+    36,
+    40,
+    255
+   ],
+   [
+    36,
+    179,
+    40,
+    255
+   ],
+   [
+    20,
+    36,
+    199,
+    255
+   ],
+   [
+    68,
+    84,
+    104,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "depth_blend": {
+  "first": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "rejected": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "blended": [
+   128,
+   255,
+   128,
+   191
+  ],
+  "err": 0
+ },
+ "cull_scissor": {
+  "back": [
+   255,
+   255,
+   255,
+   255
+  ],
+  "front": [
+   255,
+   255,
+   255,
+   255
+  ],
+  "inside": [
+   255,
+   255,
+   255,
+   255
+  ],
+  "outside": [
+   0,
+   0,
+   0,
+   255
+  ],
+  "edge": [
+   [
+    0,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    255,
+    255,
+    255
+   ],
+   [
+    255,
+    255,
+    255,
+    255
+   ],
+   [
+    0,
+    0,
+    0,
+    255
+   ]
+  ]
+ },
+ "texture_filters": {
+  "nearest_clamp": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ]
+  ],
+  "linear_clamp": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    191,
+    64,
+    0,
+    255
+   ],
+   [
+    64,
+    191,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ]
+  ],
+  "nearest_repeat": [
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ]
+  ],
+  "nearest_mirror": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "mipmaps_cube": {
+  "lvl0": [
+   [
+    0,
+    0,
+    255,
+    255
+   ],
+   [
+    255,
+    0,
+    0,
+    255
+   ]
+  ],
+  "cube": [
+   [
+    255,
+    0,
+    0,
+    255
+   ],
+   [
+    0,
+    255,
+    0,
+    255
+   ],
+   [
+    0,
+    0,
+    255,
+    255
+   ],
+   [
+    255,
+    255,
+    0,
+    255
+   ],
+   [
+    255,
+    0,
+    255,
+    255
+   ],
+   [
+    0,
+    255,
+    255,
+    255
+   ]
+  ],
+  "err": 0
+ },
+ "errors": [
+  1280,
+  1280,
+  1282,
+  1280,
+  1281,
+  1282,
+  1282,
+  1282,
+  1280,
+  1280,
+  0,
+  0,
+  1286,
+  1282,
+  1281,
+  1282,
+  0
+ ],
+ "context_params": {
+  "VERSION": "WebGL 1.0 (OpenGL ES 2.0 Chromium)",
+  "SHADING_LANGUAGE_VERSION": "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)",
+  "VENDOR": "WebKit",
+  "RENDERER": "WebKit WebGL",
+  "MAX_VERTEX_ATTRIBS": 16,
+  "MAX_TEXTURE_IMAGE_UNITS": 32,
+  "DEPTH_BITS": 24,
+  "STENCIL_BITS": 0,
+  "RED_BITS": 8,
+  "ALPHA_BITS": 8,
+  "VIEWPORT": [
+   0,
+   0,
+   4,
+   4
+  ],
+  "SCISSOR_BOX": [
+   0,
+   0,
+   4,
+   4
+  ],
+  "COLOR_CLEAR_VALUE": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "DEPTH_RANGE": [
+   0,
+   1
+  ],
+  "ALIASED_LINE_WIDTH_RANGE": [
+   1,
+   1
+  ],
+  "BLEND_EQUATION_RGB": 32774,
+  "FRONT_FACE": 2305,
+  "CULL_FACE_MODE": 1029,
+  "UNPACK_ALIGNMENT": 4,
+  "COLOR_WRITEMASK": [
+   true,
+   true,
+   true,
+   true
+  ],
+  "IMPLEMENTATION_COLOR_READ_FORMAT": 6408,
+  "IMPLEMENTATION_COLOR_READ_TYPE": 5121,
+  "ext": true,
+  "attrs": [
+   "alpha",
+   "antialias",
+   "depth",
+   "desynchronized",
+   "failIfMajorPerformanceCaveat",
+   "powerPreference",
+   "premultipliedAlpha",
+   "preserveDrawingBuffer",
+   "stencil",
+   "xrCompatible"
+  ],
+  "lostId": "[object WebGLRenderingContext]",
+  "highp": [
+   127,
+   127,
+   23
+  ]
+ },
+ "webgl2_basics": {
+  "status": true,
+  "o0": [
+   0,
+   0,
+   255,
+   255
+  ],
+  "o1": [
+   143,
+   143,
+   0,
+   255
+  ],
+  "ints": [
+   178,
+   230,
+   51,
+   255
+  ],
+  "err": 0
+ },
+ "instanced_elements": {
+  "row": [
+   0,
+   255,
+   255,
+   0,
+   0,
+   255,
+   255,
+   0
+  ],
+  "err": 0
+ },
+ "stencil_masks": {
+  "eq": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "ne": [
+   0,
+   0,
+   0,
+   255
+  ],
+  "err": 0
+ },
+ "float_fbo": {
+  "f": [
+   1.5,
+   -2,
+   1000.25,
+   0.125
+  ],
+  "status": true,
+  "err": 0
+ },
+ "glsl_math": {
+  "px": [
+   175,
+   159,
+   178,
+   255
+  ],
+  "err": 0
+ },
+ "compile_errors": {
+  "syntax": false,
+  "undeclared": false,
+  "noPrecision": false,
+  "ok": true,
+  "mismatch": false,
+  "link": false
+ },
+ "uniform_reflection": {
+  "attrs": [
+   [
+    "a",
+    1,
+    35666
+   ],
+   [
+    "b",
+    1,
+    35664
+   ]
+  ],
+  "uniforms": [
+   [
+    "m",
+    1,
+    35676
+   ],
+   [
+    "arr[0]",
+    2,
+    35665
+   ],
+   [
+    "l.x",
+    1,
+    5126
+   ],
+   [
+    "l.y",
+    1,
+    35664
+   ],
+   [
+    "s",
+    1,
+    35678
+   ]
+  ],
+  "sorted": [
+   "arr[0]",
+   "l.x",
+   "l.y",
+   "m",
+   "s"
+  ],
+  "locs": [
+   true,
+   true,
+   true,
+   true
+  ],
+  "attrLocs": [
+   true,
+   -1
+  ]
+ }
+}

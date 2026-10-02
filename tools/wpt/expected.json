@@ -68911,6 +68911,34 @@
    "Sorts events for the same transition": "FAIL"
   }
  },
+ "/webgl/compressed-tex-sub-image-2d-without-base-image.html": {
+  "status": "OK",
+  "subtests": {
+   "compressedTexSubImage2D without base image generates INVALID_OPERATION": "FAIL"
+  }
+ },
+ "/webgl/drawingBufferToneMapping.html": {
+  "status": "OK",
+  "subtests": {
+   "webgl: interface presence": "FAIL",
+   "webgl: default value is standard": "FAIL",
+   "webgl: setting and getting modes": "FAIL",
+   "webgl: invalid mode throws TypeError": "FAIL",
+   "webgl2: interface presence": "FAIL",
+   "webgl2: default value is standard": "FAIL",
+   "webgl2: setting and getting modes": "FAIL",
+   "webgl2: invalid mode throws TypeError": "FAIL"
+  }
+ },
+ "/webgl/idlharness.any.html": {
+  "status": "OK",
+  "subtests": {
+   "WebGLRenderingContext includes WebGLRenderingContextOverloads: member names are unique": "FAIL",
+   "WebGL2RenderingContext includes WebGL2RenderingContextBase: member names are unique": "FAIL",
+   "WebGL2RenderingContext includes WebGL2RenderingContextOverloads: member names are unique": "FAIL",
+   "WebGLObject interface: attribute label": "FAIL"
+  }
+ },
  "/webmessaging/Channel_postMessage_Blob.any.html": {
   "status": "OK",
   "subtests": {

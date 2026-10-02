@@ -375,3 +375,5 @@ keyed by `globalThis` survives the load. Page-specific values are read lazily. `
 * **Selector matching** uses live state: `:checked` (options included), `:indeterminate`, `:disabled`, `:focus`, and so on.
 * **`N.evalScript`:** Rust logs the exception and rethrows. JS dispatches the `ErrorEvent` without logging.
 * **Same-document navigations started from JS** (`location.hash`, `location.href = '#x'`): JS does them itself with `N.historyPush` plus `N.scrollIntoView`/`N.scrollTo`. `N.navigate` is only used for cross-document navigations.
+
+- `N.gpuAdapterInfo()` (optional): `{ name, vendorName, vendorId, deviceId }` of the GPU adapter the host would render with, or absent/`null`. WebGL reports the ANGLE/D3D11 identity when present and the ANGLE/SwiftShader identity otherwise (the pipeline rasterises in software either way).
