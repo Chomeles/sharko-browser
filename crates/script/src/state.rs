@@ -71,10 +71,13 @@ pub(crate) enum Hook {
     /// `windowPostMessage(message, targetOrigin, transfer, source)`: `window.postMessage`
     /// called with `source` (the caller's window, or `null` for this one).
     PostMessage,
+    /// `releaseNode(o)`: this realm lets go of the node wrapper `o` (it is being adopted by
+    /// another realm, which rebinds the same object); returns 1 when released.
+    ReleaseNode,
 }
 
 impl Hook {
-    pub(crate) const ALL: [Hook; 21] = [
+    pub(crate) const ALL: [Hook; 22] = [
         Hook::DocumentParsed,
         Hook::Event,
         Hook::Timer,
@@ -96,6 +99,7 @@ impl Hook {
         Hook::WrapNode,
         Hook::NodeType,
         Hook::PostMessage,
+        Hook::ReleaseNode,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -121,6 +125,7 @@ impl Hook {
             Hook::WrapNode => "wrapNode",
             Hook::NodeType => "nodeTypeOf",
             Hook::PostMessage => "windowPostMessage",
+            Hook::ReleaseNode => "releaseNode",
         }
     }
 }
@@ -128,7 +133,7 @@ impl Hook {
 #[derive(Default)]
 pub(crate) struct Hooks {
     pub(crate) obj: Option<v8::Global<v8::Object>>,
-    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 21],
+    pub(crate) funcs: [Option<v8::Global<v8::Function>>; 22],
 }
 
 impl Hooks {

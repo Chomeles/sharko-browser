@@ -705,6 +705,15 @@ pub(crate) fn n_canvas_put_image_data(cx: &mut Cx) -> NResult {
     Ok(())
 }
 
+/// `N.webglEnabled()` -> whether `getContext('webgl'|'webgl2')` hands out contexts. The software
+/// pipeline costs ~0.6 s per full-canvas draw on the main thread, which hangs real pages that only
+/// use WebGL for rendering; it stays off (contexts are `null`, as before) until it is fast enough.
+/// `SHARKO_WEBGL=1` switches it on for tests and WPT.
+pub(crate) fn n_webgl_enabled(cx: &mut Cx) -> NResult {
+    cx.ret_bool(std::env::var_os("SHARKO_WEBGL").is_some_and(|v| !v.is_empty() && v != "0"));
+    Ok(())
+}
+
 /// `N.canvasToDataURL(id, width, height)` -> a PNG `data:` URL of the canvas (a blank one
 /// of `width`×`height` without a surface).
 pub(crate) fn n_canvas_to_data_url(cx: &mut Cx) -> NResult {

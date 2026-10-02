@@ -14,10 +14,9 @@
 
 ## Publishing a release
 
-1. Bump `version` in the root `Cargo.toml` (`[workspace.package]`), commit.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-3. The `Release` workflow builds the Windows package (Linux/macOS are not published), writes `manifest.json` with
-   SHA-256 checksums, signs it and publishes everything as a GitHub release.
+1. Bump `version` in the root `Cargo.toml` (`[workspace.package]`) and in `Cargo.lock` (`cargo update -w`), merge it to `master`.
+2. That is all: the `Release` workflow sees the new version on `master`, derives the tag `v<version>` itself, builds the Windows package (Linux/macOS are not published), writes `manifest.json` with SHA-256 checksums, signs it and publishes everything as a GitHub release. A version with a `-` suffix (`0.3.0-beta.1`) is published as a pre-release.
+3. Pushing a tag by hand (`git tag v0.2.0 && git push origin v0.2.0`) still works and does the same; the workflow skips a version whose tag already exists.
 
 ## How clients update
 

@@ -57,6 +57,24 @@ and `BROWSER_DEBUG_LOAD=1` show where a slow load goes.
 Chromium results are the reference and are cached; `--refresh` re-runs them. Sharko is
 re-run every time, so after a fix `node tools/sitediff/run.js` shows what changed.
 
+## Gate, causes, trend
+
+```
+node tools/sitediff/gate.js   [summary.json] [--baseline=previous.json]   # pass/fail, per-site trend
+node tools/sitediff/causes.js [summary.json] [--top=25]                   # the work list by cause
+```
+
+A site that answers Sharko with a challenge or block page ("Nur einen Moment…", "verify
+you are human", "unusual traffic") gets the `bot-wall` tag: it measures the server's bot
+detection, not the engine. `gate.js` counts walls apart and takes the median and the 60+
+count over the rendering sites only; with `--baseline` it lists the sites that moved by
+15 or more and the walls that appeared or passed.
+
+`causes.js` turns the same summary into the order of work: Sharko-only error signatures
+by the number of sites they hit, issue tags by total weight, stylesheets Sharko lost
+(readable sheets and rules against Chromium's), and the slowest load events relative to
+Chromium. The Windows smoke report job prints both after every sweep.
+
 ## Reading a diff
 
 - `js-errors` with `X is not a function` / `X is not defined` — a missing Web API; check

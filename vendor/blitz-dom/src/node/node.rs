@@ -10,7 +10,7 @@ use euclid::{Point2D, Rect, Size2D};
 use html_escape::encode_quoted_attribute_to_string;
 use keyboard_types::Modifiers;
 use kurbo::{Affine, Rect as KurboRect};
-use markup5ever::{LocalName, local_name};
+use markup5ever::{LocalName, local_name, ns};
 use parley::{BreakReason, Cluster, ClusterSide};
 use selectors::matching::ElementSelectorFlags;
 use std::cell::{Cell, RefCell};
@@ -221,7 +221,36 @@ universal_accessors! {
     selector_flags / selector_flags_mut: Cell<ElementSelectorFlags>,
 }
 
+/// HTML "valid custom element name", simplified: lowercase ASCII start, a hyphen, and not one
+/// of the reserved hyphenated SVG/MathML names.
+fn is_custom_element_name(name: &str) -> bool {
+    const RESERVED: [&str; 8] = [
+        "annotation-xml",
+        "color-profile",
+        "font-face",
+        "font-face-src",
+        "font-face-uri",
+        "font-face-format",
+        "font-face-name",
+        "missing-glyph",
+    ];
+    name.starts_with(|c: char| c.is_ascii_lowercase())
+        && name.contains('-')
+        && !RESERVED.contains(&name)
+}
+
 impl Node {
+    /// PATCH: CSS/Selectors `:defined` (HTML "custom element state"): every element is
+    /// defined except an HTML element with a custom element name or an `is` value that the
+    /// JS layer has not upgraded yet (`IS_CUSTOM_DEFINED`).
+    pub fn matches_defined(&self) -> bool {
+        let Some(el) = self.element_data() else { return true };
+        if self.flags.contains(NodeFlags::IS_CUSTOM_DEFINED) || el.name.ns != ns!(html) {
+            return true;
+        }
+        !(is_custom_element_name(&el.name.local)
+            || el.attrs().iter().any(|a| &*a.name.local == "is"))
+    }
     /// Style data from stylo, if this node kind carries it (element or document
     /// nodes). Returns `None` for text/comment nodes.
     #[inline]

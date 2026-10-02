@@ -2870,16 +2870,48 @@ impl BaseDocument {
     /// Per the HTML spec, this is the element whose `id` matches the fragment, falling
     /// back to the first `<a>` element whose `name` attribute matches.
     pub fn get_fragment_target(&self, fragment: &str) -> Option<NodeId> {
-        if let Some(node_id) = self.get_element_by_id(fragment) {
-            return Some(node_id);
+        // PATCH: elements inside an (emulated) shadow tree are never the indicated part
+        // (HTML "find a potential indicated element" only looks at the document tree).
+        if let Some(ids) = self.nodes_to_id.get(fragment) {
+            let doc_tree: Vec<NodeId> = ids
+                .iter()
+                .copied()
+                .filter(|&id| !self.is_in_shadow_tree(id))
+                .collect();
+            if let Some(node_id) = self.first_in_tree_order(&doc_tree) {
+                return Some(node_id);
+            }
         }
 
         // Fall back to a named anchor: `<a name="...">`
         self.nodes.iter().find_map(|(id, node)| {
             let el = node.element_data()?;
-            (el.name.local == local_name!("a") && el.attr(local_name!("name")) == Some(fragment))
-                .then_some(id)
+            (el.name.local == local_name!("a")
+                && el.attr(local_name!("name")) == Some(fragment)
+                && !self.is_in_shadow_tree(id))
+            .then_some(id)
         })
+    }
+
+    /// PATCH: `true` if `id` is content of an emulated shadow tree. The shadow content shares
+    /// the host's subtree; light children of the host stay in the document tree and are
+    /// recognisable by sitting inside a `<slot>` (or a detached fragment) below the host.
+    pub(crate) fn is_in_shadow_tree(&self, id: NodeId) -> bool {
+        let mut via_slot = false;
+        let mut cur = self.nodes[id].parent;
+        while let Some(pid) = cur {
+            let node = &self.nodes[pid];
+            if node.data.is_element_with_tag_name(&local_name!("slot")) {
+                via_slot = true;
+            } else if node.flags.contains(NodeFlags::IS_SHADOW_HOST) {
+                if !via_slot {
+                    return true;
+                }
+                via_slot = false;
+            }
+            cur = node.parent;
+        }
+        false
     }
 
     /// Computes the size and position of the `Node` relative to the viewport

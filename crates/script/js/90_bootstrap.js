@@ -298,7 +298,8 @@
     }
     return null;
   });
-  defMethod('createImageBitmap', function createImageBitmap() {
+  defMethod('createImageBitmap', function createImageBitmap(image) {
+    if (L.createImageBitmap !== undefined) return Reflect.apply(L.createImageBitmap, undefined, arguments);
     return L.rejectedPromise(new DOMException("Failed to execute 'createImageBitmap' on 'Window': not supported", 'InvalidStateError'));
   });
   L.defineEventHandlers(g, L.GLOBAL_HANDLERS.concat(L.WINDOW_HANDLERS), () => g);
@@ -1104,6 +1105,8 @@
     // of a child realm).
     wrapNode: (id) => wrap(id),
     nodeTypeOf: (o) => (isNode(o) ? typeOf(o) : 0),
+    // Another realm adopts the wrapper `o` of this one (cross-realm adoption keeps identity).
+    releaseNode: (o) => (L.releaseWrapper(o) ? 1 : 0),
     // Not guarded: its exceptions are the caller's (invalid target origin, DataCloneError).
     windowPostMessage: (message, targetOrigin, transfer, source) => L.windowPostMessage(message, targetOrigin, transfer, source),
   });

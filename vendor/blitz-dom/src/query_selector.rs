@@ -22,7 +22,7 @@ impl BaseDocument {
     }
 
     /// Find the first of `candidates` in tree order
-    fn first_in_tree_order(&self, candidates: &[NodeId]) -> Option<NodeId> {
+    pub(crate) fn first_in_tree_order(&self, candidates: &[NodeId]) -> Option<NodeId> {
         let mut stack = vec![self.root_node_id];
         while let Some(node_id) = stack.pop() {
             if candidates.contains(&node_id) {

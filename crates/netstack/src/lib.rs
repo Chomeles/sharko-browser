@@ -13,7 +13,7 @@
 //!                                             |  cache     RFC 9111, memory LRU + disk LRU   |
 //!                                             |  cookies   cookie_store + PSL, persisted     |
 //!                                             |  alt_svc   HTTP/3 upgrade + fallback         |
-//!                                             |  reqwest   hyper h1/h2 + quinn h3, rustls    |
+//!                                             |  wreq     hyper h1/h2, BoringSSL (Chrome)|
 //!                                             +---------------------------------------------+
 //! ```
 //!
@@ -57,9 +57,6 @@
 //! * Response bodies are delivered decoded (gzip, deflate, br, zstd). `Set-Cookie`
 //!   headers are never exposed to clients (cookies are handled here, HttpOnly cookies must
 //!   not reach renderers).
-
-#[cfg(not(any(feature = "aws-lc", feature = "ring")))]
-compile_error!("netstack needs a TLS crypto provider: enable the `aws-lc` (default) or `ring` feature");
 
 mod alt_svc;
 mod cache;

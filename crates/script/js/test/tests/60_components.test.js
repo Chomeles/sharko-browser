@@ -292,3 +292,50 @@ test('custom elements: template contents stay inert (innerHTML, cloneNode) and u
   `);
   assert.strictEqual(JSON.stringify(e.run('__ce')), JSON.stringify(['parsed:0', 'cloned:0:false', 'ctor', 'imported:1:true', 'src:1']));
 });
+
+test('customElements.define: extends an HTMLUnknownElement interface throws NotSupportedError', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    const o = [];
+    for (const ext of ['bgsound', 'blink', 'spacer', 'nonexistent', 'div']) {
+      try { customElements.define('x-' + ext, class extends HTMLElement {}, { extends: ext }); o.push('ok'); }
+      catch (err) { o.push(err.name); }
+    }
+    o.join();
+  `);
+  assert.strictEqual(r, 'NotSupportedError,NotSupportedError,NotSupportedError,NotSupportedError,ok');
+});
+
+test('a document without browsing context does not upgrade or construct custom elements', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    class A extends HTMLElement {}
+    customElements.define('x-a', A);
+    const d = document.implementation.createHTMLDocument('');
+    [document.createElement('x-a') instanceof A, d.createElement('x-a') instanceof A,
+     d.createElementNS('http://www.w3.org/1999/xhtml', 'x-a') instanceof A].join();
+  `);
+  assert.strictEqual(r, 'true,false,false');
+});
+
+test('valid custom element names follow the relaxed 2024 definition', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    const ok = (n) => { try { customElements.define(n, class extends HTMLElement {}); return 1; } catch (_) { return 0; } };
+    ['a-a\\u00D7', 'a-a\\u3000', 'a-\\uDB80\\uDC00', 'a-A', 'a', 'font-face', 'a-b c'].map(ok).join('');
+  `);
+  assert.strictEqual(r, '1110000');
+});
+
+test('customElements.define rethrows an error from constructor.prototype', async () => {
+  const e = await createEnv({ html: '<body></body>' });
+  const r = e.run(`
+    const B = (function () {}).bind({});
+    const err = new Error('boom');
+    Object.defineProperty(B, 'prototype', { get() { throw err; } });
+    let got = null;
+    try { customElements.define('x-bad-proto', B); } catch (x) { got = x; }
+    [got === err, (() => { try { customElements.define('x-arrow', () => {}); } catch (x) { return x.name; } })()].join();
+  `);
+  assert.strictEqual(r, 'true,TypeError');
+});

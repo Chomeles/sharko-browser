@@ -25,20 +25,17 @@ const CACHE_INDEX_SAVE_INTERVAL: Duration = Duration::from_secs(30);
 
 pub(crate) struct NetworkCore {
     pub(crate) config: NetConfig,
-    pub(crate) client: reqwest::Client,
+    pub(crate) client: wreq::Client,
     pub(crate) cookies: Arc<CookieJar>,
     pub(crate) cache: Arc<HttpCache>,
     pub(crate) alt_svc: Arc<AltSvcCache>,
     pub(crate) limiter: HostLimiter,
-    /// System/env proxy rules: QUIC can't be tunneled, so proxied origins never use h3.
-    #[cfg_attr(not(feature = "http3"), allow(dead_code))]
-    pub(crate) proxies: hyper_util::client::proxy::matcher::Matcher,
     pub(crate) cookie_saver: Debouncer,
     pub(crate) alt_svc_saver: Debouncer,
     /// Primary cache keys with a background (stale-while-revalidate) revalidation.
     pub(crate) revalidating: Mutex<HashSet<u128>>,
     /// HTTP/1-only client for WebSocket handshakes, created on first use.
-    pub(crate) ws_client: Mutex<Option<reqwest::Client>>,
+    pub(crate) ws_client: Mutex<Option<wreq::Client>>,
 }
 
 impl NetworkCore {
@@ -92,7 +89,6 @@ impl NetworkCore {
         }
         Ok(Arc::new(Self {
             limiter: HostLimiter::new(config.max_requests_per_host),
-            proxies: hyper_util::client::proxy::matcher::Matcher::from_system(),
             config,
             client,
             cookies,
@@ -190,54 +186,61 @@ impl NetworkCore {
     }
 }
 
-fn build_client(config: &NetConfig) -> Result<reqwest::Client, String> {
-    #[cfg(all(feature = "ring", not(feature = "aws-lc")))]
-    {
-        // reqwest's `rustls-no-provider` uses the process-wide default provider.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-    let mut builder = reqwest::Client::builder()
-        .user_agent(config.user_agent.clone())
+/// Builds the HTTP client with BoringSSL and Chrome's network fingerprint: the TLS
+/// ClientHello (GREASE, cipher/extension set, permuted extension order, ALPS, brotli
+/// certificate compression, X25519MLKEM768) and the HTTP/2 SETTINGS, WINDOW_UPDATE and
+/// pseudo-header order are those of Chrome 140 on Windows. Bot protection (Akamai,
+/// Cloudflare, DataDome, ...) fingerprints exactly these (JA3/JA4, Akamai h2), so a
+/// rustls-shaped hello is classified as a bot whatever the headers say.
+fn build_client(config: &NetConfig) -> Result<wreq::Client, String> {
+    let mut builder = base_builder(config).read_timeout(config.read_idle_timeout);
+    builder = builder
+        .emulation(chrome_profile())
+        .tcp_nodelay(true)
+        .pool_idle_timeout(Duration::from_secs(90));
+    apply_roots(builder, config)?
+        .build()
+        .map_err(|e| format!("cannot initialize HTTP client: {e}"))
+}
+
+/// Settings shared by the page client and the WebSocket client.
+pub(crate) fn base_builder(config: &NetConfig) -> wreq::ClientBuilder {
+    wreq::Client::builder()
         // Redirects, cookies and Referer are handled by the fetch layer (per hop).
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(wreq::redirect::Policy::none())
         .referer(false)
         .connect_timeout(config.connect_timeout)
-        .read_timeout(config.read_idle_timeout)
-        .tcp_nodelay(true)
-        .pool_idle_timeout(Duration::from_secs(90))
-        // Chrome's HTTP/2 flow-control windows: full speed from the first byte on
-        // high bandwidth-delay links, no slow window ramp-up.
-        .http2_initial_stream_window_size(6 * 1024 * 1024)
-        .http2_initial_connection_window_size(15 * 1024 * 1024)
         .gzip(true)
         .deflate(true)
         .brotli(true)
-        .zstd(true);
-    #[cfg(feature = "http3")]
-    {
-        builder = builder.http3_max_idle_timeout(Duration::from_secs(30));
-        // reqwest binds its QUIC socket to `[::]:0` (dual-stack). On hosts without IPv6
-        // support that fails and HTTP/3 would silently be unavailable; bind to the IPv4
-        // wildcard instead. (For TCP this only binds IPv4 sockets to 0.0.0.0 before
-        // connecting, which is a no-op, and IPv6 is unusable on such hosts anyway.)
-        if config.http3 && std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, 0)).is_err() {
-            log::info!("IPv6 unavailable; binding the QUIC endpoint to 0.0.0.0");
-            builder = builder.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
-        }
-    }
-    if !config.extra_root_certificates_pem.is_empty() {
-        let mut certs = Vec::new();
-        for pem in &config.extra_root_certificates_pem {
-            certs.extend(
-                reqwest::Certificate::from_pem_bundle(pem)
-                    .map_err(|e| format!("invalid extra root certificate: {e}"))?,
-            );
-        }
-        builder = builder.tls_certs_merge(certs);
-    }
-    builder
+        .zstd(true)
+}
+
+/// Chrome 140 on Windows (TLS + HTTP/2 + default header set; the fetch layer overrides
+/// the headers it sends).
+pub(crate) fn chrome_profile() -> wreq_util::Emulation {
+    wreq_util::Emulation::builder()
+        .profile(wreq_util::Profile::Chrome140)
+        .platform(wreq_util::Platform::Windows)
         .build()
-        .map_err(|e| format!("cannot initialize HTTP client: {e}"))
+}
+
+/// Trust store: the operating system's roots (Windows certificate store, so enterprise
+/// and antivirus roots work like in other browsers), Mozilla's bundle as a fallback, plus
+/// the configured extra roots.
+pub(crate) fn apply_roots(builder: wreq::ClientBuilder, config: &NetConfig) -> Result<wreq::ClientBuilder, String> {
+    let mut store = wreq::tls::trust::CertStore::builder();
+    let native = rustls_native_certs::load_native_certs();
+    if native.certs.is_empty() {
+        store = store.add_der_certs(webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().map(|c| c.as_ref()));
+    } else {
+        store = store.add_der_certs(native.certs.iter().map(|c| c.as_ref()));
+    }
+    for pem in &config.extra_root_certificates_pem {
+        store = store.add_stack_pem_certs(pem);
+    }
+    let store = store.build().map_err(|e| format!("invalid extra root certificate: {e}"))?;
+    Ok(builder.tls_cert_store(store))
 }
 
 /// Converts a fetch result into the protocol response.

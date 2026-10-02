@@ -1399,6 +1399,7 @@
   // Paths are kept in device space (points are transformed when they are added, as the
   // spec's current path is); Path2D objects keep user space and are transformed when used.
   const HTMLCanvasElement = htmlClass('HTMLCanvasElement', ['canvas']);
+  L.HTMLCanvasElement = HTMLCanvasElement;
   const ctxCache = new WeakMap();
   const canvasDim = (id, name, def) => {
     const v = N.getAttr(id, name);
@@ -1409,13 +1410,22 @@
   {
     const P = HTMLCanvasElement.prototype;
     def(P, 'width', function () { return canvasDim(idOf(this), 'width', 300); },
-      function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'width', String(n > 2147483647 ? 300 : n)); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
+      function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'width', String(n > 2147483647 ? 300 : n)); const c = ctxCache.get(this); if (c) L.ctxResize(c); if (L.glResize !== undefined) L.glResize(this, this); });
     def(P, 'height', function () { return canvasDim(idOf(this), 'height', 150); },
-      function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'height', String(n > 2147483647 ? 150 : n)); const c = ctxCache.get(this); if (c) L.ctxResize(c); });
+      function (v) { const n = L.toULong(v); setAttr(this, idOf(this), 'height', String(n > 2147483647 ? 150 : n)); const c = ctxCache.get(this); if (c) L.ctxResize(c); if (L.glResize !== undefined) L.glResize(this, this); });
     L.mixin(P, {
       getContext(type, attrs) {
         const t = `${type}`;
-        if (t !== '2d') return null;
+        if (L.transferred !== undefined && L.transferred.has(this)) throw new DOMException("Failed to execute 'getContext' on 'HTMLCanvasElement': Cannot get context from a canvas that has transferred its control to offscreen.", 'InvalidStateError');
+        if (t !== '2d') {
+          // WebGL (36_webgl.js and following): a canvas has one context type; others get null
+          if (L.glKind !== undefined && L.glKind(t) !== undefined) {
+            if (ctxCache.get(this) !== undefined) return null;
+            return L.glGetContext(this, this, t, attrs);
+          }
+          return null;
+        }
+        if (L.glOf !== undefined && L.glOf(this)) return null;
         let c = ctxCache.get(this);
         if (c === undefined) { c = new CanvasRenderingContext2D(INTERNAL, this, attrs); ctxCache.set(this, c); }
         return c;
@@ -1424,6 +1434,7 @@
         const id = idOf(this);
         const c = ctxCache.get(this);
         if (c) L.ctxSync(c);
+        if (L.glFlush !== undefined) L.glFlush(this);
         const w = canvasDim(id, 'width', 300), h = canvasDim(id, 'height', 150);
         if (w === 0 || h === 0) return 'data:,';
         return N.canvasToDataURL(id, w, h);
@@ -1513,6 +1524,7 @@
       if (w === 0 || h === 0) throw new DOMException(`Failed to execute '${what}' on 'CanvasRenderingContext2D': The image argument is a canvas element with a width or height of 0.`, 'InvalidStateError');
       const c = ctxCache.get(image);
       if (c) L.ctxSync(c);
+      if (L.glFlush !== undefined) L.glFlush(image);
       return [0, id, w, h];
     }
     if (image instanceof ImageData) return [1, image.data, image.width, image.height];
@@ -1520,6 +1532,35 @@
     if (image !== null && typeof image === 'object' && (image.tagName === 'VIDEO' || image.tagName === 'svg')) return null;
     throw new TypeError(`Failed to execute '${what}' on 'CanvasRenderingContext2D': The provided value is not of type '(CSSImageValue or HTMLCanvasElement or HTMLImageElement or HTMLVideoElement or ImageBitmap or OffscreenCanvas or SVGImageElement or VideoFrame)'.`);
   }
+  // Pixels (straight RGBA bytes) of an image source for WebGL uploads and ImageBitmap-like consumers:
+  // {w, h, data} or null while the source has no pixels.
+  // TexImageSource (WebGL uploads): the DOM image types; ImageBitmap and OffscreenCanvas register themselves
+  L.texSourceTests = [(v) => v instanceof ImageData, (v) => v instanceof HTMLImageElement, (v) => v instanceof HTMLCanvasElement, (v) => v instanceof HTMLVideoElement];
+  L.isTexImageSource = (v) => v !== null && typeof v === 'object' && L.texSourceTests.some((t) => t(v));
+  L.sourcePixels = function sourcePixels(src) {
+    if (src === null || typeof src !== 'object') return null;
+    if (src instanceof ImageData) return { w: src.width, h: src.height, data: src.data };
+    if (L.imageBitmapPixels) { const b = L.imageBitmapPixels(src); if (b) return { w: b[2], h: b[3], data: b[1] }; }
+    if (src instanceof HTMLCanvasElement) {
+      const w = canvasDim(idOf(src), 'width', 300), h = canvasDim(idOf(src), 'height', 150);
+      if (w === 0 || h === 0) return null;
+      const c = ctxCache.get(src);
+      if (c) L.ctxSync(c);
+      if (L.glFlush !== undefined) L.glFlush(src);
+      return { w, h, data: new Uint8ClampedArray(N.canvasGetImageData(idOf(src), 0, 0, w, h)) };
+    }
+    if (src instanceof HTMLImageElement) {
+      if (!src.complete || src.naturalWidth === 0) return null;
+      const w = src.naturalWidth, h = src.naturalHeight;
+      const tmp = L.document.createElement('canvas');
+      tmp.width = w; tmp.height = h;
+      const ctx2 = tmp.getContext('2d');
+      ctx2.drawImage(src, 0, 0);
+      return { w, h, data: ctx2.getImageData(0, 0, w, h).data };
+    }
+    if (L.offscreenPixels) return L.offscreenPixels(src);
+    return null;
+  };
   class TextMetrics {
     #m;
     constructor(token, m) { if (token !== INTERNAL) throw L.illegal(); this.#m = m; }
@@ -2058,6 +2099,7 @@
     }
   }
   Object.assign(CanvasRenderingContext2D.prototype, pathMethods);
+  L.CanvasRenderingContext2D = CanvasRenderingContext2D;
   for (const k in CTX_DEFAULTS) {
     if (k === 'font') continue;
     def(CanvasRenderingContext2D.prototype, k, function () { return L.ctxState(this)[k]; }, function (v) {
