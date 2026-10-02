@@ -4,6 +4,10 @@
 //
 //   node tools/sitediff/gate.js [summary.json] [--median=8] [--max-bad=0.05] [--baseline=previous-summary.json]
 //
+// Sites tagged `bot-wall` (the server answered Sharko with a challenge or block page)
+// are counted apart: they measure the wall, not the engine, so the median and the 60+
+// count are taken over the rendering sites only.
+//
 // With --baseline the sites whose score moved by 15 or more against the previous run are
 // listed (informational, they do not change the exit status): the per-site trend.
 //
@@ -23,18 +27,21 @@ const maxMedian = opt('median', 8);
 const maxBad = opt('max-bad', 0.05);
 const baselineArg = args.find((a) => a.startsWith('--baseline='));
 
+const isWall = (s) => s.issues.some((i) => i.tag === 'bot-wall');
 const sum = JSON.parse(fs.readFileSync(file, 'utf8'));
-const sites = sum.sites.filter((s) => s.status === 'compared');
+const all = sum.sites.filter((s) => s.status === 'compared');
+const walls = all.filter(isWall);
+const sites = all.filter((s) => !isWall(s));
 const scores = sites.map((s) => s.score).sort((a, b) => a - b);
 const median = scores.length ? scores[Math.floor(scores.length / 2)] : 100;
-const crashes = sites.filter((s) => s.issues.some((i) => i.tag === 'crash' || i.tag === 'hang'));
+const crashes = all.filter((s) => s.issues.some((i) => i.tag === 'crash' || i.tag === 'hang'));
 const bad = sites.filter((s) => s.score >= 60);
 
 const checks = [
-  [`sites compared: ${sites.length}`, sites.length >= 100],
+  [`sites compared: ${all.length} (${walls.length} bot walls, ${sites.length} rendering)`, all.length >= 100],
   [`crashes/hangs: ${crashes.length}${crashes.length ? ' (' + crashes.map((s) => s.slug).join(', ') + ')' : ''}`, crashes.length === 0],
-  [`median score ${median} (limit ${maxMedian})`, median <= maxMedian],
-  [`sites scoring 60+: ${bad.length}/${sites.length} (limit ${Math.round(maxBad * 100)}%)`, sites.length > 0 && bad.length / sites.length <= maxBad],
+  [`rendering median score ${median} (limit ${maxMedian})`, median <= maxMedian],
+  [`rendering sites scoring 60+: ${bad.length}/${sites.length} (limit ${Math.round(maxBad * 100)}%)`, sites.length > 0 && bad.length / sites.length <= maxBad],
 ];
 let ok = true;
 for (const [text, pass] of checks) {
@@ -42,16 +49,22 @@ for (const [text, pass] of checks) {
   if (!pass) ok = false;
 }
 // Per-site numbers in the log, so two runs can be compared site by site (the artifacts need a login).
-console.log('sites >= 60: ' + bad.sort((a, b) => b.score - a.score).map((s) => `${s.slug}(${s.score})`).join(' '));
-console.log('SCORES ' + JSON.stringify(Object.fromEntries(sites.map((s) => [s.slug, s.score]))));
+console.log('bot walls: ' + (walls.map((s) => s.slug).join(' ') || 'none'));
+console.log('rendering sites >= 60: ' + bad.sort((a, b) => b.score - a.score).map((s) => `${s.slug}(${s.score})`).join(' '));
+console.log('SCORES ' + JSON.stringify(Object.fromEntries(all.map((s) => [s.slug, s.score]))));
 if (baselineArg) {
   try {
     const before = JSON.parse(fs.readFileSync(baselineArg.slice('--baseline='.length), 'utf8'));
-    const old = new Map(before.sites.filter((x) => x.status === 'compared').map((x) => [x.slug, x.score]));
+    const prev = before.sites.filter((x) => x.status === 'compared');
+    const old = new Map(prev.filter((x) => !isWall(x)).map((x) => [x.slug, x.score]));
     const moved = sites.filter((x) => old.has(x.slug) && Math.abs(x.score - old.get(x.slug)) >= 15);
     const fmt = (list) => list.map((x) => `${x.slug}(${old.get(x.slug)}->${x.score})`).join(' ') || 'none';
     console.log('worse than the previous run by 15+: ' + fmt(moved.filter((x) => x.score > old.get(x.slug)).sort((a, b) => (b.score - old.get(b.slug)) - (a.score - old.get(a.slug)))));
     console.log('better than the previous run by 15+: ' + fmt(moved.filter((x) => x.score < old.get(x.slug)).sort((a, b) => (old.get(b.slug) - b.score) - (old.get(a.slug) - a.score))));
+    const prevWalls = new Set(prev.filter(isWall).map((x) => x.slug));
+    const newWalls = walls.filter((x) => !prevWalls.has(x.slug)).map((x) => x.slug);
+    const gone = [...prevWalls].filter((slug) => sites.some((x) => x.slug === slug));
+    console.log(`bot walls new: ${newWalls.join(' ') || 'none'}; passed now: ${gone.join(' ') || 'none'}`);
   } catch (e) {
     console.log('no baseline: ' + e.message);
   }
