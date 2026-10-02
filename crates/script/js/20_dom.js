@@ -4050,16 +4050,16 @@
     d.text = text;
     d.rules = makeRules(splitRules(text), s, null);
   }
-  // A linked sheet from another origin hides its rules (as in browsers).
+  // CSSOM "origin-clean flag": a linked sheet from another origin hides its rules.
   function checkSheetAccess(s, what) {
     const d = sheetDataOf(s);
     if (!d.linked || d.href === null) return;
     const p = N.urlParse(d.href, null);
     const origin = p === null ? null : p[10];
     if (origin !== null && origin !== 'null' && origin === L.docOrigin()) return;
-    // HTML "fetch and process the linked resource": `crossorigin` makes the sheet a CORS-mode
-    // fetch; once it passed the CORS check the sheet is CORS-same-origin and readable (a
-    // failed check never produces a sheet at all). Meta, GitHub, Slack, Discord rely on it.
+    // HTML "fetch and process the linked resource": `crossorigin` makes the sheet a cors-mode
+    // fetch (blitz-dom marks the request, netstack runs the CORS check); a sheet that loaded
+    // is CORS-same-origin and readable. Meta, GitHub, Slack, Discord rely on it.
     if (d.owner.hasAttribute('crossorigin')) return;
     throw new DOMException(`Failed to ${what === 'cssRules' ? "read the 'cssRules' property from" : `execute '${what}' on`} 'CSSStyleSheet': Cannot access rules`, 'SecurityError');
   }
