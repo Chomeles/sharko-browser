@@ -231,9 +231,35 @@ async function runChromium(browser, url, dir) {
 
 // ---------------------------------------------------------------------------- Sharko
 
+// The V8 startup snapshot lives in the profile's cache dir and costs ~0.6 s (more on slow
+// disks) to build in a fresh profile. Every run here uses a fresh profile, so the snapshot
+// is kept across runs (a real browser builds it once per install): harness overhead, not
+// engine speed, and it must not show up in the load times.
+const snapshotCache = path.join(os.tmpdir(), 'sharko-sitediff-snapshot');
+function seedSnapshot(profile) {
+  try {
+    const dst = path.join(profile, 'cache');
+    fs.mkdirSync(dst, { recursive: true });
+    for (const f of fs.readdirSync(snapshotCache)) fs.copyFileSync(path.join(snapshotCache, f), path.join(dst, f));
+  } catch (_) {}
+}
+function keepSnapshot(profile) {
+  try {
+    const src = path.join(profile, 'cache');
+    fs.mkdirSync(snapshotCache, { recursive: true });
+    for (const f of fs.readdirSync(src)) {
+      if (!f.startsWith('script-snapshot-') || fs.existsSync(path.join(snapshotCache, f))) continue;
+      const tmp = path.join(snapshotCache, `.${process.pid}.${f}`);
+      fs.copyFileSync(path.join(src, f), tmp);
+      fs.renameSync(tmp, path.join(snapshotCache, f));
+    }
+  } catch (_) {}
+}
+
 function runSharko(url, dir) {
   return new Promise((resolve) => {
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sharko-sitediff-'));
+    seedSnapshot(profile);
     const png = path.join(dir, 'sharko.png');
     const argv = [
       '--headless',
@@ -264,6 +290,7 @@ function runSharko(url, dir) {
     }, timeout + settle + 30000);
     child.on('close', (code) => {
       clearTimeout(killer);
+      keepSnapshot(profile);
       fs.rmSync(profile, { recursive: true, force: true });
       const res = { url, engine: 'sharko', status: 'ok', exit: code, ms: Date.now() - t0 };
       const console_ = [];
@@ -276,7 +303,13 @@ function runSharko(url, dir) {
       const headless = stderr.split('\n').filter((l) => l.startsWith('[headless]'));
       res.headless = headless;
       const tm = /first frame ([^|]+)\| DOMContentLoaded ([^|]+)\| load ([^|]+)\|/.exec(headless.join('\n'));
-      if (tm) res.timings = { firstFrame: tm[1].trim(), dcl: tm[2].trim(), load: tm[3].trim() };
+      if (tm) {
+        res.timings = { firstFrame: tm[1].trim(), dcl: tm[2].trim(), load: tm[3].trim() };
+        // Engine time in ms ("-" = event never fired), independent of process start, --settle
+        // and the screenshot that make up the wall time `ms`.
+        const num = (t) => (/^[\d.]+ ms$/.test(t) ? parseFloat(t) : null);
+        res.engineMs = { firstFrame: num(res.timings.firstFrame), dcl: num(res.timings.dcl), load: num(res.timings.load) };
+      }
       if (killed) res.status = 'hang';
       else if (code === 3 || /renderer crashed/.test(stderr)) res.status = 'crash';
       else if (code === 2) res.status = 'failed';
@@ -378,6 +411,7 @@ function compare(c, s) {
   d.metrics.chromiumLoadMs = c.loadMs;
   d.metrics.sharkoMs = s.ms;
   d.metrics.sharkoTimings = s.timings;
+  d.metrics.sharkoEngine = s.engineMs;
   if (s.status === 'crash') add('crash', 100, 'renderer crashed');
   else if (s.status === 'hang') add('hang', 100, 'no result within the time limit');
   else if (s.status === 'failed') add('load-failed', 100, s.error || 'navigation failed');
@@ -702,6 +736,20 @@ function writeReport(results, meta) {
     L.push(
       `| [${r.slug}](${r.url}) | ${r.diff.score} | ${r.diff.issues.map((i) => i.tag).join(', ')} | ${m.text ? Math.round(m.text.missing * 100) + '%' : ''} | ${m.height ? m.height.ratio : ''} | ${m.pixels ? Math.round(m.pixels.different * 100) + '%' : ''} | ${m.errors ? m.errors.sharkoOnly.length : ''} |`,
     );
+  }
+  L.push('');
+  L.push('## Load times');
+  L.push('');
+  L.push('Engine = what Sharko reports itself (first frame, DOMContentLoaded, load; ms since navigation start). Wall = whole Sharko process incl. start, `--settle`, probe and screenshot, so it is not engine speed. Chromium = Playwright `load`.');
+  L.push('');
+  L.push('| site | first frame | DCL | load (engine) | wall | Chromium load | load ratio |');
+  L.push('|---|---:|---:|---:|---:|---:|---:|');
+  const fmt = (v) => (v == null ? '-' : Math.round(v));
+  for (const r of compared) {
+    const m = r.diff.metrics;
+    const e = m.sharkoEngine || {};
+    const ratio = e.load != null && m.chromiumLoadMs ? (e.load / m.chromiumLoadMs).toFixed(1) + '×' : '';
+    L.push(`| ${r.slug} | ${fmt(e.firstFrame)} | ${fmt(e.dcl)} | ${fmt(e.load)} | ${fmt(m.sharkoMs)} | ${fmt(m.chromiumLoadMs)} | ${ratio} |`);
   }
   L.push('');
   L.push('## Details');
