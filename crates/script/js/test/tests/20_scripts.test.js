@@ -134,6 +134,35 @@ test('dynamic script insertion semantics', async () => {
   assert.deepStrictEqual(log(e), ['after-module-insert', 'dyn-module']);
 });
 
+test('<script src> of blob: and data: URLs loads from the registry / the URL', async () => {
+  const e = await createEnv({ html: '<body></body>', url: 'https://example.com/' });
+  e.run(`
+    window.__log = [];
+    const u = URL.createObjectURL(new Blob(["__log.push('blob:' + (document.currentScript.src === s1.src))"], { type: 'text/javascript' }));
+    var s1 = document.createElement('script'); s1.src = u;
+    s1.onload = () => __log.push('load-blob'); s1.onerror = () => __log.push('error-blob');
+    document.head.appendChild(s1);
+    var s2 = document.createElement('script'); s2.src = 'data:text/javascript,__log.push("data")';
+    s2.onload = () => __log.push('load-data');
+    document.head.appendChild(s2);
+    var s3 = document.createElement('script'); s3.src = 'blob:https://example.com/unknown';
+    s3.onerror = () => __log.push('error-unknown');
+    document.head.appendChild(s3);
+  `);
+  await e.flush();
+  assert.deepStrictEqual(log(e).sort(), ['blob:true', 'data', 'error-unknown', 'load-blob', 'load-data']);
+});
+
+test('async module scripts wait for earlier parser-blocking scripts like async classic ones', async () => {
+  const html = `<!DOCTYPE html><html><head><script>window.__log = [];</script>
+    <script src="/slow.js"></script>
+    <script>__log.push('inline-after-slow')</script>
+    <script type="module" async>__log.push('async-module')</script></head><body></body></html>`;
+  const e = await createEnv({ html, url: 'https://example.com/', routes: { 'https://example.com/slow.js': { body: "__log.push('slow')", delay: 50 } } });
+  await e.flush();
+  assert.deepStrictEqual(log(e), ['slow', 'inline-after-slow', 'async-module']);
+});
+
 test('document.write during parsing and after load', async () => {
   const e = await createEnv({
     html: `<body><script>window.__log = [];

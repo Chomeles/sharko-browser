@@ -2427,6 +2427,22 @@
         if (typeof userProgress === 'function') userProgress(loaded, total, upload);
       };
     }
+    // Resource loads (<script src>, modules, ...) of `blob:`/`data:` URLs never reach the
+    // network stack: the blob registry and the URL itself are the response (Fetch "scheme fetch").
+    const lc = url.slice(0, 5).toLowerCase();
+    if (method === 'GET' && (lc === 'blob:' || lc === 'data:')) {
+      let r = null;
+      if (lc === 'blob:') {
+        const bl = blobURLs.get(stripFragment(url));
+        if (bl !== undefined) r = [200, 'OK', url, ['Content-Type', bl.type, 'Content-Length', String(bl.size)], copyToArrayBuffer(L.blobBytes(bl)), null];
+      } else {
+        const p = parseDataURL(url);
+        if (p !== null) r = [200, 'OK', url, ['Content-Type', p.type], copyToArrayBuffer(p.bytes), null];
+      }
+      if (r === null) r = [0, '', url, [], null, 'bad url'];
+      L.postTask(() => done(...r));
+      return reqId;
+    }
     pendingFetches.set(reqId, done);
     if (typeof progress === 'function') fetchProgress.set(reqId, progress);
     // blob: URLs live in this layer's registry (the network stack cannot serve them): <script src=blob:>, module
