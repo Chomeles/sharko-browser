@@ -218,6 +218,7 @@ automatically – stylesheets/images load. **`<script>` insertion is NOT execute
 | `N.canvasDrawImage(id, kind, source, srcW, srcH, sx, sy, sw, sh, dx, dy, dw, dh, ctm, alpha, op, smoothing)` | `kind` 0: element id, 1: RGBA bytes |
 | `N.canvasGetImageData(id, x, y, w, h)`, `N.canvasPutImageData(id, bytes, w, h, dx, dy, dirtyX, dirtyY, dirtyW, dirtyH)` | straight RGBA |
 | `N.canvasText(id, text, [family, size, weight, italic], x, y, align, baseline, maxWidth, fill, paint, stroke, ctm, alpha, op, pattern)`, `N.canvasMeasureText(font, text)` | text via the document's fonts; metrics `[width, inkLeft, inkRight, inkAscent, inkDescent, fontAscent, fontDescent, emAscent, emDescent]` |
+| `N.webglEnabled()` | bool: WebGL contexts available (`SHARKO_WEBGL=1`; off by default) |
 | `N.canvasToDataURL(id, w, h)` | PNG `data:` URL |
 | `N.pendingResourceCount()` | number of subresources (stylesheets/images/fonts) still loading – used to decide when to fire `window.load` |
 

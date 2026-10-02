@@ -185,8 +185,12 @@
     if (S && !S.lost) G.flushToCanvas(S);
   };
   G.hasGL = (owner) => ctxByCanvas.has(owner);
-  L.glContextKinds = { webgl: 1, 'experimental-webgl': 1, webgl2: 2 };
-  L.glGetContext = (canvasEl, owner, type, attrs) => G.createGL(canvasEl, owner, L.glContextKinds[type], attrs);
+  // Off by default (N.webglEnabled): contexts stay null until the software pipeline is fast enough for real pages.
+  const GL_KINDS = { webgl: 1, 'experimental-webgl': 1, webgl2: 2 };
+  // looked up lazily: the layer is snapshotted, the switch is read per process
+  let glOn;
+  L.glKind = (t) => { if (glOn === undefined) glOn = N.webglEnabled(); return glOn ? GL_KINDS[t] : undefined; };
+  L.glGetContext = (canvasEl, owner, type, attrs) => G.createGL(canvasEl, owner, L.glKind(type), attrs);
   L.glResize = (owner, el) => G.resizeGL(owner, el);
   L.glFlush = (owner) => G.glFlushCanvas(owner);
   L.glOf = (owner) => ctxByCanvas.has(owner);

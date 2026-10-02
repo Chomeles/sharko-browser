@@ -116,3 +116,13 @@ test('WebGL: two identical frames hash identically (stable canvas fingerprint)',
   assert.strictEqual(urls[0], urls[1]);
   assert.ok(urls[0].startsWith('data:image/png'));
 });
+
+test('WebGL: without N.webglEnabled() getContext answers null for 2d-only pages (HTMLCanvasElement and OffscreenCanvas)', async () => {
+  process.env.SHARKO_WEBGL_OFF = '1';
+  try {
+    const e = await createEnv();
+    const r = e.run(`(() => { const c = document.createElement('canvas'); const o = new OffscreenCanvas(4, 4);
+      return JSON.stringify([c.getContext('webgl'), c.getContext('webgl2'), c.getContext('experimental-webgl'), o.getContext('webgl'), !!c.getContext('2d'), !!o.getContext('2d')]); })()`);
+    assert.strictEqual(r, '[null,null,null,null,true,true]');
+  } finally { delete process.env.SHARKO_WEBGL_OFF; }
+});

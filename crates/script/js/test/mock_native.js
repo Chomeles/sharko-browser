@@ -892,6 +892,7 @@ class MockNative {
         if (s) for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const sx = x + xx, sy = y + yy; if (sx < 0 || sy < 0 || sx >= s.w || sy >= s.h) continue; for (let k = 0; k < 4; k++) out[(yy * w + xx) * 4 + k] = s.data[(sy * s.w + sx) * 4 + k]; }
         return M.ab(Buffer.from(out));
       },
+      webglEnabled: () => process.env.SHARKO_WEBGL_OFF !== '1',
       canvasToDataURL: (id, w, h) => {
         const s = M.surfaces.get(id);
         const hash = nodeCrypto.createHash('sha1').update(s ? Buffer.from(s.data) : Buffer.alloc(0)).digest('hex');

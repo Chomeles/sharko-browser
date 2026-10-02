@@ -84,15 +84,15 @@
       const s = stateOf(this);
       const id = `${contextId}`;
       if (s.placeholder === 'detached') throw new DOMException("Failed to execute 'getContext' on 'OffscreenCanvas': Cannot get context from a canvas that has transferred its control to offscreen.", 'InvalidStateError');
-      const kind = id === '2d' ? '2d' : L.glContextKinds[id] !== undefined ? 'gl' : id === 'bitmaprenderer' ? 'bitmap' : null;
+      const kind = id === '2d' ? '2d' : L.glKind(id) !== undefined ? 'gl' : id === 'bitmaprenderer' ? 'bitmap' : null;
       if (kind === null) return null;
-      if (s.kind !== null && s.kindName !== (kind === 'gl' ? (L.glContextKinds[id] === 2 ? 'webgl2' : 'webgl') : kind)) return null;
+      if (s.kind !== null && s.kindName !== (kind === 'gl' ? (L.glKind(id) === 2 ? 'webgl2' : 'webgl') : kind)) return null;
       if (s.ctx) return s.ctx;
       if (kind === '2d') s.ctx = new OffscreenCanvasRenderingContext2D(INTERNAL, s.el, options, this);
       else if (kind === 'bitmap') s.ctx = new ImageBitmapRenderingContext(INTERNAL, this, s.el);
       else { s.ctx = L.glGetContext(s.el, this, id, options); if (s.ctx === null) return null; }
       s.kind = kind === 'gl' ? 'gl' : kind;
-      s.kindName = kind === 'gl' ? (L.glContextKinds[id] === 2 ? 'webgl2' : 'webgl') : kind;
+      s.kindName = kind === 'gl' ? (L.glKind(id) === 2 ? 'webgl2' : 'webgl') : kind;
       return s.ctx;
     }
     transferToImageBitmap() {

@@ -1419,7 +1419,7 @@
         if (L.transferred !== undefined && L.transferred.has(this)) throw new DOMException("Failed to execute 'getContext' on 'HTMLCanvasElement': Cannot get context from a canvas that has transferred its control to offscreen.", 'InvalidStateError');
         if (t !== '2d') {
           // WebGL (36_webgl.js and following): a canvas has one context type; others get null
-          if (L.glContextKinds !== undefined && L.glContextKinds[t] !== undefined) {
+          if (L.glKind !== undefined && L.glKind(t) !== undefined) {
             if (ctxCache.get(this) !== undefined) return null;
             return L.glGetContext(this, this, t, attrs);
           }
