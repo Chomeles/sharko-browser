@@ -800,7 +800,7 @@ fn js_layer_offscreen_canvas_2d() {
           const bmp = oc.transferToImageBitmap();
           const t = new OffscreenCanvas(4, 6).getContext('2d'); t.drawImage(bmp, 0, 0);
           out.bitmap = [bmp.width, bmp.height, Array.from(t.getImageData(1, 1, 1, 1).data), Array.from(c.getImageData(1, 1, 1, 1).data)];
-          return JSON.stringify(out);
+          return out;
         })()"#,
     );
     assert_eq!(
