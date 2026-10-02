@@ -378,12 +378,18 @@ pub(crate) fn computed_value(
     let Some(node) = doc.get_node(target) else {
         return String::new();
     };
-    let Some(styles) = node.primary_styles() else {
-        // Not styled (e.g. inside a display:none subtree).
-        if name == "display" && ancestor_display_none(doc, id) {
-            return "none".to_string();
+    let primary = node.primary_styles().map(|s| s.clone());
+    let styles = match primary {
+        Some(s) => s,
+        None => {
+            // PATCH: not styled by the traversal (inside a display:none subtree): resolve on
+            // demand like Blink, so computed values (not 'none'/empty) reach script.
+            let resolved = doc.resolve_undisplayed_style(target, 0.0);
+            let Some(cv) = resolved else {
+                return String::new();
+            };
+            return serialize_computed(&cv, &pid);
         }
-        return String::new();
     };
     let cv: &style::properties::ComputedValues = &styles;
 
@@ -436,14 +442,6 @@ fn serialize_computed(cv: &style::properties::ComputedValues, pid: &PropertyId) 
             s
         }
     }
-}
-
-fn ancestor_display_none(doc: &BaseDocument, id: NodeId) -> bool {
-    dom::inclusive_ancestors(doc, id).into_iter().any(|a| {
-        doc.get_node(a)
-            .and_then(|n| n.primary_styles())
-            .is_some_and(|s| s.clone_display().is_none())
-    })
 }
 
 /// Used values for box-model properties of elements with a box.
