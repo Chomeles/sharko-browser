@@ -372,6 +372,13 @@
       cur = p;
     }
   };
+  // The ShadowRoot a node is a child of: shadow content has its host's node id as native
+  // parent (the root shares the id), while light children sit in the hidden light fragment.
+  function shadowParentOf(id, p) {
+    if (p === 0 || lightOwner.has(id)) return null;
+    const sr = shadowOfHost.get(wrap(p));
+    return sr === undefined ? null : sr;
+  }
   function lightFragOf(hostW) {
     const sr = shadowOfHost.get(hostW);
     if (sr === undefined) return 0;
@@ -1339,16 +1346,25 @@
       return ownerDocumentOf(this);
     },
     getRootNode(options) {
-      if (isShadowRoot(this)) return this;
+      if (isShadowRoot(this)) return options && options.composed ? this.host.getRootNode(options) : this;
       let r = idOf(this), p;
-      while ((p = N.parent(r)) !== 0) r = p;
+      while ((p = N.parent(r)) !== 0) {
+        // Shadow content shares its host's node id as parent: its root is the shadow root.
+        if (shadowParentOf(r, p) !== null) {
+          const sr = shadowOfHost.get(wrap(p));
+          return options && options.composed ? sr.host.getRootNode(options) : sr;
+        }
+        r = p;
+      }
       return wrap(r);
     },
     get parentNode() {
       if (isShadowRoot(this)) return null;
       const id = idOf(this);
       const h = lightHostOf(id);
-      return h !== null ? h : wrap(N.parent(id));
+      if (h !== null) return h;
+      const p = N.parent(id);
+      return shadowParentOf(id, p) ?? wrap(p);
     },
     get parentElement() {
       if (isShadowRoot(this)) return null;
@@ -1356,7 +1372,7 @@
       const h = lightHostOf(id);
       if (h !== null) return h;
       const p = N.parent(id);
-      if (p === 0) return null;
+      if (p === 0 || shadowParentOf(id, p) !== null) return null;
       const w = wrap(p);
       return typeOf(w) === 1 ? w : null;
     },

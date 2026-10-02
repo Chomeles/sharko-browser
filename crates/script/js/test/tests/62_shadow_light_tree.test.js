@@ -25,3 +25,16 @@ test('shadow host: light children, slots, assignedNodes', async () => {
   `);
   assert.strictEqual(r, '3,DIV,2,xyt,true,SLOT,true,B,2,DIV,4,I,3');
 });
+
+test('shadow content: parentNode is the ShadowRoot (Lit inserts through startNode.parentNode)', async () => {
+  const e = await createEnv({ html: '<div id="host"></div>' });
+  const r = e.run(`
+    var h = document.getElementById('host'), sr = h.attachShadow({ mode: 'open' });
+    var m = document.createComment(''); sr.appendChild(m);
+    var f = document.createDocumentFragment(), d = document.createElement('div'); d.className = 'x'; f.appendChild(d);
+    m.parentNode.insertBefore(f, null);
+    JSON.stringify([m.parentNode === sr, m.parentElement, d.parentNode === sr, d.getRootNode() === sr,
+      d.getRootNode({ composed: true }) === document, !!sr.querySelector('.x'), h.firstChild === null, sr.childNodes.length]);
+  `);
+  assert.strictEqual(r, '[true,null,true,true,true,true,true,2]');
+});
