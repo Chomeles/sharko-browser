@@ -128,7 +128,28 @@ impl NetworkCore {
     ) -> Result<Response, NetError> {
         use futures_util::FutureExt;
         let url = req.url.clone();
-        match std::panic::AssertUnwindSafe(self.fetch(req, progress)).catch_unwind().await {
+        let debug = net_debug();
+        let started = debug.then(std::time::Instant::now);
+        let result = std::panic::AssertUnwindSafe(self.fetch(req, progress)).catch_unwind().await;
+        if let (Some(t), Ok(r)) = (started, &result) {
+            // BROWSER_DEBUG_NET=1: one line per request (waterfall: when it ended, how long
+            // it took, protocol, size), to see what keeps a page from loading.
+            let at = *NET_EPOCH.get_or_init(std::time::Instant::now);
+            let (what, proto, bytes) = match r {
+                Ok(r) => (
+                    format!("{}{}", r.status, if r.from_cache { " cache" } else { "" }),
+                    r.http_version,
+                    r.body.len(),
+                ),
+                Err(e) => (format!("{e:?}").chars().take(40).collect(), "", 0),
+            };
+            eprintln!(
+                "[net] end {:>6.0} ms  took {:>5.0} ms  {what:<10} {proto:<8} {bytes:>8} B  {url}",
+                at.elapsed().as_secs_f64() * 1000.0,
+                t.elapsed().as_secs_f64() * 1000.0,
+            );
+        }
+        match result {
             Ok(result) => result,
             Err(_) => {
                 log::error!("internal error (panic) while fetching {url}");
@@ -301,6 +322,16 @@ impl Debouncer {
 
 struct HostSlot {
     semaphore: Arc<Semaphore>,
+}
+
+static NET_EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+fn net_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        NET_EPOCH.get_or_init(std::time::Instant::now);
+        std::env::var_os("BROWSER_DEBUG_NET").is_some_and(|v| v != "0")
+    })
 }
 
 /// Chrome-style limit of concurrent requests per origin (6) until the origin is known to

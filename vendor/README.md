@@ -387,6 +387,7 @@ Patches so far:
     parse time, so `color: transparent` gradient headings (bsky.app sign-up dialog) painted a
     plain rectangle or nothing. Layers with that clip are painted into an isolated layer and
     intersected (`DestIn`) with the opaque glyphs of the element's subtree, as in Blink/Gecko.
+- `blitz-dom/src/resolve.rs`, `shadow_css.rs`, `stylo.rs`, `document.rs`: shadow hosts are scoped by a virtual class (`.sharko-shadow-host-<id>`) instead of an attribute (O(1) bucket + bloom filter), shadow sheets are appended without a tree-order search, `BROWSER_DEBUG_STYLE=1` prints slow resolves.
 95. `blitz-dom/src/document.rs` (`get_fragment_target`, `is_in_shadow_tree`): "scroll to the
     fragment" ignores elements inside an emulated shadow tree (their ids and `<a name>` share
     the host's subtree). Light children slotted into a `<slot>` stay matchable. WPT

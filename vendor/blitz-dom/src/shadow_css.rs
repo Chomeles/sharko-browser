@@ -9,16 +9,26 @@
 //! * `:host` → `[HOST]`, `:host(X)` → `[HOST]:is(X)`, `:host-context(X)` → `:is(X) [HOST]`
 //! * `::slotted(X)` → `slot > :is(X)` (slotted nodes are moved into their `<slot>`)
 //!
-//! `[HOST]` is `[sharko-shadow-host="<node id>"]`, a virtual attribute matched by the
-//! Stylo element implementation for nodes flagged `IS_SHADOW_HOST` (it is not stored in
-//! the attribute list, so scripts and serialization never see it).
+//! `[HOST]` is `.sharko-shadow-host-<node id>`, a virtual class carried by nodes flagged
+//! `IS_SHADOW_HOST` in the Stylo element implementation (it is not stored in the `class`
+//! attribute, so scripts and serialization never see it). A class and not an attribute
+//! selector because Stylo indexes rules by class (a `:host` rule is an O(1) bucket lookup)
+//! and puts ancestor classes into the selector bloom filter (`[HOST] .x` of another host
+//! is rejected without walking the ancestors). With an attribute selector every host's
+//! rules sat in one bucket and were all tested against every host and every element of
+//! every shadow tree: quadratic, 4 s per restyle on a page with 1500 components.
 
-/// Name of the virtual attribute carried by shadow hosts.
-pub const SHADOW_HOST_ATTR: &str = "sharko-shadow-host";
+/// Prefix of the virtual class carried by shadow hosts (followed by the node id).
+pub const SHADOW_HOST_CLASS_PREFIX: &str = "sharko-shadow-host-";
+
+/// The class-name suffix of a host (`NodeId`'s `Display` has parentheses: not an identifier).
+pub fn host_key(host: crate::NodeId) -> String {
+    format!("{:x}", host.as_u64())
+}
 
 /// Rewrite a stylesheet from the shadow tree of the host with the given key.
 pub fn scope_shadow_css(css: &str, host_key: &str) -> String {
-    let host = format!("[{SHADOW_HOST_ATTR}=\"{host_key}\"]");
+    let host = format!(".{SHADOW_HOST_CLASS_PREFIX}{host_key}");
     let mut out = String::with_capacity(css.len() + css.len() / 4);
     rewrite_rule_list(css, &host, &mut out);
     out
@@ -375,7 +385,7 @@ mod tests {
 
     use super::*;
 
-    const H: &str = "[sharko-shadow-host=\"7\"]";
+    const H: &str = ".sharko-shadow-host-7";
 
     fn s(css: &str) -> String {
         scope_shadow_css(css, "7")

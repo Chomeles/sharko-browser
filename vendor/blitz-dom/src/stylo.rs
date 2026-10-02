@@ -559,12 +559,6 @@ impl selectors::Element for BlitzNode<'_> {
         local_name: &GenericAtomIdent<LocalNameStaticSet>,
         operation: &AttrSelectorOperation<&AtomString>,
     ) -> bool {
-        // PATCH: virtual attribute of emulated shadow hosts (see `shadow_css`).
-        if self.flags.contains(NodeFlags::IS_SHADOW_HOST)
-            && &*local_name.0 == crate::shadow_css::SHADOW_HOST_ATTR
-        {
-            return operation.eval_str(&self.id.to_string());
-        }
         match self.data.attr(local_name.0.clone()) {
             None => false,
             Some(attr_value) => operation.eval_str(attr_value),
@@ -706,6 +700,15 @@ impl selectors::Element for BlitzNode<'_> {
         search_name: &<Self::Impl as selectors::SelectorImpl>::Identifier,
         case_sensitivity: selectors::attr::CaseSensitivity,
     ) -> bool {
+        // PATCH: virtual class of emulated shadow hosts (see `shadow_css`).
+        if self.flags.contains(NodeFlags::IS_SHADOW_HOST)
+            && let Some(id) = search_name
+                .0
+                .strip_prefix(crate::shadow_css::SHADOW_HOST_CLASS_PREFIX)
+            && id == crate::shadow_css::host_key(self.id)
+        {
+            return true;
+        }
         // PATCH: compare the class tokens as bytes instead of interning an `Atom` per
         // token (hashing + the global atom-set lock) on every class selector test.
         let class_attr = self.data.attr(local_name!("class"));
@@ -833,6 +836,15 @@ impl<'a> TElement for BlitzNode<'a> {
                 callback(AtomIdent::cast(&atom));
             }
         }
+        // PATCH: virtual class of emulated shadow hosts (see `shadow_css`).
+        if self.flags.contains(NodeFlags::IS_SHADOW_HOST) {
+            let atom = Atom::from(format!(
+                "{}{}",
+                crate::shadow_css::SHADOW_HOST_CLASS_PREFIX,
+                crate::shadow_css::host_key(self.id)
+            ));
+            callback(AtomIdent::cast(&atom));
+        }
     }
 
     fn each_attr_name<F>(&self, mut callback: F)
@@ -843,12 +855,6 @@ impl<'a> TElement for BlitzNode<'a> {
             for attr in attrs.iter() {
                 callback(&GenericAtomIdent(attr.name.local.clone()));
             }
-        }
-        // PATCH: virtual attribute of emulated shadow hosts (bloom filter).
-        if self.flags.contains(NodeFlags::IS_SHADOW_HOST) {
-            callback(&GenericAtomIdent(LocalName::from(
-                crate::shadow_css::SHADOW_HOST_ATTR,
-            )));
         }
     }
 

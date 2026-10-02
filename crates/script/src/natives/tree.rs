@@ -735,6 +735,7 @@ fn query(
     if root.is_element() && dom::kind(st, root) == Kind::Element {
         ctx.scope_element = Some(selectors::Element::opaque(&root));
     }
+    let tags = rightmost_tags(list);
     // Pre-order traversal with an explicit stack of (parent, next child index).
     let mut stack: smallvec::SmallVec<[(&blitz_dom::Node, usize); 32]> = smallvec::SmallVec::new();
     stack.push((root, 0));
@@ -751,6 +752,17 @@ fn query(
         if !child.is_element() {
             continue;
         }
+        // Skip the selector engine's per-element setup for elements whose tag no
+        // selector of the list can match.
+        if let Some(tags) = &tags
+            && let Some(data) = child.element_data()
+            && !tags.iter().any(|(a, b)| *data.name.local == **a || *data.name.local == **b)
+        {
+            if !dom::dom_children(child).is_empty() {
+                stack.push((child, 0));
+            }
+            continue;
+        }
         let el = LiveElement::with_index(st, doc, child, idx);
         if matches_selector_list(list, &el, &mut ctx) {
             out.push(child_id);
@@ -762,6 +774,26 @@ fn query(
             stack.push((child, 0));
         }
     }
+}
+
+/// The type selector of the rightmost compound of every selector in `list` (as
+/// `(name, lower_name)`), or `None` if one of them has none (`.a`, `[x]`, `*`, ...):
+/// only elements of those types can match, which lets `query` skip the others cheaply
+/// (`window.module` named-property lookups run `iframe[name=..],frame[name=..],...` over
+/// the whole document for every undefined global a script probes).
+fn rightmost_tags(
+    list: &blitz_dom::SelectorList,
+) -> Option<smallvec::SmallVec<[(blitz_dom::LocalName, blitz_dom::LocalName); 8]>> {
+    use selectors::parser::Component;
+    let mut tags = smallvec::SmallVec::new();
+    for selector in list.slice() {
+        let name = selector.iter().find_map(|c| match c {
+            Component::LocalName(n) => Some((n.name.0.clone(), n.lower_name.0.clone())),
+            _ => None,
+        })?;
+        tags.push(name);
+    }
+    Some(tags)
 }
 
 /// A selector simple enough to match without the selector engine.

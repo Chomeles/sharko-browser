@@ -37,6 +37,22 @@ use crate::{
 impl BaseDocument {
     /// Restyle the tree and then relayout it
     pub fn resolve(&mut self, current_time_for_animations: f64) {
+        // PATCH: BROWSER_DEBUG_STYLE=1 prints every resolve that takes >= 20 ms (stage timing
+        // for page-load profiling); the env lookup is cached.
+        static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*DEBUG.get_or_init(|| std::env::var_os("BROWSER_DEBUG_STYLE").is_some_and(|v| v != "0")) {
+            return self.resolve_inner(current_time_for_animations);
+        }
+        let t = std::time::Instant::now();
+        let dirty = self.root_node().has_dirty_descendants();
+        self.resolve_inner(current_time_for_animations);
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        if ms >= 20.0 {
+            eprintln!("[resolve] {ms:.0} ms (root dirty descendants: {dirty}, nodes: {})", self.nodes.len());
+        }
+    }
+
+    fn resolve_inner(&mut self, current_time_for_animations: f64) {
         if TDocument::as_node(&self.root_node())
             .first_element_child()
             .is_none()

@@ -48,6 +48,12 @@ to fix things.
 - `<site>/chromium.{json,png}`, `<site>/sharko.{json,png}`, `<site>/sharko.log`
   (Sharko's console), `<site>/diff.json`.
 
+`report.md` ends its tables with "Load times": Sharko's own engine time (first frame, DOMContentLoaded,
+load) next to the wall time of the whole process (start, `--settle`, probe, screenshot) and Chromium's load.
+The V8 snapshot is kept across the fresh per-site profiles, so it does not count as page load.
+`BROWSER_DEBUG_NET=1` (one line per request), `BROWSER_DEBUG_STYLE=1` (every style+layout pass >= 20 ms)
+and `BROWSER_DEBUG_LOAD=1` show where a slow load goes.
+
 Chromium results are the reference and are cached; `--refresh` re-runs them. Sharko is
 re-run every time, so after a fix `node tools/sitediff/run.js` shows what changed.
 
