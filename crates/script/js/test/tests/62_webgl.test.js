@@ -7,18 +7,7 @@ const cases = require('../webgl_cases');
 const prelude = require('../webgl_prelude');
 const golden = require('../webgl_golden.json');
 
-function close(a, b, path) {
-  if (typeof b === 'number' && typeof a === 'number') {
-    const tol = Number.isInteger(b) && b >= 0 && b <= 255 && Number.isInteger(a) ? 3 : 1e-5;
-    assert.ok(Math.abs(a - b) <= tol, `${path}: ${a} differs from Chromium's ${b}`);
-  } else if (Array.isArray(b)) {
-    assert.ok(Array.isArray(a) && a.length === b.length, `${path}: length ${a && a.length} vs ${b.length}`);
-    b.forEach((v, i) => close(a[i], v, `${path}[${i}]`));
-  } else if (b !== null && typeof b === 'object') {
-    assert.deepStrictEqual(Object.keys(a).sort(), Object.keys(b).sort(), `${path}: keys`);
-    for (const k of Object.keys(b)) close(a[k], b[k], `${path}.${k}`);
-  } else assert.strictEqual(a, b, path);
-}
+const { close } = require('../compare');
 // the answers that legitimately differ from Chromium's: what this implementation can honour
 const OWN = {
   context_params: (r, g) => { const { highp, lostId, ...rest } = r; void rest; return [r, Object.assign({}, g)]; },

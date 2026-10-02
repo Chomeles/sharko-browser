@@ -1399,6 +1399,7 @@
   // Paths are kept in device space (points are transformed when they are added, as the
   // spec's current path is); Path2D objects keep user space and are transformed when used.
   const HTMLCanvasElement = htmlClass('HTMLCanvasElement', ['canvas']);
+  L.HTMLCanvasElement = HTMLCanvasElement;
   const ctxCache = new WeakMap();
   const canvasDim = (id, name, def) => {
     const v = N.getAttr(id, name);
@@ -1415,6 +1416,7 @@
     L.mixin(P, {
       getContext(type, attrs) {
         const t = `${type}`;
+        if (L.transferred !== undefined && L.transferred.has(this)) throw new DOMException("Failed to execute 'getContext' on 'HTMLCanvasElement': Cannot get context from a canvas that has transferred its control to offscreen.", 'InvalidStateError');
         if (t !== '2d') {
           // WebGL (36_webgl.js and following): a canvas has one context type; others get null
           if (L.glContextKinds !== undefined && L.glContextKinds[t] !== undefined) {
@@ -2097,6 +2099,7 @@
     }
   }
   Object.assign(CanvasRenderingContext2D.prototype, pathMethods);
+  L.CanvasRenderingContext2D = CanvasRenderingContext2D;
   for (const k in CTX_DEFAULTS) {
     if (k === 'font') continue;
     def(CanvasRenderingContext2D.prototype, k, function () { return L.ctxState(this)[k]; }, function (v) {

@@ -610,5 +610,121 @@
    true,
    -1
   ]
+ },
+ "offscreen_2d": {
+  "size": [
+   10,
+   6
+  ],
+  "pix": [
+   10,
+   200,
+   30,
+   255
+  ],
+  "same": true,
+  "back": true,
+  "other": null,
+  "tag": "[object OffscreenCanvasRenderingContext2D]",
+  "ctor": "OffscreenCanvasRenderingContext2D",
+  "measure": true,
+  "clear": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "isOff": true,
+  "resize": [
+   4,
+   [
+    0,
+    0,
+    0,
+    0
+   ]
+  ]
+ },
+ "offscreen_webgl": {
+  "px": [
+   51,
+   102,
+   204,
+   255
+  ],
+  "canvas": true,
+  "bmp": [
+   6,
+   4
+  ],
+  "drawn": [
+   51,
+   102,
+   204,
+   255,
+   51,
+   102,
+   204,
+   255
+  ],
+  "tag": "[object WebGLRenderingContext]",
+  "second": null,
+  "size": [
+   6,
+   4
+  ]
+ },
+ "offscreen_blob_bitmap": {
+  "blob": [
+   "image/png",
+   true
+  ],
+  "dims": [
+   2,
+   2,
+   1,
+   2,
+   3,
+   2,
+   4,
+   4
+  ],
+  "closed": [
+   0,
+   0
+  ],
+  "sub": [
+   0,
+   255,
+   0,
+   255,
+   9,
+   9,
+   9,
+   255
+  ],
+  "err": "InvalidStateError",
+  "err2": "RangeError",
+  "bitmapCanvas": [
+   2,
+   2
+  ],
+  "bctxCanvas": true,
+  "tag": "[object ImageBitmap]"
+ },
+ "offscreen_transfer": {
+  "size": [
+   5,
+   3
+  ],
+  "shown": [
+   0,
+   255,
+   0,
+   255
+  ],
+  "err": "InvalidStateError",
+  "err2": "InvalidStateError",
+  "tag": "[object OffscreenCanvas]"
  }
 }
