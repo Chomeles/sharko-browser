@@ -556,6 +556,7 @@ class MockNative {
         const active = M.frame ? M.frame.group.active : null;
         return M.hooks.windowPostMessage(message, targetOrigin, transfer, active && active !== M.global ? active : null);
       },
+      linkSheetText: (id) => 'a { color: red }\nb { color: blue }',
       setAdoptedSheets: (hostId, sources, bases) => { if (hostId !== 0) M.n(hostId); M.adoptedSheets.set(hostId, sources.map((s, i) => [s, bases[i]])); },
       setDefined: (id) => { M.n(id); M.definedIds.add(id); },
       appendChild: (p, c) => nat.insertBefore(p, c, 0),
