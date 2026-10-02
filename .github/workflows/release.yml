@@ -47,7 +47,7 @@ jobs:
       release: ${{ steps.t.outputs.release }}
       prerelease: ${{ steps.t.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Which tag is released, and whether this run releases at all: a push to master only
       # does when Cargo.toml carries a version that has no tag yet.
       - id: t
@@ -92,7 +92,7 @@ jobs:
       BROWSER_UPDATE_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -132,7 +132,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
