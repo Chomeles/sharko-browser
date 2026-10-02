@@ -552,3 +552,19 @@ test('Cookie Store API: set/get/getAll/delete over document.cookie', async () =>
   `);
   assert.strictEqual(String(r), 'object|true|null|{"name":"a","value":"1"}|2|true|null|["b"]|true');
 });
+
+test('BroadcastChannel in a data: URL worker is isolated from the page (opaque origin)', async () => {
+  const e = await env({});
+  e.run(`window.got = [];
+    const bc = new BroadcastChannel('t'); bc.onmessage = (ev) => got.push('page:' + ev.data);
+    const src = "const b = new BroadcastChannel('t'); b.postMessage('from-worker'); postMessage('done');";
+    window.w = new Worker('data:text/javascript,' + encodeURIComponent(src));
+    w.onmessage = (ev) => got.push(ev.data);`);
+  await e.flush();
+  assert.deepStrictEqual(Array.from(e.run('got')), ['done']);
+  e.run(`new BroadcastChannel('t2').postMessage('x'); window.got2 = [];
+    const c = new BroadcastChannel('t2'); c.onmessage = (ev) => got2.push(ev.origin);
+    new BroadcastChannel('t2').postMessage('y');`);
+  await e.flush();
+  assert.strictEqual(e.run('got2.length'), 1);
+});

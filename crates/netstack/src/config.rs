@@ -36,7 +36,7 @@ pub struct NetConfig {
     /// AVIF is not advertised by default because the image decoder of the engine may not
     /// support it (content-negotiating CDNs would then serve undecodable images).
     pub image_accept: String,
-    /// Use HTTP/3 for origins that advertise it via `Alt-Svc` (needs the `http3` feature).
+    /// Use HTTP/3 for origins that advertise it via `Alt-Svc` (no QUIC transport in the client yet; currently ignored).
     pub http3: bool,
     /// How long an unconfirmed HTTP/3 attempt runs alone before a TCP (h2/h1.1) request
     /// is raced against it.
@@ -80,7 +80,7 @@ impl NetConfig {
             sec_ch_ua_platform: r#""Windows""#.to_string(),
             document_accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string(),
             image_accept: "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8".to_string(),
-            http3: cfg!(feature = "http3"),
+            http3: false,
             h3_head_start: Duration::from_millis(300),
             h3_probe_timeout: Duration::from_secs(10),
             max_requests_per_host: 6,

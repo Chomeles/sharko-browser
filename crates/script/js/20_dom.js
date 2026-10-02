@@ -988,8 +988,33 @@
       default: throw new TypeError(`Failed to execute '${method}': parameter 1 is not of type 'Node'.`);
     }
     if (remove && o.parentNode !== null) o.parentNode.removeChild(o);
-    return n;
+    return remove && t !== 11 ? rebindForeign(o, n) : n;
   }
+  // DOM "adopt": the node keeps its identity when it moves to another document. The copy
+  // `n` made above is the node of this document; the wrapper object `o` of the other realm
+  // is re-stamped to it and gets this realm's prototype (so `o instanceof otherRealm.Node`
+  // is false and `o instanceof Node` true, as in Chromium). Wrappers that cannot be moved
+  // (the other realm refuses) keep the copy.
+  function rebindForeign(o, n) {
+    let released = 0;
+    try { released = typeof N.foreignRelease === 'function' ? N.foreignRelease(o) : 0; } catch (_) { released = 0; }
+    if (released !== 1) return n;
+    const id = idOf(n);
+    Object.setPrototypeOf(o, Object.getPrototypeOf(n));
+    L.stamp(o, id, typeOf(n), lnOf(n), nsOf(n));
+    cache.set(id, o);
+    return o;
+  }
+  // This realm lets go of `o` because another realm adopts it (hook `releaseNode`).
+  L.releaseWrapper = function (o) {
+    if (!isNode(o)) return false;
+    const t = typeOf(o);
+    if (t === 9 || t === 11 || t === 2) return false;
+    if (t === 1 && (L.elementWrapperMakers.has(lnOf(o)))) return false;
+    const id = idOf(o);
+    if (cache.get(id) === o) cache.delete(id);
+    return L.releaseNodeStamp(o);
+  };
   L.adoptForeign = adoptForeign;
   // The node argument of a mutating operation: a node of this realm, or a foreign one
   // adopted (by copy).
@@ -2948,9 +2973,9 @@
   // document.createElement(name, { is }): the element records its "is value" (as the `is`
   // attribute, so serialization, cloning and later upgrades see it) and, if a matching
   // customized built-in is defined, is upgraded synchronously.
-  function createCustomizedBuiltin(w, id, name, is) {
+  function createCustomizedBuiltin(w, id, name, is, hasRegistry) {
     N.setAttr(id, 'is', is);
-    const def = builtinDefs.get(is);
+    const def = hasRegistry ? builtinDefs.get(is) : undefined;
     if (def !== undefined && def.localName === name) upgradeElement(w, def);
   }
   function findTitleId(docId) {
@@ -3051,12 +3076,14 @@
       if (html) name = L.asciiLower(name);
       if (html || info.contentType === 'application/xhtml+xml') {
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
-        const def = ceDefs.get(name);
+        // HTML "look up a custom element definition": a document without a browsing context
+        // (createHTMLDocument, DOMParser, ...) has no registry, so its elements stay undefined.
+        const def = info.main ? ceDefs.get(name) : undefined;
         if (def !== undefined && !isOpt) return ownDoc(this, constructCE(def, name));
         const id = N.createElement(name, '');
         const w = wrap(id);
         if (name === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
-        if (isOpt) createCustomizedBuiltin(w, id, name, `${options.is}`);
+        if (isOpt) createCustomizedBuiltin(w, id, name, `${options.is}`, info.main);
         return ownDoc(this, w);
       }
       const id = N.createElement(name, '');
@@ -3074,13 +3101,14 @@
       const code = L.nsCode(nsv);
       let w;
       if (code === HTML) {
-        const def = ceDefs.get(local);
+        const main = docInfo(this).main;
+        const def = main ? ceDefs.get(local) : undefined;
         const isOpt = options !== null && typeof options === 'object' && options.is !== undefined;
         if (def !== undefined && !isOpt && prefix === null) return ownDoc(this, constructCE(def, local));
         const id = N.createElement(local, '');
         w = wrap(id);
         if (local === 'script') { L.pendingScripts.add(id); L.forceAsync.add(id); }
-        if (isOpt && prefix === null) createCustomizedBuiltin(w, id, local, `${options.is}`);
+        if (isOpt && prefix === null) createCustomizedBuiltin(w, id, local, `${options.is}`, main);
       } else if (code === SVG || code === MATHML) {
         w = wrap(N.createElement(local, nsv));
       } else {
@@ -4281,10 +4309,14 @@
   // =======================================================================================
   const CE_RESERVED = new Set(['annotation-xml', 'color-profile', 'font-face', 'font-face-src', 'font-face-uri',
     'font-face-format', 'font-face-name', 'missing-glyph']);
-  const PCEN_RE = /^[a-z][\-.0-9_a-z\u00B7\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u037D\u037F-\u1FFF\u200C\u200D\u203F\u2040\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD\u{10000}-\u{EFFFF}]*$/u;
+  // HTML "valid custom element name" (2024 wording): a lowercase ASCII start, no ASCII upper alpha,
+  // no whitespace, NUL, '/' or '>' (the old PCENChar ranges rejected U+00D7, U+3000 and plane 15).
+  const PCEN_RE = /^[a-z][^\t\n\f\r \0/>A-Z]*$/;
   L.isValidCEName = function (n) { return n.includes('-') && PCEN_RE.test(n) && !CE_RESERVED.has(n); };
   function isConstructor(f) {
-    try { Reflect.construct(String, [], f); return true; } catch (_) { return false; }
+    // IsConstructor without observable effects: a proxy's [[Construct]] exists iff the target's,
+    // and the trap keeps `new` from reading f.prototype or calling f.
+    try { new (new Proxy(f, { construct() { return {}; } }))(); return true; } catch (_) { return false; }
   }
   const CE_CALLBACKS = ['connectedCallback', 'disconnectedCallback', 'adoptedCallback', 'attributeChangedCallback', 'connectedMoveCallback'];
   const CE_FORM_CALLBACKS = ['formAssociatedCallback', 'formResetCallback', 'formDisabledCallback', 'formStateRestoreCallback'];
@@ -4303,6 +4335,9 @@
       if (options !== undefined && options !== null && options.extends !== undefined && options.extends !== null) {
         ext = `${options.extends}`;
         if (L.isValidCEName(ext)) throw new DOMException(pre + `"${ext}" is a valid custom element name`, 'NotSupportedError');
+        // HTML "look up a custom element definition": an element interface of HTMLUnknownElement
+        // (bgsound, blink, unknown names...) cannot be extended.
+        if (L.elementProtoFor(ext, L.NS_HTML) === L.HTMLUnknownElement.prototype) throw new DOMException(pre + `"${ext}" is an HTMLUnknownElement`, 'NotSupportedError');
       }
       if (this.#defining) throw new DOMException(pre + 'this registry is already defining an element', 'NotSupportedError');
       this.#defining = true;

@@ -111,10 +111,19 @@
     static ns(o) { return o.#ns; }
     static is(o) { return typeof o === 'object' && o !== null && #id in o && o.#rm === L; }
     static setNs(o, ns) { o.#ns = ns; }
+    // Adoption by another realm: this realm no longer owns `o` (is() turns false).
+    static release(o) { if (#id in o && o.#rm === L) { o.#rm = null; return true; } return false; }
+    // Adoption back into a realm that stamped `o` before.
+    static rebind(o, id, t, ln, ns) { o.#id = id; o.#t = t; o.#ln = ln; o.#ns = ns; o.#rm = L; }
+    static stamped(o) { return #id in o; }
   }
   // o: wrapper object, id: native node id, t: nodeType, ln: local name ('' for non-elements),
   // ns: namespace code (see L.nsCode)
-  L.stamp = function (o, id, t, ln, ns) { new NodeStamp(o, id, t, ln, ns); return o; };
+  L.stamp = function (o, id, t, ln, ns) {
+    if (NodeStamp.stamped(o)) NodeStamp.rebind(o, id, t, ln, ns); else new NodeStamp(o, id, t, ln, ns);
+    return o;
+  };
+  L.releaseNodeStamp = NodeStamp.release;
   L.idOf = NodeStamp.id;          // throws TypeError for non-nodes ("illegal invocation")
   L.typeOf = NodeStamp.type;
   L.lnOf = NodeStamp.ln;

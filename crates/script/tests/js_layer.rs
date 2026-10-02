@@ -603,6 +603,29 @@ fn js_layer_frame_replaced_in_same_entry() {
     drop(page);
 }
 
+/// Inserting a node of another realm moves the same object (DOM "adopt"): identity,
+/// parent, ownerDocument, expandos stay, the other realm's tree loses it, and the old
+/// realm's `instanceof` no longer holds (Chromium: `x instanceof frame.Node`).
+#[test]
+fn js_layer_cross_realm_adopt_keeps_identity() {
+    let mut page = js_env(
+        r#"<!DOCTYPE html><html><body><iframe id="f" srcdoc="<p id=p>child</p>"></iframe></body></html>"#,
+    );
+    assert_eq!(
+        page.eval(
+            "const fd = f.contentDocument, fw = f.contentWindow; const x = document.createElement('div'); x.id = 'x'; x.expando = 7; \
+             document.body.appendChild(x); const ret = fd.body.appendChild(x); \
+             const same = ret === x; const pn = x.parentNode === fd.body; const od = x.ownerDocument === fd; \
+             const conn = x.isConnected; const gone = document.getElementById('x') === null; \
+             const inst = [x instanceof fw.Node, x instanceof Node]; \
+             const rep = x.parentNode.replaceChild(fd.createElement('i'), x) === x; \
+             [same, pn, od, conn, gone, inst, x.expando, rep, x.parentNode]"
+        ),
+        r#"[true,true,true,true,true,[true,false],7,true,null]"#
+    );
+    drop(page);
+}
+
 /// Same-origin iframes share the page's isolate with a V8 context (realm) each:
 /// `contentWindow`/`contentDocument` are the frame's real globals (created on demand),
 /// `parent`/`top`/`frameElement` cross realms, functions of one realm run against the

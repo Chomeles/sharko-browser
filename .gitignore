@@ -8,3 +8,4 @@ update-signing.key
 /resources/icudtl.dat
 /tools/api-inventory/out/
 /tools/sitediff/out/
+tools/fpecho/*.pem

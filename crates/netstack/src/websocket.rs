@@ -45,29 +45,18 @@ const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Chrome's limit for a single message.
 const MAX_MESSAGE: usize = 64 << 20;
 
-type Socket = WebSocketStream<reqwest::Upgraded>;
+type Socket = WebSocketStream<wreq::Upgraded>;
 
-pub(crate) fn build_ws_client(config: &NetConfig) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
+pub(crate) fn build_ws_client(config: &NetConfig) -> Result<wreq::Client, String> {
+    // Same TLS fingerprint as page loads; the handshake itself is HTTP/1.1.
+    let builder = crate::core::base_builder(config)
         .user_agent(config.user_agent.clone())
-        .redirect(reqwest::redirect::Policy::none())
-        .referer(false)
-        .connect_timeout(config.connect_timeout)
+        .emulation(crate::core::chrome_profile())
         .tcp_nodelay(true)
         // The upgraded connection belongs to the socket; never pool it.
         .pool_max_idle_per_host(0)
         .http1_only();
-    if !config.extra_root_certificates_pem.is_empty() {
-        let mut certs = Vec::new();
-        for pem in &config.extra_root_certificates_pem {
-            certs.extend(
-                reqwest::Certificate::from_pem_bundle(pem)
-                    .map_err(|e| format!("invalid extra root certificate: {e}"))?,
-            );
-        }
-        builder = builder.tls_certs_merge(certs);
-    }
-    builder
+    crate::core::apply_roots(builder, config)?
         .build()
         .map_err(|e| format!("cannot initialize WebSocket client: {e}"))
 }
@@ -144,7 +133,7 @@ impl NetworkCore {
         let response = request
             .send()
             .await
-            .map_err(|e| format!("Error in connection establishment: {}", crate::error::NetError::from_reqwest(&e)))?;
+            .map_err(|e| format!("Error in connection establishment: {}", crate::error::NetError::from_wreq(&e)))?;
         if self.cookies.store_response(&url, response.headers()) {
             self.cookie_saver.trigger();
         }
@@ -194,7 +183,7 @@ impl NetworkCore {
         Ok((socket, protocol, extensions))
     }
 
-    fn ws_client(&self) -> Result<reqwest::Client, String> {
+    fn ws_client(&self) -> Result<wreq::Client, String> {
         let mut slot = self.ws_client.lock();
         if let Some(client) = slot.as_ref() {
             return Ok(client.clone());

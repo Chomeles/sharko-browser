@@ -50,12 +50,12 @@ impl NetError {
     }
 
     /// Classifies a reqwest/hyper/rustls error by walking its source chain.
-    pub fn from_reqwest(err: &reqwest::Error) -> Self {
+    pub fn from_wreq(err: &wreq::Error) -> Self {
         let detail = error_chain(err);
         let mut source: Option<&(dyn StdError + 'static)> = Some(err);
         while let Some(e) = source {
-            if let Some(tls) = e.downcast_ref::<rustls::Error>() {
-                return Self::new(tls_code(tls), detail);
+            if let Some(code) = tls_code(&e.to_string()) {
+                return Self::new(code, detail);
             }
             if let Some(ioe) = e.downcast_ref::<io::Error>() {
                 let code = match ioe.kind() {
@@ -119,20 +119,34 @@ impl fmt::Display for NetError {
 
 impl StdError for NetError {}
 
-fn tls_code(err: &rustls::Error) -> &'static str {
-    use rustls::CertificateError as C;
-    match err {
-        rustls::Error::InvalidCertificate(cert) => match cert {
-            C::UnknownIssuer | C::BadSignature => "ERR_CERT_AUTHORITY_INVALID",
-            C::Expired | C::ExpiredContext { .. } | C::NotValidYet | C::NotValidYetContext { .. } => {
-                "ERR_CERT_DATE_INVALID"
-            }
-            C::NotValidForName | C::NotValidForNameContext { .. } => "ERR_CERT_COMMON_NAME_INVALID",
-            C::Revoked => "ERR_CERT_REVOKED",
-            _ => "ERR_CERT_INVALID",
-        },
-        _ => "ERR_SSL_PROTOCOL_ERROR",
-    }
+/// Maps a BoringSSL error message (OpenSSL `X509_verify_cert_error_string` texts and
+/// handshake alerts) to a Chrome net error; `None` for messages that are not TLS errors.
+fn tls_code(msg: &str) -> Option<&'static str> {
+    let m = msg.to_ascii_lowercase();
+    Some(if m.contains("certificate has expired") || m.contains("not yet valid") {
+        "ERR_CERT_DATE_INVALID"
+    } else if m.contains("hostname mismatch") || m.contains("ip address mismatch") || m.contains("subject name") {
+        "ERR_CERT_COMMON_NAME_INVALID"
+    } else if m.contains("certificate revoked") {
+        "ERR_CERT_REVOKED"
+    } else if m.contains("self-signed")
+        || m.contains("self signed")
+        || m.contains("unable to get local issuer")
+        || m.contains("unable to get issuer")
+        || m.contains("unable to verify the first certificate")
+        || m.contains("certificate signature failure")
+    {
+        "ERR_CERT_AUTHORITY_INVALID"
+    } else if m.contains("certificate verify failed") || m.contains("certificate_verify_failed") {
+        // BoringSSL reports only this code through wreq (the X509 verify result is not kept),
+        // so the specific causes above are only seen when a message carries them; unknown
+        // issuer is by far the most common cause.
+        "ERR_CERT_AUTHORITY_INVALID"
+    } else if m.contains("ssl") && (m.contains("handshake") || m.contains("alert") || m.contains("protocol")) {
+        "ERR_SSL_PROTOCOL_ERROR"
+    } else {
+        return None;
+    })
 }
 
 /// `outer: inner: innermost`, skipping repeated messages.
