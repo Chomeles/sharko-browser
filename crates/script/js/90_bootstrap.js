@@ -662,7 +662,12 @@
     // module
     if (rec.async) {
       asyncPending++;
-      runModuleRecord(rec).then(() => { asyncPending--; maybeFireLoad(); });
+      // The graph is fetched and evaluated in one step, so the start waits like an async
+      // classic script's execution: earlier parser-blocking/inline scripts go first (React
+      // Router's async module reads window.__reactRouterContext set by the inline script before it).
+      const run = () => { runModuleRecord(rec).then(() => { asyncPending--; maybeFireLoad(); }); };
+      if (asyncMayRun(rec)) run();
+      else asyncWaiting.push({ rec, run });
       return 'async';
     }
     (parsingFinished ? endQueue : deferQueue).push(rec);

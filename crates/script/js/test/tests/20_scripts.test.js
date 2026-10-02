@@ -153,6 +153,16 @@ test('<script src> of blob: and data: URLs loads from the registry / the URL', a
   assert.deepStrictEqual(log(e).sort(), ['blob:true', 'data', 'error-unknown', 'load-blob', 'load-data']);
 });
 
+test('async module scripts wait for earlier parser-blocking scripts like async classic ones', async () => {
+  const html = `<!DOCTYPE html><html><head><script>window.__log = [];</script>
+    <script src="/slow.js"></script>
+    <script>__log.push('inline-after-slow')</script>
+    <script type="module" async>__log.push('async-module')</script></head><body></body></html>`;
+  const e = await createEnv({ html, url: 'https://example.com/', routes: { 'https://example.com/slow.js': { body: "__log.push('slow')", delay: 50 } } });
+  await e.flush();
+  assert.deepStrictEqual(log(e), ['slow', 'inline-after-slow', 'async-module']);
+});
+
 test('document.write during parsing and after load', async () => {
   const e = await createEnv({
     html: `<body><script>window.__log = [];
