@@ -603,6 +603,23 @@ fn js_layer_frame_replaced_in_same_entry() {
     drop(page);
 }
 
+/// `<iframe src="javascript:void(0)">` starts with the initial about:blank document, so
+/// loader snippets (Akamai mPulse) can `contentWindow.document.open()/write()` right after
+/// inserting it (samsung.com/de: "Cannot read properties of null (reading 'open')").
+#[test]
+fn js_layer_javascript_url_iframe_has_initial_document() {
+    let mut page = js_env(r#"<!DOCTYPE html><html><body></body></html>"#);
+    assert_eq!(
+        page.eval(
+            "const j = document.createElement('iframe'); j.src = 'javascript:void(0)'; document.body.append(j); \
+             const d = j.contentWindow.document; d.open(); d.write('<body><p id=q>x</p></body>'); d.close(); \
+             [d === j.contentDocument, d.getElementById('q') !== null]"
+        ),
+        r#"[true,true]"#
+    );
+    drop(page);
+}
+
 /// Inserting a node of another realm moves the same object (DOM "adopt"): identity,
 /// parent, ownerDocument, expandos stay, the other realm's tree loses it, and the old
 /// realm's `instanceof` no longer holds (Chromium: `x instanceof frame.Node`).
