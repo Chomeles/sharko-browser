@@ -544,6 +544,7 @@
   }
   function finishParsing() {
     if (parsingFinished) return;
+    if (writeTail !== '') { const t = writeTail; writeTail = ''; docWrite(document, [t], false, true); } // EOF ends an unfinished write
     parsingFinished = true;
     if (asyncWaiting.length) releaseAsync();
     registerBodyHandlers();
@@ -800,6 +801,24 @@
     }
     return stack;
   }
+  // HTML tokenizer state survives between `document.write()` calls: a <script>/<style> (or a tag)
+  // left open by one chunk continues in the next, so the script must not run on its half. Where
+  // the unfinished construct starts in `html` (-1: the chunk ends on a token boundary). The held
+  // tail is prepended to the next write and flushed by close().
+  function incompleteTailStart(html) {
+    const re = /<(\/)?([a-zA-Z][\w:-]*)((?:\s+[^\s/>"'=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?)*)\s*(\/)?>/g;
+    let m, raw = null, rawStart = -1, last = 0;
+    while ((m = re.exec(html)) !== null) {
+      last = re.lastIndex;
+      const name = m[2].toLowerCase();
+      if (raw !== null) { if (m[1] && name === raw) raw = null; continue; }
+      if (!m[1] && (name === 'script' || name === 'style' || name === 'textarea' || name === 'title')) { raw = name; rawStart = m.index; }
+    }
+    if (raw !== null) return rawStart;
+    const lt = html.indexOf('<', last);
+    return lt >= 0 && /^<[a-zA-Z!/]/.test(html.slice(lt, lt + 2)) && html.indexOf('>', lt) < 0 ? lt : -1;
+  }
+  let writeTail = '';
   function writeInto(parentId, refId, html) {
     const ctx = wrap(parentId);
     const frag = L.parseFragment(typeOf(ctx) === 1 ? ctx : null, html);
@@ -875,10 +894,16 @@
     reopened = true;
     maybeFireLoad(); // the dropped scripts may have been all the load event waited for
   }
-  function docWrite(doc, args, newline) {
+  function docWrite(doc, args, newline, flush) {
     let html = '';
     for (const a of args) html += `${a}`;
     if (newline) html += '\n';
+    if (doc === document) {
+      html = writeTail + html;
+      writeTail = '';
+      const cut = incompleteTailStart(html);
+      if (cut >= 0 && !flush) { writeTail = html.slice(cut); html = html.slice(0, cut); if (html === '') return; }
+    }
     if (doc !== document) {
       // no browsing context (createHTMLDocument, DOMParser): the markup is inserted but its scripts never run
       const b = doc.body;
@@ -913,11 +938,13 @@
       if (arguments.length >= 3) return g.open(a, b, c);
       if (this !== document) return this;
       if (inParserScript !== null) return this;
+      writeTail = '';
       if (parsingFinished || L.readyState !== 'loading') openWrittenParser();
       return this;
     },
     close() {
       if (this !== document) return;
+      if (writeTail !== '') { const t = writeTail; writeTail = ''; docWrite(document, [t], false, true); }
       reopened = false;
       // the parser ends after the script that closes it, not inside it
       if (inParserScript !== null || inNonBlockingScript > 0) L.internalTimeout(runEndQueue, 0);
