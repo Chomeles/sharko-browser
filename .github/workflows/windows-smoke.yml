@@ -51,7 +51,7 @@ jobs:
         run: cargo build --release --locked --target x86_64-pc-windows-msvc -p browser-core -p browser-launcher
       - name: Package
         run: cargo xtask package --target x86_64-pc-windows-msvc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-package
           path: dist/*.zip
@@ -118,7 +118,7 @@ jobs:
           Move-Item tranco/top-1m.csv tools/sitediff/out/tranco-top-1m.csv -Force
       - name: Compare with Chromium (sitediff, shard ${{ matrix.shard }}/6)
         run: node tools/sitediff/run.js --jobs=2 --settle=3000 --random=${{ github.event.inputs.random || '20' }} --seed=7 --shard=${{ matrix.shard }}/6
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: sitediff-windows-${{ matrix.shard }}
@@ -160,7 +160,7 @@ jobs:
           node tools/sitediff/gate.js merged-summary.json $base | tee -a "$GITHUB_STEP_SUMMARY" || true
           node tools/sitediff/causes.js merged-summary.json --top=15 | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sitediff-windows-merged
           path: merged-summary.json
