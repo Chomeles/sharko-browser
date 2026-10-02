@@ -188,7 +188,8 @@ and reports differences (for layout development).
 
 ## 🚧 Known limitations
 
-- Canvas 2D has no shadows or filters, and there is no video/audio yet; WebGL 1/2 runs
+- Canvas 2D has no shadows or filters, and there is no video yet; Web Audio runs in
+  JavaScript (no audio output, no media element/stream sources, no HRTF); WebGL 1/2 runs
   in a software pipeline written in JavaScript (no multisampling, no compressed textures,
   no uniform buffer objects or transform feedback yet, slow on large canvases); Web
   Workers run on the page's thread

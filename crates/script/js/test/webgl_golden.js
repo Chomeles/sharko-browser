@@ -4,10 +4,10 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
-const cases = Object.assign({}, require('./webgl_cases'), require('./offscreen_cases'));
+const cases = Object.assign({}, require('./webgl_cases'), require('./offscreen_cases'), require('./audio_cases'));
 const prelude = require('./webgl_prelude');
 (async () => {
-  const b = await chromium.launch({ channel: 'chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const b = await chromium.launch({ channel: 'chromium', args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
   const p = await b.newPage();
   const out = {};
   for (const [name, fn] of Object.entries(cases)) {
