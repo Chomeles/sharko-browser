@@ -15,3 +15,9 @@ test('cross-origin linked sheet: cssRules readable only with crossorigin', async
   assert.strictEqual(probe(1), 2);
   assert.strictEqual(probe(2), 2);
 });
+
+test('splitRules: escaped quotes and braces in selectors do not swallow the rest of the sheet', async () => {
+  const e = await createEnv({ html: '<head><style>@layer u{.a\\\'b{color:red}.c\\"d{color:red}.e\\{f{color:red}}.g{color:blue}.h{color:blue}</style></head>' });
+  assert.strictEqual(e.run('document.styleSheets[0].cssRules.length'), 3);
+  assert.strictEqual(e.run('document.styleSheets[0].cssRules[0].cssRules.length'), 3);
+});

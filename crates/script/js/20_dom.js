@@ -3693,6 +3693,7 @@
     while (i < n) {
       const c = s[i];
       if (c === '/' && s[i + 1] === '*') { if (start === i) { i = skipComment(s, i); start = i; continue; } i = skipComment(s, i); continue; }
+      if (c === '\\') { i += 2; continue; } // CSS escape (`.a\'b`, `\{`): never opens a string or block
       if (c === '"' || c === "'") { i = skipString(s, i); continue; }
       if (c === ';' && s.slice(start, i).trim().startsWith('@')) {
         out.push({ prelude: s.slice(start, i).trim(), body: null, text: s.slice(start, i + 1).trim() });
@@ -3703,6 +3704,7 @@
         while (j < n && depth > 0) {
           const d = s[j];
           if (d === '/' && s[j + 1] === '*') { j = skipComment(s, j); continue; }
+          if (d === '\\') { j += 2; continue; }
           if (d === '"' || d === "'") { j = skipString(s, j); continue; }
           if (d === '{') depth++;
           else if (d === '}') depth--;
@@ -3727,6 +3729,7 @@
     while (i < s.length) {
       const c = s[i];
       if (c === '/' && s[i + 1] === '*') { i = skipComment(s, i); continue; }
+      if (c === '\\') { i += 2; continue; }
       if (c === '"' || c === "'") { i = skipString(s, i); continue; }
       if (c === '(' || c === '{' || c === '[') depth++;
       else if (c === ')' || c === '}' || c === ']') depth--;
