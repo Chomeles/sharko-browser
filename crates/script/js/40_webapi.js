@@ -2299,6 +2299,8 @@
       const b = bodies.get(this);
       if (b !== null && b.used) throw new TypeError("Failed to execute 'clone' on 'Request': Request body is already used");
       const r = new Request(this, {});
+      // the constructor moves the body of its input (Fetch §5.4 step 36) but cloning must leave the original usable
+      if (b !== null) b.used = false;
       if (b !== null && b.stream !== null && b.bytes === null) {
         const [s1, s2] = b.stream.tee();
         b.stream = s1;
